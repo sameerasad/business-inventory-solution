@@ -1,0 +1,23 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "next/cache": [
+        "./.verify/next-cache-stub.ts"
+      ]
+    }
+  },
+  "include": [
+    "../src/**/*.ts",
+    "./*.ts"
+  ],
+  "exclude": [
+    "../node_modules"
+  ]
+}

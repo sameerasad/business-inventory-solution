@@ -1,0 +1,153 @@
+// Inventory & Profit Tracking — data model
+//
+// Design rules baked in here:
+//  * Profit / revenue are NEVER stored. They are derived from
+//    (sale.sale_price - batch.unit_cost) * sale.quantity at query time.
+//  * Nothing is hard-deleted: batches, sales, areas and shops carry is_deleted.
+//  * Batch.remaining_qty is the single source of truth for stock on hand and is
+//    guarded by a CHECK constraint (see the init migration) plus a transactional
+//    conditional update in the sale server action.
+//  * Every batch and sale carries created_by / created_at, and writes are mirrored
+//    into audit_logs.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Used only by the Prisma CLI (migrate / studio). Pooled connections cannot
+  // run DDL reliably, so migrations go over the direct endpoint.
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model Category {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  products  Product[]
+
+  @@map("categories")
+}
+
+model Area {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  isDeleted Boolean  @default(false) @map("is_deleted")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  shops     Shop[]
+  sales     Sale[]
+
+  @@index([isDeleted])
+  @@map("areas")
+}
+
+model Shop {
+  id        Int      @id @default(autoincrement())
+  areaId    Int      @map("area_id")
+  name      String
+  isDeleted Boolean  @default(false) @map("is_deleted")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  area      Area     @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  sales     Sale[]
+
+  // One shop name per area. Also gives "add on the fly" a natural upsert target.
+  @@unique([areaId, name])
+  @@index([areaId, isDeleted])
+  @@map("shops")
+}
+
+model Product {
+  id               Int      @id @default(autoincrement())
+  categoryId       Int      @map("category_id")
+  name             String
+  packagingType    String   @map("packaging_type")
+  variantValue     String   @map("variant_value")
+  sku              String   @unique
+  unit             String
+  defaultSalePrice Decimal  @default(0) @map("default_sale_price") @db.Decimal(12, 2)
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  category         Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  batches          Batch[]
+  sales            Sale[]
+
+  // A product is the unique combination of category + name + packaging + variant.
+  // name: sets the Prisma client key; map: sets the actual Postgres index name.
+  @@unique([categoryId, name, packagingType, variantValue], name: "product_identity", map: "product_identity")
+  @@index([categoryId])
+  @@index([packagingType])
+  @@index([variantValue])
+  @@map("products")
+}
+
+model Batch {
+  id             Int      @id @default(autoincrement())
+  productId      Int      @map("product_id")
+  quantity       Int
+  remainingQty   Int      @map("remaining_qty")
+  unitCost       Decimal  @map("unit_cost") @db.Decimal(12, 2)
+  receivedDate   DateTime @map("received_date") @db.Date
+  notes          String?
+  isDeleted      Boolean  @default(false) @map("is_deleted")
+  idempotencyKey String?  @unique @map("idempotency_key")
+  createdBy      String   @default("system") @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  sales          Sale[]
+
+  // Drives the "batches with stock left for this product" dropdown query.
+  @@index([productId, isDeleted, remainingQty])
+  @@index([receivedDate])
+  @@map("batches")
+}
+
+model Sale {
+  id             Int      @id @default(autoincrement())
+  productId      Int      @map("product_id")
+  batchId        Int      @map("batch_id")
+  areaId         Int      @map("area_id")
+  shopId         Int?     @map("shop_id")
+  quantity       Int
+  salePrice      Decimal  @map("sale_price") @db.Decimal(12, 2)
+  saleDate       DateTime @map("sale_date") @db.Date
+  notes          String?
+  isDeleted      Boolean  @default(false) @map("is_deleted")
+  idempotencyKey String?  @unique @map("idempotency_key")
+  createdBy      String   @default("system") @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  batch          Batch    @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  area           Area     @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  shop           Shop?    @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  // Dashboard aggregates all scan by (is_deleted, sale_date) then join batches.
+  @@index([isDeleted, saleDate])
+  @@index([saleDate])
+  @@index([areaId, saleDate])
+  @@index([shopId, saleDate])
+  @@index([productId, saleDate])
+  @@index([batchId])
+  @@map("sales")
+}
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  entityType String   @map("entity_type")
+  entityId   Int      @map("entity_id")
+  action     String
+  actor      String
+  payload    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

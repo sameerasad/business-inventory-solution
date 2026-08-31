@@ -1,0 +1,4 @@
+# Dev-only tooling. Not imported by the app, so keep it out of the deployment.
+.verify
+scripts
+README.md
