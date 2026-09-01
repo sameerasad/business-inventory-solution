@@ -53,6 +53,9 @@ model Shop {
   /// Optional delivery address. Entered once per shop and printed on every
   /// invoice for that shop, so a booker never retypes it.
   address   String?
+  /// Optional WhatsApp / contact number for the shopkeeper. Used to pre-fill the
+  /// "send this invoice on WhatsApp" dialog.
+  phone     String?
   isDeleted Boolean   @default(false) @map("is_deleted")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -172,6 +175,10 @@ model AuditLog {
 model Booking {
   id             Int      @id @default(autoincrement())
   invoiceNo      String   @unique @map("invoice_no")
+  /// Random, unguessable id for the shareable invoice link. The in-app PDF
+  /// button uses the numeric id, but anything sent to a customer uses this, so
+  /// a recipient cannot walk the sequence and read other people's invoices.
+  shareToken     String?  @unique @map("share_token")
   customerName   String?  @map("customer_name")
   customerPhone  String?  @map("customer_phone")
   areaId         Int      @map("area_id")

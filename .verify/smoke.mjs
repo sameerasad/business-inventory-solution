@@ -112,7 +112,7 @@ const YEAR = new Date().getFullYear();
 // assertions are what stop that regressing.
 const pages = [
   ["/", ["Dashboard"]],
-  ["/bookings", ["Bookings", "Invoice", "Booked value", "Invoice PDF"]],
+  ["/bookings", ["Bookings", "Invoice", "Booked value"]],
   [
     "/bookings/new",
     ["New booking", "Customer &amp; date", "Customer name", "Add line", "Order total"],

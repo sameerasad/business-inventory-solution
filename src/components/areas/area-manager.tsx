@@ -123,7 +123,7 @@ function AreaCard({ area }: { area: AreaWithShops }) {
             hiddenAreaId={area.id}
             label="Add shop"
             placeholder="Shop name"
-            withAddress
+            withShopFields
             submitLabel="Add"
             compact
             icon={<Plus className="h-4 w-4" />}
@@ -137,7 +137,13 @@ function AreaCard({ area }: { area: AreaWithShops }) {
 function ShopRow({
   shop,
 }: {
-  shop: { id: number; name: string; address: string | null; salesCount: number };
+  shop: {
+    id: number;
+    name: string;
+    address: string | null;
+    phone: string | null;
+    salesCount: number;
+  };
 }) {
   const [renaming, setRenaming] = useState(false);
 
@@ -149,8 +155,9 @@ function ShopRow({
           hiddenId={shop.id}
           label="Edit shop"
           defaultValue={shop.name}
-          withAddress
+          withShopFields
           defaultAddress={shop.address ?? ""}
+          defaultPhone={shop.phone ?? ""}
           submitLabel="Save"
           compact
           onSuccess={() => setRenaming(false)}
@@ -170,8 +177,10 @@ function ShopRow({
             <Badge variant="outline">{shop.salesCount} sales</Badge>
           ) : null}
         </span>
-        {shop.address ? (
-          <span className="pl-5 text-xs text-muted-foreground">{shop.address}</span>
+        {shop.address || shop.phone ? (
+          <span className="pl-5 text-xs text-muted-foreground">
+            {[shop.address, shop.phone].filter(Boolean).join("  ·  ")}
+          </span>
         ) : null}
       </span>
       <span className="flex shrink-0 items-center gap-0.5">
@@ -207,8 +216,9 @@ function NameForm({
   hiddenAreaId,
   compact,
   icon,
-  withAddress,
+  withShopFields,
   defaultAddress = "",
+  defaultPhone = "",
   onSuccess,
   onCancel,
 }: {
@@ -221,15 +231,17 @@ function NameForm({
   hiddenAreaId?: number;
   compact?: boolean;
   icon?: React.ReactNode;
-  /** Shops carry an optional delivery address; areas do not. */
-  withAddress?: boolean;
+  /** Shops carry an optional address and phone; areas carry neither. */
+  withShopFields?: boolean;
   defaultAddress?: string;
+  defaultPhone?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
 }) {
   const [state, formAction, isPending] = useActionState(action, emptyActionState);
   const [value, setValue] = useState(defaultValue);
   const [address, setAddress] = useState(defaultAddress);
+  const [phone, setPhone] = useState(defaultPhone);
 
   useEffect(() => {
     if (state.ok) {
@@ -238,6 +250,7 @@ function NameForm({
       else {
         setValue("");
         setAddress("");
+        setPhone("");
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -283,15 +296,25 @@ function NameForm({
         ) : null}
       </div>
 
-      {withAddress ? (
-        <Input
-          name="address"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          placeholder="Delivery address (optional) - prints on invoices"
-          aria-label="Shop address"
-          disabled={isPending}
-        />
+      {withShopFields ? (
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          <Input
+            name="address"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="Address (optional) - prints on invoices"
+            aria-label="Shop address"
+            disabled={isPending}
+          />
+          <Input
+            name="phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="WhatsApp / phone (optional)"
+            aria-label="Shop phone"
+            disabled={isPending}
+          />
+        </div>
       ) : null}
 
       {state.message && !state.ok ? (

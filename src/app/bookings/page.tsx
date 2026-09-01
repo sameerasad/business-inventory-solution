@@ -8,6 +8,7 @@ import { FilterBarSkeleton } from "@/components/filter-bar-skeleton";
 import { ListFilters, type FilterSpec } from "@/components/list-filters";
 import { Pagination } from "@/components/pagination";
 import { SoftDeleteButton } from "@/components/forms/soft-delete-button";
+import { WhatsAppShareDialog } from "@/components/bookings/whatsapp-share-dialog";
 import { softDeleteBookingAction } from "@/actions/bookings";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -134,7 +135,7 @@ export default async function BookingsPage({
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-right">Profit</TableHead>
               <TableHead>Booked by</TableHead>
-              <TableHead className="text-right">Invoice PDF</TableHead>
+              <TableHead className="text-right">Invoice</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -182,15 +183,23 @@ export default async function BookingsPage({
                     {row.createdBy}
                   </TableCell>
                   <TableCell className="text-right">
-                    {/* A plain link, so the browser downloads it straight from
-                        the route handler with no client-side JS involved. */}
-                    <a
-                      href={`/api/invoices/${row.id}`}
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      PDF
-                    </a>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {/* A plain link, so the browser downloads it straight from
+                          the route handler with no client-side JS involved. */}
+                      <a
+                        href={`/api/invoices/${row.id}`}
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        PDF
+                      </a>
+                      <WhatsAppShareDialog
+                        bookingId={row.id}
+                        invoiceNo={row.invoiceNo}
+                        customerPhone={row.customerPhone}
+                        shopPhone={row.shopPhone}
+                      />
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <SoftDeleteButton

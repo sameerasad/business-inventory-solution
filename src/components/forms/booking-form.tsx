@@ -66,7 +66,7 @@ export function BookingForm({
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<Line[]>(() => [blankLine()]);
   const [addedShops, setAddedShops] = useState<
-    { id: number; name: string; address: string | null; areaId: number }[]
+    { id: number; name: string; address: string | null; phone: string | null; areaId: number }[]
   >([]);
 
   const byId = useMemo(() => new Map(products.map((p) => [String(p.id), p])), [products]);
@@ -91,7 +91,7 @@ export function BookingForm({
     const extra = addedShops
       .filter((s) => s.areaId === selectedArea.id)
       .filter((s) => !selectedArea.shops.some((e) => e.id === s.id))
-      .map((s) => ({ id: s.id, name: s.name, address: s.address }));
+      .map((s) => ({ id: s.id, name: s.name, address: s.address, phone: s.phone }));
     return [...selectedArea.shops, ...extra].sort((a, b) => a.name.localeCompare(b.name));
   }, [selectedArea, addedShops]);
 

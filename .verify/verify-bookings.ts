@@ -7,6 +7,7 @@ import { emptyActionState } from "@/lib/validations";
 import { createBatchAction } from "@/actions/batches";
 import { createBookingAction, softDeleteBookingAction } from "@/actions/bookings";
 import { createShop } from "@/actions/areas";
+import { getInvoiceShareData, getInvoiceShareToken } from "@/actions/bookings";
 import { getBookingList, getBookableProducts, getInvoice } from "@/lib/bookings";
 import { getKpis, getStockLevels } from "@/lib/queries";
 import { renderInvoicePdf, invoiceFileName } from "@/lib/invoice-pdf";
@@ -245,6 +246,43 @@ async function main() {
     invoiceFileName(invoice),
   );
 
+  section("shareable invoice link");
+  const token = await getInvoiceShareToken(booking.id);
+  ok("a share token exists", typeof token === "string" && token.length >= 20, token);
+  ok(
+    "token is url-safe and unguessable-looking",
+    token !== null && /^[A-Za-z0-9_-]{20,}$/.test(token),
+    token,
+  );
+  ok(
+    "token is not derivable from the id",
+    token !== null && !token.includes(String(booking.id)),
+    token,
+  );
+  const tokenAgain = await getInvoiceShareToken(booking.id);
+  ok("asking twice returns the same token", tokenAgain === token, { token, tokenAgain });
+
+  const shareData = await getInvoiceShareData(booking.id);
+  ok("share data found", shareData !== null);
+  ok(
+    "share data carries the invoice number and lines",
+    shareData !== null && shareData.invoiceNo === booking.invoiceNo && shareData.lines.length === 3,
+    shareData?.lines.length,
+  );
+  ok(
+    "share total matches the invoice",
+    shareData !== null && Math.abs(shareData.total - expectedRevenue) < 0.005,
+    shareData?.total,
+  );
+  // The WhatsApp text is a customer document too.
+  ok(
+    "share data leaks no cost or profit",
+    !/(cost|profit|margin)/i.test(JSON.stringify(shareData)),
+    JSON.stringify(shareData).slice(0, 120),
+  );
+  ok("unknown booking has no token", (await getInvoiceShareToken(999999)) === null);
+  ok("invalid id is rejected", (await getInvoiceShareToken(-1)) === null);
+
   section("idempotency: a double submit must not sell twice");
   const replay = await createBookingAction(
     emptyActionState,
@@ -353,6 +391,11 @@ async function main() {
   const walkIn = await prisma.booking.findFirstOrThrow({ where: { idempotencyKey: "booking-2" } });
   const walkInInvoice = await getInvoice(walkIn.id);
   ok("direct sale invoice says no shop", walkInInvoice!.shopName === null);
+  const walkInToken = await getInvoiceShareToken(walkIn.id);
+  ok("a second booking gets a different share token", walkInToken !== null && walkInToken !== token, {
+    token,
+    walkInToken,
+  });
   const pdf2 = await renderInvoicePdf(walkInInvoice!);
   ok("single-line invoice PDF renders", Buffer.from(pdf2.slice(0, 5)).toString("latin1") === "%PDF-");
 

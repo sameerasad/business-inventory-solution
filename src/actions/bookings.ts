@@ -3,9 +3,12 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
+import { randomBytes } from "node:crypto";
+
 import { prisma } from "@/lib/db";
 import { currentActor, writeAudit } from "@/lib/audit";
 import { parseDateOnly } from "@/lib/dates";
+import { getInvoice } from "@/lib/bookings";
 import {
   createBookingSchema,
   failure,
@@ -15,6 +18,15 @@ import {
   type ActionState,
   type BookingLineInput,
 } from "@/lib/validations";
+
+/**
+ * Unguessable id for a shareable invoice link. 16 random bytes in base64url
+ * is 22 characters - short enough for a WhatsApp message, far too large a
+ * space to enumerate. The numeric booking id stays for in-app use.
+ */
+function newShareToken(): string {
+  return randomBytes(16).toString("base64url");
+}
 
 function revalidateBookings() {
   revalidatePath("/bookings");
@@ -163,6 +175,7 @@ export async function createBookingAction(
       const booking = await tx.booking.create({
         data: {
           invoiceNo,
+          shareToken: newShareToken(),
           customerName: input.customerName,
           customerPhone: input.customerPhone,
           areaId: input.areaId,
@@ -270,6 +283,70 @@ export async function createBookingAction(
     console.error("createBookingAction failed", error);
     return failure("Could not save the booking. Please try again.");
   }
+}
+
+/**
+ * The token for a booking's shareable invoice link, minted on demand for any
+ * booking recorded before share links existed.
+ */
+export async function getInvoiceShareToken(bookingId: number): Promise<string | null> {
+  if (!Number.isInteger(bookingId) || bookingId <= 0) return null;
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { id: true, shareToken: true },
+  });
+  if (!booking) return null;
+  if (booking.shareToken) return booking.shareToken;
+
+  const token = newShareToken();
+  await prisma.booking.update({ where: { id: booking.id }, data: { shareToken: token } });
+  return token;
+}
+
+/**
+ * Everything the WhatsApp dialog needs, in one round trip: the share token
+ * (minted on demand for bookings older than share links), the business name
+ * from the server environment, and the invoice lines.
+ *
+ * Deliberately mirrors the invoice itself - quantities, prices and totals, no
+ * unit cost and no profit. This text goes to a customer.
+ */
+export async function getInvoiceShareData(bookingId: number): Promise<
+  | {
+      token: string;
+      invoiceNo: string;
+      businessName: string;
+      bookingDate: string;
+      customerName: string | null;
+      shopName: string | null;
+      lines: { description: string; quantity: number; unitPrice: number; lineTotal: number }[];
+      total: number;
+      totalUnits: number;
+    }
+  | null
+> {
+  const token = await getInvoiceShareToken(bookingId);
+  if (!token) return null;
+
+  const invoice = await getInvoice(bookingId);
+  if (!invoice) return null;
+
+  return {
+    token,
+    invoiceNo: invoice.invoiceNo,
+    businessName: process.env.BUSINESS_NAME?.trim() || "Your Business Name",
+    bookingDate: invoice.bookingDate.toISOString().slice(0, 10),
+    customerName: invoice.customerName,
+    shopName: invoice.shopName,
+    lines: invoice.lines.map((l) => ({
+      description: l.description,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      lineTotal: l.lineTotal,
+    })),
+    total: invoice.subtotal,
+    totalUnits: invoice.totalUnits,
+  };
 }
 
 /**

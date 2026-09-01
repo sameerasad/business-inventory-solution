@@ -144,6 +144,12 @@ export const shopSchema = z.object({
     .max(400, "Shop address cannot exceed 400 characters")
     .optional()
     .transform((v) => (v ? v : null)),
+  phone: z
+    .string()
+    .trim()
+    .max(40, "Phone cannot exceed 40 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
 });
 
 export const updateShopSchema = z.object({
@@ -153,6 +159,12 @@ export const updateShopSchema = z.object({
     .string()
     .trim()
     .max(400, "Shop address cannot exceed 400 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
+  phone: z
+    .string()
+    .trim()
+    .max(40, "Phone cannot exceed 40 characters")
     .optional()
     .transform((v) => (v ? v : null)),
 });

@@ -18,9 +18,12 @@ export type BookingRow = {
   id: number;
   invoiceNo: string;
   customerName: string | null;
+  customerPhone: string | null;
   bookingDate: Date;
   areaName: string;
   shopName: string | null;
+  shopPhone: string | null;
+  shareToken: string | null;
   lineCount: number;
   units: number;
   total: number;
@@ -67,9 +70,12 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
         b.id                                       AS "id",
         b.invoice_no                               AS "invoiceNo",
         b.customer_name                            AS "customerName",
+        b.customer_phone                           AS "customerPhone",
+        b.share_token                              AS "shareToken",
         b.booking_date                             AS "bookingDate",
         a.name                                     AS "areaName",
         sh.name                                    AS "shopName",
+        sh.phone                                   AS "shopPhone",
         COALESCE(agg.line_count, 0)::int           AS "lineCount",
         COALESCE(agg.units, 0)::int                AS "units",
         COALESCE(agg.total, 0)::float8             AS "total",
@@ -152,6 +158,7 @@ export type Invoice = {
   areaName: string;
   shopName: string | null;
   shopAddress: string | null;
+  shopPhone: string | null;
   notes: string | null;
   createdBy: string;
   isDeleted: boolean;
@@ -172,7 +179,7 @@ export async function getInvoice(bookingId: number): Promise<Invoice | null> {
     where: { id: bookingId },
     include: {
       area: { select: { name: true } },
-      shop: { select: { name: true, address: true } },
+      shop: { select: { name: true, address: true, phone: true } },
     },
   });
   if (!booking) return null;
@@ -224,6 +231,7 @@ export async function getInvoice(bookingId: number): Promise<Invoice | null> {
     areaName: booking.area.name,
     shopName: booking.shop?.name ?? null,
     shopAddress: booking.shop?.address ?? null,
+    shopPhone: booking.shop?.phone ?? null,
     notes: booking.notes,
     createdBy: booking.createdBy,
     isDeleted: booking.isDeleted,

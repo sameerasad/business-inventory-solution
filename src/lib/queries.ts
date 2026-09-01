@@ -376,7 +376,13 @@ export async function getAreasWithShops() {
       shops: {
         where: { isDeleted: false },
         orderBy: { name: "asc" },
-        select: { id: true, name: true, address: true, _count: { select: { sales: true } } },
+        select: {
+          id: true,
+          name: true,
+          address: true,
+          phone: true,
+          _count: { select: { sales: true } },
+        },
       },
       _count: { select: { sales: true } },
     },
@@ -389,6 +395,7 @@ export async function getAreasWithShops() {
       id: s.id,
       name: s.name,
       address: s.address,
+      phone: s.phone,
       salesCount: s._count.sales,
     })),
   }));

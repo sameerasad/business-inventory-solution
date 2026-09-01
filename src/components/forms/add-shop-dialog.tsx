@@ -29,11 +29,18 @@ export function AddShopDialog({
 }: {
   areaId: number | null;
   areaName: string | null;
-  onCreated: (shop: { id: number; name: string; address: string | null; areaId: number }) => void;
+  onCreated: (shop: {
+    id: number;
+    name: string;
+    address: string | null;
+    phone: string | null;
+    areaId: number;
+  }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -50,14 +57,26 @@ export function AddShopDialog({
 
     setError(null);
     startTransition(async () => {
-      const result = await createShop({ areaId, name: trimmed, address: address.trim() });
+      const result = await createShop({
+        areaId,
+        name: trimmed,
+        address: address.trim(),
+        phone: phone.trim(),
+      });
       if (!result.ok) {
         setError(result.message);
         return;
       }
-      onCreated({ id: result.shopId, name: result.name, address: result.address, areaId });
+      onCreated({
+        id: result.shopId,
+        name: result.name,
+        address: result.address,
+        phone: result.phone,
+        areaId,
+      });
       setName("");
       setAddress("");
+      setPhone("");
       setOpen(false);
     });
   };
@@ -106,6 +125,16 @@ export function AddShopDialog({
                 submit();
               }
             }}
+          />
+        </Field>
+
+        <Field label="WhatsApp / phone" htmlFor="new-shop-phone" hint="Optional. Pre-fills the send-on-WhatsApp dialog.">
+          <Input
+            id="new-shop-phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="e.g. 0300-1234567"
+            disabled={pending}
           />
         </Field>
 
