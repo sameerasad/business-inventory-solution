@@ -182,7 +182,30 @@ async function main(): Promise<number> {
           ? "no application tables found - the migrations have not been applied."
           : `missing table(s): ${missing.join(", ")}`,
       );
-      console.log("\n  Run:  npm run db:deploy\n");
+      // Which command actually helps depends on whether Prisma thinks these
+      // migrations already ran. If the ledger says they did, `migrate deploy`
+      // reports "up to date" and changes nothing - which is what happens when a
+      // table was dropped by hand. db:repair is the way back from that.
+      let ledgerClaimsApplied = false;
+      try {
+        const applied = await prisma.$queryRaw<{ n: number }[]>`
+          SELECT COUNT(*)::int AS n FROM "_prisma_migrations" WHERE finished_at IS NOT NULL
+        `;
+        ledgerClaimsApplied = applied[0].n > 0;
+      } catch {
+        // No _prisma_migrations table - nothing has ever been applied.
+      }
+
+      if (ledgerClaimsApplied) {
+        console.log(
+          "\n  Prisma's migration ledger says these migrations already ran, so\n" +
+            '  "npm run db:deploy" will report "up to date" and change nothing.\n' +
+            "  A table was most likely dropped by hand.\n" +
+            "\n  Run:  npm run db:repair\n",
+        );
+      } else {
+        console.log("\n  Run:  npm run db:deploy\n");
+      }
       return 1;
     }
     pass(`all ${EXPECTED_TABLES.length} tables present`);

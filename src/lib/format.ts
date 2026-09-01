@@ -1,23 +1,49 @@
-const currency = new Intl.NumberFormat("en-US", {
+/**
+ * Currency and locale for the whole app. Every figure on every page and chart is
+ * formatted through the helpers below, so changing these two lines is all it
+ * takes to switch currency.
+ *
+ * "en-PK" renders PKR as "Rs 450"; the "en-US" locale would render the same
+ * amount as "PKR 450", which reads like a spreadsheet export.
+ */
+export const CURRENCY = { locale: "en-PK", code: "PKR" } as const;
+
+const wholeCurrency = new Intl.NumberFormat(CURRENCY.locale, {
   style: "currency",
-  currency: "USD",
+  currency: CURRENCY.code,
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+const preciseCurrency = new Intl.NumberFormat(CURRENCY.locale, {
+  style: "currency",
+  currency: CURRENCY.code,
+  minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
-const compactCurrency = new Intl.NumberFormat("en-US", {
+const compactCurrency = new Intl.NumberFormat(CURRENCY.locale, {
   style: "currency",
-  currency: "USD",
+  currency: CURRENCY.code,
   notation: "compact",
   maximumFractionDigits: 1,
 });
 
-const integer = new Intl.NumberFormat("en-US");
+const integer = new Intl.NumberFormat(CURRENCY.locale);
 
+/**
+ * Rupee amounts are normally whole, so paisa are shown only when the value
+ * actually has some: "Rs 450", but "Rs 12.50". Always forcing two decimals
+ * would put ".00" on nearly every figure in the app.
+ */
 export function money(value: number | null | undefined): string {
-  return currency.format(value ?? 0);
+  const amount = value ?? 0;
+  return Number.isInteger(amount)
+    ? wholeCurrency.format(amount)
+    : preciseCurrency.format(amount);
 }
 
-/** For chart axes, where "$12.5K" beats "$12,543.00". */
+/** For chart axes, where "Rs 12.5K" beats "Rs 12,543". */
 export function moneyCompact(value: number | null | undefined): string {
   return compactCurrency.format(value ?? 0);
 }
@@ -53,7 +79,7 @@ export function dateTime(value: Date | string | null | undefined): string {
   if (!value) return "-";
   const d = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return "-";
-  return d.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  return d.toLocaleString(CURRENCY.locale, { dateStyle: "medium", timeStyle: "short" });
 }
 
 export const MONTH_LABELS = [

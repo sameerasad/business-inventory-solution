@@ -425,12 +425,16 @@ gets stored and grouped, whatever timezone the server runs in.
   catalog is 5 flavors × 5 packaging/volume combinations (25) plus the 10g
   chocolate bar = 26. The seed matches the list you gave; add the 27th on the
   Products page if one is missing.
-- **Default sale prices are placeholders** (250ml bottle $1.50, 500ml $2.50,
-  1000ml $4.00, 250ml tetra $1.20, 500ml tetra $2.00, chocolate bar $0.50). Set
-  your real prices on the Products page — editing a default never touches
-  recorded sales, which keep the price they were sold at.
-- **Currency is USD** via `Intl.NumberFormat` in `src/lib/format.ts`. Change it
-  in that one file.
+- **Default sale prices are placeholders in PKR** (250ml bottle Rs 60, 500ml
+  Rs 100, 1000ml Rs 180, 250ml tetra Rs 50, 500ml tetra Rs 90, chocolate bar
+  Rs 20). Set your real prices on the Products page — editing a default never
+  touches recorded sales, which keep the price they were sold at. A reseed also
+  never overwrites a price you have edited.
+- **Currency is PKR (rupees)**, set by the `CURRENCY` constant at the top of
+  `src/lib/format.ts`. Every figure in the app and on every chart formats through
+  the helpers in that file, so changing those two lines switches the whole app.
+  Amounts show as `Rs 450`, with paisa only when a value actually has them
+  (`Rs 12.50`).
 - **No authentication.** Anyone who can reach the app can write to it. Before
   employees use it, put it behind auth and swap `currentActor()` for the session
   user. The audit trail is already wired for this.
