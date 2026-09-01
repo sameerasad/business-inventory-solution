@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  ClipboardList,
+  FileText,
   Boxes,
   Layers,
   MapPin,
@@ -16,8 +18,10 @@ import { cn } from "@/lib/utils";
 
 const LINKS = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
+  { href: "/bookings/new", label: "New Booking", icon: ClipboardList, accent: true },
   { href: "/sales/new", label: "New Sale", icon: ShoppingCart, accent: true },
   { href: "/batches/new", label: "New Batch", icon: PackagePlus, accent: true },
+  { href: "/bookings", label: "Bookings", icon: FileText },
   { href: "/sales", label: "Sales", icon: Receipt },
   { href: "/batches", label: "Batches", icon: Layers },
   { href: "/products", label: "Products", icon: Boxes },

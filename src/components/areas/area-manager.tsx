@@ -123,6 +123,7 @@ function AreaCard({ area }: { area: AreaWithShops }) {
             hiddenAreaId={area.id}
             label="Add shop"
             placeholder="Shop name"
+            withAddress
             submitLabel="Add"
             compact
             icon={<Plus className="h-4 w-4" />}
@@ -133,7 +134,11 @@ function AreaCard({ area }: { area: AreaWithShops }) {
   );
 }
 
-function ShopRow({ shop }: { shop: { id: number; name: string; salesCount: number } }) {
+function ShopRow({
+  shop,
+}: {
+  shop: { id: number; name: string; address: string | null; salesCount: number };
+}) {
   const [renaming, setRenaming] = useState(false);
 
   if (renaming) {
@@ -142,8 +147,10 @@ function ShopRow({ shop }: { shop: { id: number; name: string; salesCount: numbe
         <NameForm
           action={renameShopAction}
           hiddenId={shop.id}
-          label="Rename shop"
+          label="Edit shop"
           defaultValue={shop.name}
+          withAddress
+          defaultAddress={shop.address ?? ""}
           submitLabel="Save"
           compact
           onSuccess={() => setRenaming(false)}
@@ -154,12 +161,17 @@ function ShopRow({ shop }: { shop: { id: number; name: string; salesCount: numbe
   }
 
   return (
-    <li className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5">
-      <span className="flex min-w-0 items-center gap-2 text-sm">
-        <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{shop.name}</span>
-        {shop.salesCount > 0 ? (
-          <Badge variant="outline">{shop.salesCount} sales</Badge>
+    <li className="flex items-start justify-between gap-2 rounded-md border px-2.5 py-1.5">
+      <span className="flex min-w-0 flex-col gap-0.5 text-sm">
+        <span className="flex min-w-0 items-center gap-2">
+          <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{shop.name}</span>
+          {shop.salesCount > 0 ? (
+            <Badge variant="outline">{shop.salesCount} sales</Badge>
+          ) : null}
+        </span>
+        {shop.address ? (
+          <span className="pl-5 text-xs text-muted-foreground">{shop.address}</span>
         ) : null}
       </span>
       <span className="flex shrink-0 items-center gap-0.5">
@@ -195,6 +207,8 @@ function NameForm({
   hiddenAreaId,
   compact,
   icon,
+  withAddress,
+  defaultAddress = "",
   onSuccess,
   onCancel,
 }: {
@@ -207,17 +221,24 @@ function NameForm({
   hiddenAreaId?: number;
   compact?: boolean;
   icon?: React.ReactNode;
+  /** Shops carry an optional delivery address; areas do not. */
+  withAddress?: boolean;
+  defaultAddress?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
 }) {
   const [state, formAction, isPending] = useActionState(action, emptyActionState);
   const [value, setValue] = useState(defaultValue);
+  const [address, setAddress] = useState(defaultAddress);
 
   useEffect(() => {
     if (state.ok) {
       // A create form empties itself; a rename form closes.
       if (onSuccess) onSuccess();
-      else setValue("");
+      else {
+        setValue("");
+        setAddress("");
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
@@ -261,6 +282,17 @@ function NameForm({
           </Button>
         ) : null}
       </div>
+
+      {withAddress ? (
+        <Input
+          name="address"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          placeholder="Delivery address (optional) - prints on invoices"
+          aria-label="Shop address"
+          disabled={isPending}
+        />
+      ) : null}
 
       {state.message && !state.ok ? (
         <p className="text-xs font-medium text-destructive">{state.message}</p>

@@ -30,7 +30,11 @@ import {
   type CascadeSelection,
 } from "@/components/forms/product-cascade";
 
-export type AreaOption = { id: number; name: string; shops: { id: number; name: string }[] };
+export type AreaOption = {
+  id: number;
+  name: string;
+  shops: { id: number; name: string; address: string | null }[];
+};
 
 /** Same string in the dropdown and in the closed trigger. */
 function describeBatch(b: AvailableBatch): string {
@@ -64,7 +68,9 @@ export function SaleForm({
   const [saleDate, setSaleDate] = useState(todayInputValue);
   const [notes, setNotes] = useState("");
   /** Shops created from the dialog, so the picker updates without a page reload. */
-  const [addedShops, setAddedShops] = useState<{ id: number; name: string; areaId: number }[]>([]);
+  const [addedShops, setAddedShops] = useState<
+    { id: number; name: string; address: string | null; areaId: number }[]
+  >([]);
 
   const resolved = useMemo(() => cascade(products, selection), [products, selection]);
   const product = resolved.product;
@@ -136,7 +142,7 @@ export function SaleForm({
     const extra = addedShops
       .filter((s) => s.areaId === selectedArea.id)
       .filter((s) => !selectedArea.shops.some((existing) => existing.id === s.id))
-      .map((s) => ({ id: s.id, name: s.name }));
+      .map((s) => ({ id: s.id, name: s.name, address: s.address }));
     return [...selectedArea.shops, ...extra].sort((a, b) => a.name.localeCompare(b.name));
   }, [selectedArea, addedShops]);
 

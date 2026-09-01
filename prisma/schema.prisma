@@ -15,8 +15,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   // Used only by the Prisma CLI (migrate / studio). Pooled connections cannot
   // run DDL reliably, so migrations go over the direct endpoint.
   directUrl = env("DATABASE_URL_UNPOOLED")
@@ -33,27 +33,32 @@ model Category {
 }
 
 model Area {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  isDeleted Boolean  @default(false) @map("is_deleted")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  isDeleted Boolean   @default(false) @map("is_deleted")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
   shops     Shop[]
   sales     Sale[]
+  bookings  Booking[]
 
   @@index([isDeleted])
   @@map("areas")
 }
 
 model Shop {
-  id        Int      @id @default(autoincrement())
-  areaId    Int      @map("area_id")
+  id        Int       @id @default(autoincrement())
+  areaId    Int       @map("area_id")
   name      String
-  isDeleted Boolean  @default(false) @map("is_deleted")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  area      Area     @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  /// Optional delivery address. Entered once per shop and printed on every
+  /// invoice for that shop, so a booker never retypes it.
+  address   String?
+  isDeleted Boolean   @default(false) @map("is_deleted")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  area      Area      @relation(fields: [areaId], references: [id], onDelete: Restrict)
   sales     Sale[]
+  bookings  Booking[]
 
   // One shop name per area. Also gives "add on the fly" a natural upsert target.
   @@unique([areaId, name])
@@ -114,6 +119,9 @@ model Sale {
   batchId        Int      @map("batch_id")
   areaId         Int      @map("area_id")
   shopId         Int?     @map("shop_id")
+  // Set when the sale came from a booking. One booking line can span several
+  // batches, so a booking has many sales.
+  bookingId      Int?     @map("booking_id")
   quantity       Int
   salePrice      Decimal  @map("sale_price") @db.Decimal(12, 2)
   saleDate       DateTime @map("sale_date") @db.Date
@@ -127,6 +135,7 @@ model Sale {
   batch          Batch    @relation(fields: [batchId], references: [id], onDelete: Restrict)
   area           Area     @relation(fields: [areaId], references: [id], onDelete: Restrict)
   shop           Shop?    @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  booking        Booking? @relation(fields: [bookingId], references: [id], onDelete: Restrict)
 
   // Dashboard aggregates all scan by (is_deleted, sale_date) then join batches.
   @@index([isDeleted, saleDate])
@@ -135,6 +144,7 @@ model Sale {
   @@index([shopId, saleDate])
   @@index([productId, saleDate])
   @@index([batchId])
+  @@index([bookingId])
   @@map("sales")
 }
 
@@ -150,4 +160,44 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+/// An order taken by a booker. Creating one immediately records the underlying
+/// sales (drawing stock down oldest-batch-first), so the booker never has to
+/// think about batches.
+///
+/// Deliberately has no line table: each booking line IS one or more Sale rows.
+/// That means the invoice is rendered from exactly the rows the dashboard
+/// aggregates, so an invoice total can never drift from recorded revenue.
+model Booking {
+  id             Int      @id @default(autoincrement())
+  invoiceNo      String   @unique @map("invoice_no")
+  customerName   String?  @map("customer_name")
+  customerPhone  String?  @map("customer_phone")
+  areaId         Int      @map("area_id")
+  shopId         Int?     @map("shop_id")
+  bookingDate    DateTime @map("booking_date") @db.Date
+  notes          String?
+  isDeleted      Boolean  @default(false) @map("is_deleted")
+  idempotencyKey String?  @unique @map("idempotency_key")
+  createdBy      String   @default("system") @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  area           Area     @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  shop           Shop?    @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  sales          Sale[]
+
+  @@index([isDeleted, bookingDate])
+  @@index([bookingDate])
+  @@index([areaId, bookingDate])
+  @@map("bookings")
+}
+
+/// Per-year invoice numbering. A single atomic upsert hands out the next number,
+/// so two bookers submitting at the same moment cannot get the same invoice no.
+model InvoiceCounter {
+  year   Int @id
+  lastNo Int @map("last_no")
+
+  @@map("invoice_counters")
 }

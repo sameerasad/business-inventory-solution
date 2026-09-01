@@ -1,0 +1,132 @@
+[
+  {
+    "sku": "APP-BTL-1000",
+    "name": "Apple Juice",
+    "defaultSalePrice": "750"
+  },
+  {
+    "sku": "APP-BTL-250",
+    "name": "Apple Juice",
+    "defaultSalePrice": "450"
+  },
+  {
+    "sku": "APP-BTL-500",
+    "name": "Apple Juice",
+    "defaultSalePrice": "450"
+  },
+  {
+    "sku": "APP-TET-250",
+    "name": "Apple Juice",
+    "defaultSalePrice": "1.2"
+  },
+  {
+    "sku": "APP-TET-500",
+    "name": "Apple Juice",
+    "defaultSalePrice": "2"
+  },
+  {
+    "sku": "CHO-BAR-10",
+    "name": "Chocolate",
+    "defaultSalePrice": "10"
+  },
+  {
+    "sku": "LYC-BTL-1000",
+    "name": "Lychee Juice",
+    "defaultSalePrice": "4"
+  },
+  {
+    "sku": "LYC-BTL-250",
+    "name": "Lychee Juice",
+    "defaultSalePrice": "1.5"
+  },
+  {
+    "sku": "LYC-BTL-500",
+    "name": "Lychee Juice",
+    "defaultSalePrice": "2.5"
+  },
+  {
+    "sku": "LYC-TET-250",
+    "name": "Lychee Juice",
+    "defaultSalePrice": "1.2"
+  },
+  {
+    "sku": "LYC-TET-500",
+    "name": "Lychee Juice",
+    "defaultSalePrice": "2"
+  },
+  {
+    "sku": "MNG-BTL-1000",
+    "name": "Mango Juice",
+    "defaultSalePrice": "4"
+  },
+  {
+    "sku": "MNG-BTL-250",
+    "name": "Mango Juice",
+    "defaultSalePrice": "1.5"
+  },
+  {
+    "sku": "MNG-BTL-500",
+    "name": "Mango Juice",
+    "defaultSalePrice": "2.5"
+  },
+  {
+    "sku": "MNG-TET-250",
+    "name": "Mango Juice",
+    "defaultSalePrice": "1.2"
+  },
+  {
+    "sku": "MNG-TET-500",
+    "name": "Mango Juice",
+    "defaultSalePrice": "2"
+  },
+  {
+    "sku": "PCH-BTL-1000",
+    "name": "Peach Juice",
+    "defaultSalePrice": "4"
+  },
+  {
+    "sku": "PCH-BTL-250",
+    "name": "Peach Juice",
+    "defaultSalePrice": "1.5"
+  },
+  {
+    "sku": "PCH-BTL-500",
+    "name": "Peach Juice",
+    "defaultSalePrice": "2.5"
+  },
+  {
+    "sku": "PCH-TET-250",
+    "name": "Peach Juice",
+    "defaultSalePrice": "1.2"
+  },
+  {
+    "sku": "PCH-TET-500",
+    "name": "Peach Juice",
+    "defaultSalePrice": "2"
+  },
+  {
+    "sku": "POM-BTL-1000",
+    "name": "Pomegranate Juice",
+    "defaultSalePrice": "4"
+  },
+  {
+    "sku": "POM-BTL-250",
+    "name": "Pomegranate Juice",
+    "defaultSalePrice": "1.5"
+  },
+  {
+    "sku": "POM-BTL-500",
+    "name": "Pomegranate Juice",
+    "defaultSalePrice": "2.5"
+  },
+  {
+    "sku": "POM-TET-250",
+    "name": "Pomegranate Juice",
+    "defaultSalePrice": "1.2"
+  },
+  {
+    "sku": "POM-TET-500",
+    "name": "Pomegranate Juice",
+    "defaultSalePrice": "2"
+  }
+]

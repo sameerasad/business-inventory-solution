@@ -325,6 +325,8 @@ lookup when you add logins and every call site starts recording real users.
 | `/dashboard` | KPI cards + 7 charts, filterable by year / category / area |
 | `/batches/new` | Receive stock (inventory in) |
 | `/sales/new` | Record a sale against a specific batch (inventory out) |
+| `/bookings/new` | Booker takes an order: sales captured automatically, invoice created |
+| `/bookings` | Orders with their invoice numbers and a PDF download per row |
 | `/batches` | All batches, filter by product and status |
 | `/sales` | All sales with per-line profit and margin, filter by date range / area / product |
 | `/products` | Catalog with live stock levels; add products, edit default prices, retire entries |
@@ -366,6 +368,78 @@ against the white card surface for lightness, chroma, protan/tritan separation,
 normal-vision separation and 3:1 contrast.
 
 ---
+
+## Bookings and invoices
+
+The Booking tab is for whoever takes orders. They enter the job, the customer and
+the products; everything else happens by itself.
+
+### What one booking does
+
+```
+Booker enters:  job ref, customer, area/shop, date, N product lines (qty + price)
+        |
+        v
+One transaction:
+  1. take the next invoice number for the year   -> INV-2026-00001
+  2. for each line, allocate stock oldest batch first
+  3. write one Sale per (line x batch) it touched
+  4. decrement each batch
+  5. write the audit entry
+        |
+        v
+Invoice PDF at /api/invoices/<id>
+```
+
+### Why a booking line can become several sales
+
+A line for 150 units against an oldest batch holding 100 becomes **two** sales:
+100 from that batch and 50 from the next. Each carries its own batch, so each
+carries its own unit cost. If those batches cost 40 and 50, the profit on that
+line is `100x(price-40) + 50x(price-50)` — exact, not an average.
+
+The invoice puts the line back together: it groups the sales by product and price,
+so the customer sees one row for 150 units. The split exists only in your data.
+
+### Guarantees
+
+- **All or nothing.** If the last line is short of stock, nothing is written — no
+  partial order, no invoice that disagrees with what was reserved. The error names
+  the SKU and how many are actually available.
+- **No separate line table.** A booking line *is* its sales. So the invoice total,
+  the bookings list and the dashboard are all reading the same rows and cannot
+  drift apart.
+- **Invoice numbers never collide.** A single atomic upsert on `invoice_counters`
+  hands out the next number per year, so two bookers submitting at the same moment
+  get different numbers.
+- **Double submits are safe.** Same idempotency key as everywhere else: a replayed
+  submit returns the original invoice instead of selling the stock twice.
+- **Cancelling restores stock.** Every allocated unit goes back to the batch it came
+  from, the sales stop counting, and the booking is kept so the invoice number is
+  never reused. Its PDF is watermarked CANCELLED.
+- **The invoice shows no costs.** Quantities, unit prices and totals only — never
+  unit cost or profit. It is a customer document. The verification suite asserts
+  this.
+
+### The PDF
+
+Generated on demand by `pdf-lib` in `src/lib/invoice-pdf.ts` and served from
+`src/app/api/invoices/[id]/route.ts` with `Content-Disposition: attachment`, so the
+browser downloads it. Pure JavaScript — no headless browser and no font files, so
+it runs unchanged in a Vercel function.
+
+Put your own details on it via `.env`:
+
+```dotenv
+BUSINESS_NAME="Your Business Name"
+BUSINESS_ADDRESS="Street, City, Postcode"
+BUSINESS_PHONE="+92 ..."
+BUSINESS_EMAIL="orders@example.com"
+BUSINESS_TAX_ID="NTN ..."
+```
+
+There is no discount field on purpose: a discount would make the invoice total
+disagree with recorded revenue. To discount, lower the unit price on the line.
 
 ## Project layout
 

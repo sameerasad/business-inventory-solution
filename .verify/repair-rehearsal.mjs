@@ -26,6 +26,22 @@ function ok(label, cond, detail) {
   }
 }
 
+// The tables the app expects, and the ones this rehearsal drops. Derived
+// assertions, so adding a table to the schema cannot silently stale this file.
+const ALL_TABLES = [
+  "areas",
+  "audit_logs",
+  "batches",
+  "bookings",
+  "categories",
+  "invoice_counters",
+  "products",
+  "sales",
+  "shops",
+];
+const DROPPED = ["sales", "batches", "shops", "areas", "audit_logs"];
+const SURVIVORS = ALL_TABLES.filter((t) => !DROPPED.includes(t));
+
 const db = await PGlite.create();
 const migrationsDir = path.join(process.cwd(), "prisma", "migrations");
 for (const d of fs
@@ -109,7 +125,11 @@ try {
   // Stand in for the real edited prices (CHO-BAR-10=10, APP-BTL-250=450, ...).
   await db.exec(`UPDATE products SET default_sale_price = 450 WHERE sku = 'APP-BTL-250'`);
   await db.exec(`UPDATE products SET default_sale_price = 10 WHERE sku = 'CHO-BAR-10'`);
-  ok("7 tables present", (await tableList()).length === 7, await tableList());
+  ok(
+    `all ${ALL_TABLES.length} tables present`,
+    (await tableList()).join(",") === ALL_TABLES.join(","),
+    await tableList(),
+  );
   ok("7 CHECK constraints present", (await constraintCount()) === 7, await constraintCount());
 
   console.log("\n=== 2. reproduce the damage (DROP ... CASCADE) ===");
@@ -121,14 +141,22 @@ try {
     DROP TABLE IF EXISTS "audit_logs" CASCADE;
   `);
   const damaged = await tableList();
-  ok("only categories + products left", damaged.join(",") === "categories,products", damaged);
+  ok(
+    `only ${SURVIVORS.join(", ")} left`,
+    damaged.join(",") === SURVIVORS.join(","),
+    damaged,
+  );
 
   console.log("\n=== 3. confirm `migrate deploy` does NOT fix it (the trap) ===");
   const statusCode = await run("npx prisma migrate status", "prisma migrate status");
   ok("ledger reports up to date (exit 0) despite 5 missing tables", statusCode === 0, statusCode);
   const deployCode = await run("npx prisma migrate deploy", "prisma migrate deploy");
   ok("migrate deploy exits 0 but fixes nothing", deployCode === 0, deployCode);
-  ok("tables STILL missing after migrate deploy", (await tableList()).length === 2, await tableList());
+  ok(
+    "tables STILL missing after migrate deploy",
+    (await tableList()).length === SURVIVORS.length,
+    await tableList(),
+  );
 
   console.log("\n=== 4. run the repair ===");
   const repairCode = await run("npm run db:repair", "npm run db:repair");
@@ -136,11 +164,7 @@ try {
 
   console.log("\n=== 5. verify recovery ===");
   const after = await tableList();
-  ok(
-    "all 7 tables restored",
-    after.join(",") === "areas,audit_logs,batches,categories,products,sales,shops",
-    after,
-  );
+  ok(`all ${ALL_TABLES.length} tables restored`, after.join(",") === ALL_TABLES.join(","), after);
   ok("all 7 CHECK constraints restored", (await constraintCount()) === 7, await constraintCount());
 
   const { rows: idx } = await db.query(

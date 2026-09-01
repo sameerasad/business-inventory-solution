@@ -29,10 +29,11 @@ export function AddShopDialog({
 }: {
   areaId: number | null;
   areaName: string | null;
-  onCreated: (shop: { id: number; name: string; areaId: number }) => void;
+  onCreated: (shop: { id: number; name: string; address: string | null; areaId: number }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -49,13 +50,14 @@ export function AddShopDialog({
 
     setError(null);
     startTransition(async () => {
-      const result = await createShop({ areaId, name: trimmed });
+      const result = await createShop({ areaId, name: trimmed, address: address.trim() });
       if (!result.ok) {
         setError(result.message);
         return;
       }
-      onCreated({ id: result.shopId, name: result.name, areaId });
+      onCreated({ id: result.shopId, name: result.name, address: result.address, areaId });
       setName("");
+      setAddress("");
       setOpen(false);
     });
   };
@@ -104,6 +106,16 @@ export function AddShopDialog({
                 submit();
               }
             }}
+          />
+        </Field>
+
+        <Field label="Address" htmlFor="new-shop-address" hint="Optional. Prints on invoices for this shop.">
+          <Input
+            id="new-shop-address"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="e.g. Shop 12, Block C, Jinnah Road"
+            disabled={pending}
           />
         </Field>
 

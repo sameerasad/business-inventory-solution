@@ -123,19 +123,45 @@ const probes = [
 ];
 
 let constraintFailures = 0;
-for (const [label, sql] of probes) {
-  let blocked = false;
-  try {
-    await db.exec(`BEGIN; ${sql}; ROLLBACK;`);
-  } catch {
-    blocked = true;
-  }
-  await db.exec("ROLLBACK").catch(() => {});
-  if (blocked) {
-    console.log(`  PASS  ${label}`);
-  } else {
-    constraintFailures += 1;
-    console.error(`  FAIL  ${label} - the write was ALLOWED`);
+
+// The UPDATE probes target batch id 1 / product id 1. If those rows are absent
+// the UPDATE matches nothing, raises no error, and would be scored as "the
+// constraint let it through" - a false failure. Check the fixtures first.
+const { rows: fixture } = await db.query(
+  `SELECT (SELECT COUNT(*)::int FROM batches WHERE id = 1) AS b,
+          (SELECT COUNT(*)::int FROM products WHERE id = 1) AS p,
+          (SELECT COUNT(*)::int FROM shops) AS s`,
+);
+if (fixture[0].b === 0 || fixture[0].p === 0 || fixture[0].s === 0) {
+  console.error(
+    `  FAIL  constraint probes - fixtures missing (batch id 1: ${fixture[0].b}, ` +
+      `product id 1: ${fixture[0].p}, shops: ${fixture[0].s}). These probes need ` +
+      `the seed to have run and at least one batch to exist.`,
+  );
+  constraintFailures += 1;
+} else {
+  for (const [label, sql] of probes) {
+    let blocked = false;
+    let affected = null;
+    try {
+      await db.exec("BEGIN");
+      const res = await db.query(sql);
+      affected = res.affectedRows ?? null;
+      await db.exec("ROLLBACK");
+    } catch {
+      blocked = true;
+      await db.exec("ROLLBACK").catch(() => {});
+    }
+    if (blocked) {
+      console.log(`  PASS  ${label}`);
+    } else if (affected === 0) {
+      // Nothing was written, so the constraint was never actually exercised.
+      constraintFailures += 1;
+      console.error(`  FAIL  ${label} - probe matched 0 rows, constraint not exercised`);
+    } else {
+      constraintFailures += 1;
+      console.error(`  FAIL  ${label} - the write was ALLOWED`);
+    }
   }
 }
 console.log(

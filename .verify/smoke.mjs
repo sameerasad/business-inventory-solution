@@ -21,7 +21,16 @@ for (const dir of fs
 const server = new PGLiteSocketServer({ db, port: PG_PORT, host: "127.0.0.1" });
 await server.start();
 
-const env = { ...process.env, DATABASE_URL: url, DATABASE_URL_UNPOOLED: url, DEFAULT_ACTOR: "smoke" };
+// Never build into .next: the dev server shares it, and mixing dev and
+// production artifacts leaves the dev server serving a page with no CSS.
+const DIST = ".next-verify";
+const env = {
+  ...process.env,
+  DATABASE_URL: url,
+  DATABASE_URL_UNPOOLED: url,
+  DEFAULT_ACTOR: "smoke",
+  NEXT_DIST_DIR: DIST,
+};
 
 function run(cmd) {
   return new Promise((resolve) => {
@@ -56,6 +65,9 @@ const check = (label, condition, detail) => {
     console.error(`  FAIL  ${label}`, detail ?? "");
   }
 };
+
+console.log(`\nbuilding into ${DIST}/ (leaving .next alone for next dev)...`);
+if ((await run("npx next build")) !== 0) process.exit(1);
 
 if ((await run("npx tsx prisma/seed.ts")) !== 0) process.exit(1);
 if (
@@ -100,6 +112,11 @@ const YEAR = new Date().getFullYear();
 // assertions are what stop that regressing.
 const pages = [
   ["/", ["Dashboard"]],
+  ["/bookings", ["Bookings", "Invoice", "Booked value", "Invoice PDF"]],
+  [
+    "/bookings/new",
+    ["New booking", "Customer &amp; date", "Customer name", "Add line", "Order total"],
+  ],
   [
     "/dashboard",
     [

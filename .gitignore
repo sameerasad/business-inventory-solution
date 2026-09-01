@@ -10,3 +10,5 @@ next-env.d.ts
 
 # scratch data from the verification suite
 .verify/pgdata
+sample-invoice.pdf
+.next-verify

@@ -15,7 +15,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    // suppressHydrationWarning covers attributes on THIS element only, not the
+    // tree below it. Browser extensions (page rulers, dark-mode injectors,
+    // translators) commonly stamp style variables onto <html> before React
+    // hydrates, which React then reports as a mismatch even though the app
+    // rendered correctly. Suppressing it here silences that class of false
+    // positive while leaving real hydration errors in the app itself visible.
+    <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen antialiased">
         <header className="border-b bg-card">
           <div className="mx-auto flex max-w-[1400px] flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">

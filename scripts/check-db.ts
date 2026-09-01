@@ -69,6 +69,20 @@ function looksPooled(url: string): boolean {
   return /-pooler\.|:6543\b/.test(url);
 }
 
+/** Migration folder names present in prisma/migrations, in order. */
+function listMigrationsOnDisk(): string[] {
+  const dir = path.join(process.cwd(), "prisma", "migrations");
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && fs.existsSync(path.join(dir, d.name, "migration.sql")))
+      .map((d) => d.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
 const EXPECTED_TABLES = [
   "categories",
   "areas",
@@ -77,6 +91,8 @@ const EXPECTED_TABLES = [
   "batches",
   "sales",
   "audit_logs",
+  "bookings",
+  "invoice_counters",
 ];
 
 async function main(): Promise<number> {
@@ -135,6 +151,21 @@ async function main(): Promise<number> {
     if (/channel_binding=/.test(runtimeUrl)) {
       warn("Drop channel_binding from DATABASE_URL; keep sslmode=require.");
     }
+
+    // The combination that produces "Timed out fetching a new connection from
+    // the connection pool" on a cold start. The dashboard issues ~8 aggregate
+    // queries per request; with one connection they queue behind each other.
+    const limit = /[?&]connection_limit=(\d+)/.exec(runtimeUrl);
+    const poolTimeout = /[?&]pool_timeout=(\d+)/.exec(runtimeUrl);
+    if (limit && Number(limit[1]) <= 1 && !poolTimeout) {
+      warn(
+        [
+          "connection_limit=1 with the default 10s pool_timeout can time out while a",
+          "         suspended database wakes. The dashboard runs ~8 queries per request.",
+          "         Add &pool_timeout=20 (and consider connection_limit=5).",
+        ].join("\n"),
+      );
+    }
   }
 
   if (cliUrl && looksPooled(cliUrl)) {
@@ -182,33 +213,79 @@ async function main(): Promise<number> {
           ? "no application tables found - the migrations have not been applied."
           : `missing table(s): ${missing.join(", ")}`,
       );
-      // Which command actually helps depends on whether Prisma thinks these
-      // migrations already ran. If the ledger says they did, `migrate deploy`
-      // reports "up to date" and changes nothing - which is what happens when a
-      // table was dropped by hand. db:repair is the way back from that.
-      let ledgerClaimsApplied = false;
+      // Which command helps depends on WHY the tables are missing:
+      //   * migrations on disk that the database has not recorded -> genuinely
+      //     pending, so `db:deploy` will apply them.
+      //   * every migration recorded but tables gone -> someone dropped them by
+      //     hand; `db:deploy` would report "up to date" and change nothing, and
+      //     `db:repair` is the way back.
+      const onDisk = listMigrationsOnDisk();
+      let recorded: string[] = [];
+      let ledgerExists = true;
       try {
-        const applied = await prisma.$queryRaw<{ n: number }[]>`
-          SELECT COUNT(*)::int AS n FROM "_prisma_migrations" WHERE finished_at IS NOT NULL
+        const rows = await prisma.$queryRaw<{ migration_name: string }[]>`
+          SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL
         `;
-        ledgerClaimsApplied = applied[0].n > 0;
+        recorded = rows.map((r) => r.migration_name);
       } catch {
-        // No _prisma_migrations table - nothing has ever been applied.
+        ledgerExists = false;
       }
 
-      if (ledgerClaimsApplied) {
+      const pending = onDisk.filter((m) => !recorded.includes(m));
+
+      if (!ledgerExists || recorded.length === 0) {
+        console.log("\n  Nothing has been migrated yet.\n\n  Run:  npm run db:deploy\n");
+      } else if (pending.length > 0) {
         console.log(
-          "\n  Prisma's migration ledger says these migrations already ran, so\n" +
+          `\n  ${pending.length} migration(s) on disk are not applied yet:\n` +
+            pending.map((m) => `    - ${m}`).join("\n") +
+            "\n\n  Run:  npm run db:deploy\n",
+        );
+      } else {
+        console.log(
+          "\n  Every migration on disk is already recorded as applied, so\n" +
             '  "npm run db:deploy" will report "up to date" and change nothing.\n' +
             "  A table was most likely dropped by hand.\n" +
             "\n  Run:  npm run db:repair\n",
         );
-      } else {
-        console.log("\n  Run:  npm run db:deploy\n");
       }
       return 1;
     }
     pass(`all ${EXPECTED_TABLES.length} tables present`);
+
+    // Tables existing is NOT the same as being up to date. A migration that only
+    // adds or drops a COLUMN leaves every table in place, so checking tables
+    // alone would give a green light while the app is asking for a column the
+    // database does not have. Always compare the ledger against the folder.
+    const migrationsOnDisk = listMigrationsOnDisk();
+    let appliedMigrations: string[] = [];
+    try {
+      const rows = await prisma.$queryRaw<{ migration_name: string }[]>`
+        SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL
+      `;
+      appliedMigrations = rows.map((r) => r.migration_name);
+    } catch {
+      // No ledger: db push was used instead of migrations. Nothing to compare.
+    }
+    const pendingMigrations = migrationsOnDisk.filter((m) => !appliedMigrations.includes(m));
+
+    if (migrationsOnDisk.length === 0) {
+      warn("no migrations found in prisma/migrations");
+    } else if (appliedMigrations.length === 0) {
+      warn(
+        "the database has no migration history - it was probably set up with\n" +
+          "         db push. Fine for a sandbox, but prefer db:deploy for real data.",
+      );
+    } else if (pendingMigrations.length > 0) {
+      fail(
+        `${pendingMigrations.length} migration(s) NOT applied - the app will fail on any\n` +
+          "         column they add or remove:\n" +
+          pendingMigrations.map((m) => `           - ${m}`).join("\n") +
+          "\n\n         Run:  npm run db:deploy",
+      );
+    } else {
+      pass(`all ${appliedMigrations.length} migrations applied`);
+    }
 
     const checkRows = await prisma.$queryRaw<{ n: number }[]>`
       SELECT COUNT(*)::int AS n FROM pg_constraint
@@ -246,6 +323,15 @@ async function main(): Promise<number> {
     /* ----------------------------------------------------------- 5. verdict */
 
     console.log("");
+
+    // Anything that failed AFTER connecting - a pending migration, say - must
+    // still fail the whole check. Reporting "set up correctly" while the app is
+    // about to crash on a missing column is worse than having no check at all.
+    if (problems > 0) {
+      console.log(`${problems} problem(s) found. Fix the above, then run this again.\n`);
+      return 1;
+    }
+
     console.log(
       warnings > 0
         ? `Connected and usable, with ${warnings} thing(s) to look at above.`

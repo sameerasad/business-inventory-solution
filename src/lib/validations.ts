@@ -138,11 +138,23 @@ export const updateAreaSchema = z.object({
 export const shopSchema = z.object({
   areaId: dbId("Area"),
   name: shortName("Shop name"),
+  address: z
+    .string()
+    .trim()
+    .max(400, "Shop address cannot exceed 400 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
 });
 
 export const updateShopSchema = z.object({
   id: dbId("Shop"),
   name: shortName("Shop name"),
+  address: z
+    .string()
+    .trim()
+    .max(400, "Shop address cannot exceed 400 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
 });
 
 export const idOnlySchema = z.object({ id: dbId("Record") });
@@ -214,3 +226,79 @@ export function failure(message: string, fieldErrors: Record<string, string> = {
 export function success(message: string): ActionState {
   return { ok: true, message, fieldErrors: {} };
 }
+
+/* ------------------------------------------------------------------ bookings */
+
+/**
+ * One line of a booking. The booker gives product, quantity and unit price; the
+ * server works out which batches to draw from.
+ */
+export const bookingLineSchema = z.object({
+  productId: z
+    .number()
+    .int()
+    .positive("Pick a product for every line"),
+  quantity: z
+    .number()
+    .int("Quantity must be a whole number")
+    .positive("Quantity must be greater than 0")
+    .max(100_000_000, "Quantity is unrealistically large"),
+  unitPrice: z
+    .number()
+    .nonnegative("Unit price cannot be negative")
+    .max(10_000_000, "Unit price is unrealistically large")
+    // Money is stored to 2 decimals; reject anything finer so the invoice total
+    // and the recorded revenue can never disagree by a rounding artefact.
+    .refine((n) => Number.isInteger(Math.round(n * 100)) && Math.abs(n * 100 - Math.round(n * 100)) < 1e-9,
+      "Unit price cannot have more than 2 decimals"),
+});
+export type BookingLineInput = z.infer<typeof bookingLineSchema>;
+
+/**
+ * Lines arrive as a JSON string in a hidden field - the form is a dynamic list,
+ * which does not map cleanly onto flat FormData keys.
+ */
+const bookingLinesFromJson = z
+  .string()
+  .min(1, "Add at least one product line")
+  .transform((raw, ctx) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Could not read the order lines" });
+      return z.NEVER;
+    }
+    const result = z.array(bookingLineSchema).min(1, "Add at least one product line").safeParse(parsed);
+    if (!result.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: result.error.issues[0]?.message ?? "Invalid order lines",
+      });
+      return z.NEVER;
+    }
+    return result.data;
+  });
+
+export const createBookingSchema = z.object({
+  // Optional: a walk-in or cash sale often has no name worth recording.
+  customerName: z
+    .string()
+    .trim()
+    .max(160, "Customer name cannot exceed 160 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
+  customerPhone: z
+    .string()
+    .trim()
+    .max(40, "Phone cannot exceed 40 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
+  areaId: dbId("Area"),
+  shopId: optionalDbId,
+  bookingDate: dateOnlyString,
+  notes: optionalNotes,
+  lines: bookingLinesFromJson,
+  idempotencyKey,
+});
+export type CreateBookingInput = z.infer<typeof createBookingSchema>;

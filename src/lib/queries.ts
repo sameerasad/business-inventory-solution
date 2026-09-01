@@ -376,7 +376,7 @@ export async function getAreasWithShops() {
       shops: {
         where: { isDeleted: false },
         orderBy: { name: "asc" },
-        select: { id: true, name: true, _count: { select: { sales: true } } },
+        select: { id: true, name: true, address: true, _count: { select: { sales: true } } },
       },
       _count: { select: { sales: true } },
     },
@@ -385,7 +385,12 @@ export async function getAreasWithShops() {
     id: a.id,
     name: a.name,
     salesCount: a._count.sales,
-    shops: a.shops.map((s) => ({ id: s.id, name: s.name, salesCount: s._count.sales })),
+    shops: a.shops.map((s) => ({
+      id: s.id,
+      name: s.name,
+      address: s.address,
+      salesCount: s._count.sales,
+    })),
   }));
 }
 export type AreaWithShops = Awaited<ReturnType<typeof getAreasWithShops>>[number];

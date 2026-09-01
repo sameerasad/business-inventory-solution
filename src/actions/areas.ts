@@ -21,6 +21,8 @@ function revalidateGeography() {
   revalidatePath("/areas");
   revalidatePath("/sales/new");
   revalidatePath("/sales");
+  revalidatePath("/bookings/new");
+  revalidatePath("/bookings");
   revalidatePath("/dashboard");
 }
 
@@ -151,12 +153,20 @@ export async function deleteAreaAction(
 export async function createShop(input: {
   areaId: number;
   name: string;
-}): Promise<{ ok: true; shopId: number; name: string } | { ok: false; message: string }> {
-  const parsed = shopSchema.safeParse({ areaId: String(input.areaId), name: input.name });
+  address?: string | null;
+}): Promise<
+  | { ok: true; shopId: number; name: string; address: string | null }
+  | { ok: false; message: string }
+> {
+  const parsed = shopSchema.safeParse({
+    areaId: String(input.areaId),
+    name: input.name,
+    address: input.address ?? undefined,
+  });
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid shop." };
   }
-  const { areaId, name } = parsed.data;
+  const { areaId, name, address } = parsed.data;
 
   const area = await prisma.area.findUnique({ where: { id: areaId }, select: { isDeleted: true } });
   if (!area || area.isDeleted) return { ok: false, message: "That area is no longer available." };
@@ -167,31 +177,40 @@ export async function createShop(input: {
     const shop = await prisma.$transaction(async (tx) => {
       const existing = await tx.shop.findUnique({
         where: { areaId_name: { areaId, name } },
-        select: { id: true, isDeleted: true },
+        select: { id: true, isDeleted: true, address: true },
       });
       if (existing) {
-        if (existing.isDeleted) {
-          await tx.shop.update({ where: { id: existing.id }, data: { isDeleted: false } });
+        // Re-adding a shop that already exists never blanks an address it
+        // already has; an address given now fills a blank one in.
+        const nextAddress = address ?? existing.address;
+        if (existing.isDeleted || nextAddress !== existing.address) {
+          await tx.shop.update({
+            where: { id: existing.id },
+            data: { isDeleted: false, address: nextAddress },
+          });
           await writeAudit(tx, {
             entityType: "shop",
             entityId: existing.id,
-            action: "shop.restored",
+            action: existing.isDeleted ? "shop.restored" : "shop.address_updated",
           });
         }
-        return existing;
+        return { id: existing.id, address: nextAddress };
       }
-      const created = await tx.shop.create({ data: { areaId, name }, select: { id: true } });
+      const created = await tx.shop.create({
+        data: { areaId, name, address },
+        select: { id: true, address: true },
+      });
       await writeAudit(tx, {
         entityType: "shop",
         entityId: created.id,
         action: "shop.created",
-        payload: { areaId, name },
+        payload: { areaId, name, address },
       });
       return created;
     });
 
     revalidateGeography();
-    return { ok: true, shopId: shop.id, name };
+    return { ok: true, shopId: shop.id, name, address: shop.address };
   } catch (error) {
     console.error("createShop failed", error);
     return { ok: false, message: "Could not add the shop. Please try again." };
@@ -204,12 +223,13 @@ export async function createShopAction(
 ): Promise<ActionState> {
   const areaIdRaw = String(formData.get("areaId") ?? "");
   const name = String(formData.get("name") ?? "");
+  const address = String(formData.get("address") ?? "");
   const areaId = Number.parseInt(areaIdRaw, 10);
   if (!Number.isInteger(areaId) || areaId <= 0) {
     return failure("Pick an area first.", { areaId: "Area is required" });
   }
 
-  const result = await createShop({ areaId, name });
+  const result = await createShop({ areaId, name, address });
   if (!result.ok) return failure(result.message, { name: result.message });
   return success(`Shop "${result.name}" added.`);
 }
@@ -221,22 +241,23 @@ export async function renameShopAction(
   const parsed = updateShopSchema.safeParse({
     id: formData.get("id") ?? "",
     name: formData.get("name") ?? "",
+    address: formData.get("address") ?? undefined,
   });
   if (!parsed.success) return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
-  const { id, name } = parsed.data;
+  const { id, name, address } = parsed.data;
 
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.shop.update({ where: { id }, data: { name } });
+      await tx.shop.update({ where: { id }, data: { name, address } });
       await writeAudit(tx, {
         entityType: "shop",
         entityId: id,
-        action: "shop.renamed",
-        payload: { name },
+        action: "shop.updated",
+        payload: { name, address },
       });
     });
     revalidateGeography();
-    return success(`Shop renamed to "${name}".`);
+    return success(`Shop "${name}" saved.`);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return failure(`That area already has a shop called "${name}".`, { name: "Already exists" });
