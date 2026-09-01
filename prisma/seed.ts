@@ -35,9 +35,13 @@ const FLAVORS: { name: string; code: string }[] = [
 ];
 
 /**
- * Placeholder sale prices, in PKR (rupees). They are only used for products that
- * do not exist yet - the seed never overwrites a price you have edited in the
- * app, so a reseed cannot undo your real pricing.
+ * Sale prices in PKR (rupees).
+ *
+ * Bottle prices are the real ones. Tetra Pack and Chocolate are still
+ * placeholders - set them on the Products page.
+ *
+ * Only used for products that do not exist yet: the seed never overwrites a
+ * price already in the database, so a reseed cannot undo pricing you edited.
  */
 const JUICE_VARIANTS: {
   packagingType: string;
@@ -47,9 +51,9 @@ const JUICE_VARIANTS: {
   unit: string;
   defaultSalePrice: string;
 }[] = [
-  { packagingType: "Bottle", packagingCode: "BTL", variantValue: "250ml", variantCode: "250", unit: "bottle", defaultSalePrice: "60" },
-  { packagingType: "Bottle", packagingCode: "BTL", variantValue: "500ml", variantCode: "500", unit: "bottle", defaultSalePrice: "100" },
-  { packagingType: "Bottle", packagingCode: "BTL", variantValue: "1000ml", variantCode: "1000", unit: "bottle", defaultSalePrice: "180" },
+  { packagingType: "Bottle", packagingCode: "BTL", variantValue: "250ml", variantCode: "250", unit: "bottle", defaultSalePrice: "450" },
+  { packagingType: "Bottle", packagingCode: "BTL", variantValue: "500ml", variantCode: "500", unit: "bottle", defaultSalePrice: "750" },
+  { packagingType: "Bottle", packagingCode: "BTL", variantValue: "1000ml", variantCode: "1000", unit: "bottle", defaultSalePrice: "750" },
   { packagingType: "Tetra Pack", packagingCode: "TET", variantValue: "250ml", variantCode: "250", unit: "tetra_pack", defaultSalePrice: "50" },
   { packagingType: "Tetra Pack", packagingCode: "TET", variantValue: "500ml", variantCode: "500", unit: "tetra_pack", defaultSalePrice: "90" },
 ];
