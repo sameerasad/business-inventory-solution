@@ -173,26 +173,27 @@ model AuditLog {
 /// That means the invoice is rendered from exactly the rows the dashboard
 /// aggregates, so an invoice total can never drift from recorded revenue.
 model Booking {
-  id             Int      @id @default(autoincrement())
-  invoiceNo      String   @unique @map("invoice_no")
+  id             Int       @id @default(autoincrement())
+  invoiceNo      String    @unique @map("invoice_no")
   /// Random, unguessable id for the shareable invoice link. The in-app PDF
   /// button uses the numeric id, but anything sent to a customer uses this, so
   /// a recipient cannot walk the sequence and read other people's invoices.
-  shareToken     String?  @unique @map("share_token")
-  customerName   String?  @map("customer_name")
-  customerPhone  String?  @map("customer_phone")
-  areaId         Int      @map("area_id")
-  shopId         Int?     @map("shop_id")
-  bookingDate    DateTime @map("booking_date") @db.Date
+  shareToken     String?   @unique @map("share_token")
+  customerName   String?   @map("customer_name")
+  customerPhone  String?   @map("customer_phone")
+  areaId         Int       @map("area_id")
+  shopId         Int?      @map("shop_id")
+  bookingDate    DateTime  @map("booking_date") @db.Date
   notes          String?
-  isDeleted      Boolean  @default(false) @map("is_deleted")
-  idempotencyKey String?  @unique @map("idempotency_key")
-  createdBy      String   @default("system") @map("created_by")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-  area           Area     @relation(fields: [areaId], references: [id], onDelete: Restrict)
-  shop           Shop?    @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  isDeleted      Boolean   @default(false) @map("is_deleted")
+  idempotencyKey String?   @unique @map("idempotency_key")
+  createdBy      String    @default("system") @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  area           Area      @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  shop           Shop?     @relation(fields: [shopId], references: [id], onDelete: Restrict)
   sales          Sale[]
+  payments       Payment[]
 
   @@index([isDeleted, bookingDate])
   @@index([bookingDate])
@@ -207,4 +208,31 @@ model InvoiceCounter {
   lastNo Int @map("last_no")
 
   @@map("invoice_counters")
+}
+
+/// A payment received against a booking.
+///
+/// Payments are deliberately separate rows rather than a running total on the
+/// booking, because shopkeepers settle in instalments and you need to know when
+/// each one arrived. Paid / partial / unpaid is DERIVED from these rows against
+/// the booking's sale value - never stored - for the same reason profit is:
+/// a stored status is a second source of truth waiting to disagree.
+model Payment {
+  id             Int      @id @default(autoincrement())
+  bookingId      Int      @map("booking_id")
+  amount         Decimal  @db.Decimal(12, 2)
+  paidOn         DateTime @map("paid_on") @db.Date
+  /// Free text: cash, bank transfer, cheque, easypaisa...
+  method         String?
+  notes          String?
+  isDeleted      Boolean  @default(false) @map("is_deleted")
+  idempotencyKey String?  @unique @map("idempotency_key")
+  createdBy      String   @default("system") @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  booking        Booking  @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@index([bookingId, isDeleted])
+  @@index([paidOn])
+  @@map("payments")
 }

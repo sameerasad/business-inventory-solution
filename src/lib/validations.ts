@@ -181,6 +181,23 @@ export const softDeleteSchema = z.object({
     .transform((v) => (v ? v : null)),
 });
 
+/* ------------------------------------------------------------------ payments */
+
+export const createPaymentSchema = z.object({
+  bookingId: dbId("Booking"),
+  amount: nonNegativeMoney("Amount").refine((n) => n > 0, "Amount must be greater than 0"),
+  paidOn: dateOnlyString,
+  method: z
+    .string()
+    .trim()
+    .max(60, "Method cannot exceed 60 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
+  notes: optionalNotes,
+  idempotencyKey,
+});
+export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
+
 /* --------------------------------------------------------- SKU auto-generation */
 
 const STOPWORDS = new Set(["juice", "beverage", "drink", "the", "and"]);

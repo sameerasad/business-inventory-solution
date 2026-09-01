@@ -93,6 +93,7 @@ const EXPECTED_TABLES = [
   "audit_logs",
   "bookings",
   "invoice_counters",
+  "payments",
 ];
 
 async function main(): Promise<number> {
@@ -291,7 +292,7 @@ async function main(): Promise<number> {
       SELECT COUNT(*)::int AS n FROM pg_constraint
        WHERE contype = 'c' AND connamespace = 'public'::regnamespace
     `;
-    if (checkRows[0].n >= 7) {
+    if (checkRows[0].n >= 8) {
       pass(`${checkRows[0].n} CHECK constraints in place (the no-negative-stock guards)`);
     } else {
       warn(

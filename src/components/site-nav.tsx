@@ -12,6 +12,7 @@ import {
   PackagePlus,
   Receipt,
   ShoppingCart,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 
@@ -35,6 +36,7 @@ const RECORD: NavLink[] = [
 const BROWSE: NavLink[] = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { href: "/bookings", label: "Bookings", icon: FileText },
+  { href: "/receivables", label: "Receivables", icon: Wallet },
   { href: "/sales", label: "Sales", icon: Receipt },
   { href: "/batches", label: "Batches", icon: Layers },
   { href: "/products", label: "Products", icon: Boxes },

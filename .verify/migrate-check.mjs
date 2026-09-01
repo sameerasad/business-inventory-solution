@@ -65,7 +65,7 @@ if (applied.rows.length !== expectedMigrations) {
 const ok =
   code === 0 &&
   missingTables.length === 0 &&
-  checks.rows.length >= 7 &&
+  checks.rows.length >= 8 &&
   applied.rows.length === expectedMigrations;
 await db.close();
 console.log(ok ? "\nMIGRATE DEPLOY OK" : "\nMIGRATE DEPLOY FAILED");

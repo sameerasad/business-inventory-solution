@@ -118,11 +118,19 @@ const probes = [
     `INSERT INTO shops (area_id, name, updated_at)
      SELECT area_id, name, now() FROM shops LIMIT 1`,
   ],
+  [
+    "payment amount must be positive",
+    `INSERT INTO payments (booking_id, amount, paid_on, updated_at)
+     SELECT id, 0, CURRENT_DATE, now() FROM bookings LIMIT 1`,
+    // Needs a booking to attach to; suites that never create one skip it.
+    "SELECT COUNT(*)::int AS n FROM bookings",
+  ],
   ["a SKU cannot be reused", `INSERT INTO products (category_id, name, packaging_type, variant_value, sku, unit, updated_at)
      SELECT category_id, name, packaging_type, 'X', sku, unit, now() FROM products LIMIT 1`],
 ];
 
 let constraintFailures = 0;
+const skipped = [];
 
 // The UPDATE probes target batch id 1 / product id 1. If those rows are absent
 // the UPDATE matches nothing, raises no error, and would be scored as "the
@@ -140,7 +148,19 @@ if (fixture[0].b === 0 || fixture[0].p === 0 || fixture[0].s === 0) {
   );
   constraintFailures += 1;
 } else {
-  for (const [label, sql] of probes) {
+  for (const [label, sql, needs] of probes) {
+    // A probe whose fixture is absent is SKIPPED out loud. Silently passing it
+    // would be a lie; failing it would be noise, since different suites seed
+    // different things.
+    if (needs) {
+      const { rows } = await db.query(needs);
+      if ((rows[0]?.n ?? 0) === 0) {
+        skipped.push(label);
+        console.log(`  SKIP  ${label} - fixture absent in this database`);
+        continue;
+      }
+    }
+
     let blocked = false;
     let affected = null;
     try {
@@ -166,7 +186,8 @@ if (fixture[0].b === 0 || fixture[0].p === 0 || fixture[0].s === 0) {
 }
 console.log(
   constraintFailures === 0
-    ? `  ${probes.length}/${probes.length} constraint probes blocked as expected`
+    ? `  ${probes.length - skipped.length}/${probes.length - skipped.length} constraint probes blocked as expected` +
+        (skipped.length ? ` (${skipped.length} skipped: ${skipped.join(", ")})` : "")
     : `  ${constraintFailures} constraint probe(s) did NOT block`,
 );
 

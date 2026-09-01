@@ -289,6 +289,34 @@ export async function renderInvoicePdf(invoice: Invoice): Promise<Uint8Array> {
 
   ctx.y -= 62;
 
+  // Paid / Balance Due, but only when something has actually been paid - a
+  // fully unpaid invoice does not need a "Paid: Rs 0" line.
+  if (invoice.paid > 0.005) {
+    ctx.page.drawRectangle({
+      x: MARGIN + totalsLeft,
+      y: ctx.y - 26,
+      width: 200,
+      height: 44,
+      color: BAND,
+    });
+    text(ctx, "Paid", totalsLeft + 12, ctx.y + 4, { size: 9, color: MUTED });
+    text(ctx, money(invoice.paid), COL.total - 12, ctx.y + 4, { size: 9, align: "right" });
+
+    const settled = invoice.balance <= 0.005;
+    text(ctx, settled ? "PAID IN FULL" : "BALANCE DUE", totalsLeft + 12, ctx.y - 16, {
+      size: 10,
+      bold: true,
+      color: settled ? rgb(0, 0.39, 0) : rgb(0.82, 0.23, 0.23),
+    });
+    text(ctx, money(invoice.balance), COL.total - 12, ctx.y - 16, {
+      size: 11,
+      bold: true,
+      align: "right",
+      color: settled ? rgb(0, 0.39, 0) : rgb(0.82, 0.23, 0.23),
+    });
+    ctx.y -= 46;
+  }
+
   /* --------------------------------------------------------------- notes */
   if (invoice.notes) {
     if (ctx.y < MARGIN + 70) newPage(ctx);

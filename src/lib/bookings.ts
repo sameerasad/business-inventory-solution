@@ -28,6 +28,8 @@ export type BookingRow = {
   units: number;
   total: number;
   profit: number;
+  paid: number;
+  balance: number;
   createdBy: string;
   isDeleted: boolean;
 };
@@ -56,7 +58,7 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
   total: number;
   page: number;
   pageCount: number;
-  totals: { revenue: number; profit: number; units: number };
+  totals: { revenue: number; profit: number; units: number; collected: number };
 }> {
   for (const value of [filters.from, filters.to]) if (value) parseDateOnly(value);
 
@@ -80,6 +82,8 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
         COALESCE(agg.units, 0)::int                AS "units",
         COALESCE(agg.total, 0)::float8             AS "total",
         COALESCE(agg.profit, 0)::float8            AS "profit",
+        COALESCE(pay.paid, 0)::float8              AS "paid",
+        (COALESCE(agg.total, 0) - COALESCE(pay.paid, 0))::float8 AS "balance",
         b.created_by                               AS "createdBy",
         b.is_deleted                               AS "isDeleted"
       FROM bookings b
@@ -99,17 +103,26 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
         WHERE s.is_deleted = false AND bt.is_deleted = false AND s.booking_id IS NOT NULL
         GROUP BY s.booking_id
       ) agg ON agg.booking_id = b.id
+      LEFT JOIN (
+        SELECT p.booking_id, SUM(p.amount) AS paid
+        FROM payments p
+        WHERE p.is_deleted = false
+        GROUP BY p.booking_id
+      ) pay ON pay.booking_id = b.id
       ${clause}
       ORDER BY b.booking_date DESC, b.id DESC
       LIMIT ${BOOKINGS_PAGE_SIZE} OFFSET ${offset}
     `),
-    prisma.$queryRaw<{ total: number; revenue: number; profit: number; units: number }[]>(
+    prisma.$queryRaw<
+      { total: number; revenue: number; profit: number; units: number; collected: number }[]
+    >(
       Prisma.sql`
         SELECT
           COUNT(*)::int AS total,
           COALESCE(SUM(t.revenue), 0)::float8 AS revenue,
           COALESCE(SUM(t.profit), 0)::float8  AS profit,
-          COALESCE(SUM(t.units), 0)::int      AS units
+          COALESCE(SUM(t.units), 0)::int      AS units,
+          COALESCE(SUM(pay.paid), 0)::float8  AS collected
         FROM bookings b
         LEFT JOIN (
           SELECT
@@ -122,18 +135,28 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
           WHERE s.is_deleted = false AND bt.is_deleted = false AND s.booking_id IS NOT NULL
           GROUP BY s.booking_id
         ) t ON t.booking_id = b.id
+        LEFT JOIN (
+          SELECT p.booking_id, SUM(p.amount) AS paid
+          FROM payments p WHERE p.is_deleted = false
+          GROUP BY p.booking_id
+        ) pay ON pay.booking_id = b.id
         ${clause}
       `,
     ),
   ]);
 
-  const agg = summary[0] ?? { total: 0, revenue: 0, profit: 0, units: 0 };
+  const agg = summary[0] ?? { total: 0, revenue: 0, profit: 0, units: 0, collected: 0 };
   return {
     rows,
     total: agg.total,
     page,
     pageCount: Math.max(1, Math.ceil(agg.total / BOOKINGS_PAGE_SIZE)),
-    totals: { revenue: agg.revenue, profit: agg.profit, units: agg.units },
+    totals: {
+      revenue: agg.revenue,
+      profit: agg.profit,
+      units: agg.units,
+      collected: agg.collected,
+    },
   };
 }
 
@@ -165,6 +188,8 @@ export type Invoice = {
   lines: InvoiceLine[];
   subtotal: number;
   totalUnits: number;
+  paid: number;
+  balance: number;
 };
 
 /**
@@ -212,6 +237,14 @@ export async function getInvoice(bookingId: number): Promise<Invoice | null> {
     ORDER BY p.name, p.packaging_type, p.variant_value
   `);
 
+  // Payments received against this booking, for the Paid / Balance Due block.
+  const paidRows = await prisma.$queryRaw<{ paid: number }[]>(Prisma.sql`
+    SELECT COALESCE(SUM(p.amount), 0)::float8 AS paid
+    FROM payments p
+    WHERE p.booking_id = ${bookingId} AND p.is_deleted = false
+  `);
+  const paid = paidRows[0]?.paid ?? 0;
+
   const invoiceLines = lines.map<InvoiceLine>((l) => ({
     sku: l.sku,
     description: `${l.name} - ${l.packagingType} ${l.variantValue}`,
@@ -220,6 +253,8 @@ export async function getInvoice(bookingId: number): Promise<Invoice | null> {
     unitPrice: l.unitPrice,
     lineTotal: l.lineTotal,
   }));
+
+  const subtotal = invoiceLines.reduce((sum, l) => sum + l.lineTotal, 0);
 
   return {
     id: booking.id,
@@ -236,8 +271,11 @@ export async function getInvoice(bookingId: number): Promise<Invoice | null> {
     createdBy: booking.createdBy,
     isDeleted: booking.isDeleted,
     lines: invoiceLines,
-    subtotal: invoiceLines.reduce((sum, l) => sum + l.lineTotal, 0),
+    subtotal,
     totalUnits: invoiceLines.reduce((sum, l) => sum + l.quantity, 0),
+    paid,
+    // Never negative on the document, even if someone overpaid.
+    balance: Math.max(0, subtotal - paid),
   };
 }
 
@@ -282,3 +320,205 @@ export async function getBookableProducts() {
   `);
 }
 export type BookableProduct = Awaited<ReturnType<typeof getBookableProducts>>[number];
+
+/* ------------------------------------------------------------------ payments */
+
+/**
+ * Paid / partial / unpaid is DERIVED, never stored - the same rule as profit.
+ * A stored status is a second source of truth waiting to disagree with the
+ * payment rows underneath it.
+ */
+export type PaymentStatus = "unpaid" | "partial" | "paid";
+
+/** Money compares to 2 decimals; anything finer is a rounding artefact. */
+const CENT = 0.005;
+
+export function paymentStatus(total: number, paid: number): PaymentStatus {
+  // Nothing owed is settled, not unpaid. A zero-value order - every line at
+  // price 0, or a booking whose sales have all been reversed - would otherwise
+  // sit in the list claiming money is due on it.
+  if (total <= CENT) return "paid";
+  if (paid <= CENT) return "unpaid";
+  if (paid >= total - CENT) return "paid";
+  return "partial";
+}
+
+export type PaymentRow = {
+  id: number;
+  amount: number;
+  paidOn: Date;
+  method: string | null;
+  notes: string | null;
+  createdBy: string;
+  createdAt: Date;
+};
+
+/** Payment history for one booking, oldest first. */
+export async function getPayments(bookingId: number): Promise<PaymentRow[]> {
+  const rows = await prisma.payment.findMany({
+    where: { bookingId, isDeleted: false },
+    orderBy: [{ paidOn: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      amount: true,
+      paidOn: true,
+      method: true,
+      notes: true,
+      createdBy: true,
+      createdAt: true,
+    },
+  });
+  return rows.map((r) => ({ ...r, amount: Number(r.amount) }));
+}
+
+/**
+ * The money picture for one booking: what it is worth, what has come in, what
+ * is left. Used by the payment dialog and to validate a new payment.
+ */
+export async function getBookingBalance(bookingId: number): Promise<{
+  total: number;
+  paid: number;
+  balance: number;
+  status: PaymentStatus;
+} | null> {
+  const rows = await prisma.$queryRaw<{ total: number; paid: number }[]>(Prisma.sql`
+    SELECT
+      COALESCE((
+        SELECT SUM(s.sale_price * s.quantity)
+        FROM sales s
+        WHERE s.booking_id = ${bookingId} AND s.is_deleted = false
+      ), 0)::float8 AS total,
+      COALESCE((
+        SELECT SUM(p.amount)
+        FROM payments p
+        WHERE p.booking_id = ${bookingId} AND p.is_deleted = false
+      ), 0)::float8 AS paid
+  `);
+  const exists = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { id: true },
+  });
+  if (!exists) return null;
+
+  const { total, paid } = rows[0] ?? { total: 0, paid: 0 };
+  return {
+    total,
+    paid,
+    balance: Math.max(0, total - paid),
+    status: paymentStatus(total, paid),
+  };
+}
+
+/* --------------------------------------------------------------- receivables */
+
+export type ReceivableRow = {
+  id: number;
+  invoiceNo: string;
+  bookingDate: Date;
+  customerName: string | null;
+  areaName: string;
+  shopName: string | null;
+  shopPhone: string | null;
+  customerPhone: string | null;
+  total: number;
+  paid: number;
+  balance: number;
+  daysOutstanding: number;
+};
+
+/**
+ * Everything still owed, oldest first. Aging comes from the booking date, which
+ * is when the goods went out - that is the day the clock starts.
+ */
+export async function getReceivables(filters: { areaId: number | null } = { areaId: null }): Promise<{
+  rows: ReceivableRow[];
+  totals: { invoiced: number; collected: number; outstanding: number };
+  buckets: { label: string; count: number; amount: number }[];
+}> {
+  const areaClause =
+    filters.areaId != null ? Prisma.sql`AND b.area_id = ${filters.areaId}` : Prisma.empty;
+
+  const rows = await prisma.$queryRaw<ReceivableRow[]>(Prisma.sql`
+    SELECT
+      b.id                                   AS "id",
+      b.invoice_no                           AS "invoiceNo",
+      b.booking_date                         AS "bookingDate",
+      b.customer_name                        AS "customerName",
+      b.customer_phone                       AS "customerPhone",
+      a.name                                 AS "areaName",
+      sh.name                                AS "shopName",
+      sh.phone                               AS "shopPhone",
+      t.total::float8                        AS "total",
+      COALESCE(pay.paid, 0)::float8          AS "paid",
+      (t.total - COALESCE(pay.paid, 0))::float8 AS "balance",
+      (CURRENT_DATE - b.booking_date)::int   AS "daysOutstanding"
+    FROM bookings b
+    JOIN areas a ON a.id = b.area_id
+    LEFT JOIN shops sh ON sh.id = b.shop_id
+    JOIN (
+      SELECT s.booking_id, SUM(s.sale_price * s.quantity) AS total
+      FROM sales s
+      WHERE s.is_deleted = false AND s.booking_id IS NOT NULL
+      GROUP BY s.booking_id
+    ) t ON t.booking_id = b.id
+    LEFT JOIN (
+      SELECT p.booking_id, SUM(p.amount) AS paid
+      FROM payments p
+      WHERE p.is_deleted = false
+      GROUP BY p.booking_id
+    ) pay ON pay.booking_id = b.id
+    WHERE b.is_deleted = false
+      ${areaClause}
+      -- Only what is actually still owed, to the paisa.
+      AND t.total - COALESCE(pay.paid, 0) > 0.005
+    ORDER BY b.booking_date ASC, b.id ASC
+  `);
+
+  // Separate fragments per alias, rather than reusing one clause, so the column
+  // it filters on always matches the table it is filtering.
+  const invoicedArea =
+    filters.areaId != null ? Prisma.sql`AND b2.area_id = ${filters.areaId}` : Prisma.empty;
+  const collectedArea =
+    filters.areaId != null ? Prisma.sql`AND b3.area_id = ${filters.areaId}` : Prisma.empty;
+
+  const totalsRow = await prisma.$queryRaw<{ invoiced: number; collected: number }[]>(Prisma.sql`
+    SELECT
+      COALESCE((
+        SELECT SUM(s.sale_price * s.quantity)
+        FROM sales s JOIN bookings b2 ON b2.id = s.booking_id
+        WHERE s.is_deleted = false AND b2.is_deleted = false ${invoicedArea}
+      ), 0)::float8 AS invoiced,
+      COALESCE((
+        SELECT SUM(p.amount)
+        FROM payments p JOIN bookings b3 ON b3.id = p.booking_id
+        WHERE p.is_deleted = false AND b3.is_deleted = false ${collectedArea}
+      ), 0)::float8 AS collected
+  `);
+  const { invoiced, collected } = totalsRow[0] ?? { invoiced: 0, collected: 0 };
+
+  // Aging buckets, the way a collections list is normally read.
+  const edges: [string, number, number][] = [
+    ["0-7 days", 0, 7],
+    ["8-30 days", 8, 30],
+    ["31-60 days", 31, 60],
+    ["60+ days", 61, Number.MAX_SAFE_INTEGER],
+  ];
+  const buckets = edges.map(([label, lo, hi]) => {
+    const inBucket = rows.filter((r) => r.daysOutstanding >= lo && r.daysOutstanding <= hi);
+    return {
+      label,
+      count: inBucket.length,
+      amount: inBucket.reduce((sum, r) => sum + r.balance, 0),
+    };
+  });
+
+  return {
+    rows,
+    totals: {
+      invoiced,
+      collected,
+      outstanding: rows.reduce((sum, r) => sum + r.balance, 0),
+    },
+    buckets,
+  };
+}

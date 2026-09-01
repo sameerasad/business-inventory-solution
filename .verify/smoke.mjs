@@ -119,6 +119,7 @@ const NAV_LINKS = [
   "/sales/new",
   "/batches/new",
   "/bookings",
+  "/receivables",
   "/sales",
   "/batches",
   "/products",
@@ -128,6 +129,7 @@ const NAV_LINKS = [
 const pages = [
   ["/", ["Dashboard"]],
   ["/dashboard", NAV_LINKS],
+  ["/receivables", ["Receivables", "Outstanding", "Collected", "Invoiced"]],
   ["/areas", NAV_LINKS],
   ["/bookings", ["Bookings", "Invoice", "Booked value"]],
   [

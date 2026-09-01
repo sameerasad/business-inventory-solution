@@ -11,7 +11,14 @@ export function currentActor(): string {
   return process.env.DEFAULT_ACTOR?.trim() || "owner";
 }
 
-export type AuditableEntity = "batch" | "sale" | "product" | "area" | "shop" | "booking";
+export type AuditableEntity =
+  | "batch"
+  | "sale"
+  | "product"
+  | "area"
+  | "shop"
+  | "booking"
+  | "payment";
 
 type Tx = Prisma.TransactionClient | PrismaClient;
 

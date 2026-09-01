@@ -47,3 +47,15 @@ CREATE INDEX IF NOT EXISTS "batches_available_idx"
 CREATE INDEX IF NOT EXISTS "sales_live_by_date_idx"
   ON "sales" ("sale_date", "product_id", "area_id")
   WHERE "is_deleted" = false;
+
+-- payments -------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payments_amount_positive') THEN
+    ALTER TABLE "payments" ADD CONSTRAINT "payments_amount_positive" CHECK ("amount" > 0);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "payments_live_idx"
+  ON "payments" ("booking_id", "paid_on")
+  WHERE "is_deleted" = false;

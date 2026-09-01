@@ -28,19 +28,10 @@ function ok(label, cond, detail) {
 
 // The tables the app expects, and the ones this rehearsal drops. Derived
 // assertions, so adding a table to the schema cannot silently stale this file.
-const ALL_TABLES = [
-  "areas",
-  "audit_logs",
-  "batches",
-  "bookings",
-  "categories",
-  "invoice_counters",
-  "products",
-  "sales",
-  "shops",
-];
+// The tables this rehearsal deletes, reproducing the real incident. Everything
+// else is discovered from the migrated database rather than listed here, so a
+// new table cannot leave these assertions silently out of date.
 const DROPPED = ["sales", "batches", "shops", "areas", "audit_logs"];
-const SURVIVORS = ALL_TABLES.filter((t) => !DROPPED.includes(t));
 
 const db = await PGlite.create();
 const migrationsDir = path.join(process.cwd(), "prisma", "migrations");
@@ -84,6 +75,15 @@ for (const d of fs
   );
 }
 
+const { rows: discovered } = await db.query(
+  `SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name NOT LIKE '\\_prisma%'
+    ORDER BY table_name`,
+);
+const ALL_TABLES = discovered.map((r) => r.table_name);
+const SURVIVORS = ALL_TABLES.filter((t) => !DROPPED.includes(t));
+console.log(`schema has ${ALL_TABLES.length} tables; dropping ${DROPPED.length}`);
+
 const server = new PGLiteSocketServer({ db, port: PORT, host: "127.0.0.1", maxConnections: 20 });
 await server.start();
 
@@ -114,7 +114,7 @@ const tableList = async () => {
 };
 const constraintCount = async () => {
   const { rows } = await db.query(
-    `SELECT COUNT(*)::int AS n FROM pg_constraint WHERE contype = 'c' AND conname LIKE ANY (ARRAY['batches%','sales%','products%'])`,
+    `SELECT COUNT(*)::int AS n FROM pg_constraint WHERE contype = 'c' AND conname LIKE ANY (ARRAY['batches%','sales%','products%','payments%'])`,
   );
   return rows[0].n;
 };
@@ -130,7 +130,7 @@ try {
     (await tableList()).join(",") === ALL_TABLES.join(","),
     await tableList(),
   );
-  ok("7 CHECK constraints present", (await constraintCount()) === 7, await constraintCount());
+  ok("8 CHECK constraints present", (await constraintCount()) === 8, await constraintCount());
 
   console.log("\n=== 2. reproduce the damage (DROP ... CASCADE) ===");
   await db.exec(`
@@ -165,7 +165,7 @@ try {
   console.log("\n=== 5. verify recovery ===");
   const after = await tableList();
   ok(`all ${ALL_TABLES.length} tables restored`, after.join(",") === ALL_TABLES.join(","), after);
-  ok("all 7 CHECK constraints restored", (await constraintCount()) === 7, await constraintCount());
+  ok("all 8 CHECK constraints restored", (await constraintCount()) === 8, await constraintCount());
 
   const { rows: idx } = await db.query(
     `SELECT indexname FROM pg_indexes WHERE schemaname='public' AND indexname IN ('batches_available_idx','sales_live_by_date_idx') ORDER BY indexname`,

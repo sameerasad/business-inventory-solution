@@ -9,6 +9,7 @@ import { ListFilters, type FilterSpec } from "@/components/list-filters";
 import { Pagination } from "@/components/pagination";
 import { SoftDeleteButton } from "@/components/forms/soft-delete-button";
 import { WhatsAppShareDialog } from "@/components/bookings/whatsapp-share-dialog";
+import { PaymentDialog, PaymentStatusBadge } from "@/components/bookings/payment-dialog";
 import { softDeleteBookingAction } from "@/actions/bookings";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -118,7 +119,7 @@ export default async function BookingsPage({
           value={money(list.totals.profit)}
           tone={list.totals.profit < 0 ? "loss" : "gain"}
         />
-        <Tile label="Units (filtered)" value={qty(list.totals.units)} />
+        <Tile label="Collected (filtered)" value={money(list.totals.collected)} tone="gain" />
       </div>
 
       <Card className="overflow-hidden">
@@ -134,6 +135,9 @@ export default async function BookingsPage({
               <TableHead className="text-right">Units</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-right">Profit</TableHead>
+              <TableHead className="text-right">Paid</TableHead>
+              <TableHead className="text-right">Balance</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Booked by</TableHead>
               <TableHead className="text-right">Invoice</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -142,7 +146,7 @@ export default async function BookingsPage({
           <TableBody>
             {list.rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={13} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={16} className="py-10 text-center text-muted-foreground">
                   No bookings match these filters.{" "}
                   <Link href="/bookings/new" className="underline">
                     Take a booking
@@ -179,6 +183,18 @@ export default async function BookingsPage({
                   >
                     {money(row.profit)}
                   </TableCell>
+                  <TableCell className="num text-right" style={{ color: "#006300" }}>
+                    {money(row.paid)}
+                  </TableCell>
+                  <TableCell
+                    className="num text-right font-medium"
+                    style={{ color: row.balance > 0.005 ? "#d03b3b" : undefined }}
+                  >
+                    {money(row.balance)}
+                  </TableCell>
+                  <TableCell>
+                    <PaymentStatusBadge total={row.total} paid={row.paid} />
+                  </TableCell>
                   <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                     {row.createdBy}
                   </TableCell>
@@ -193,6 +209,12 @@ export default async function BookingsPage({
                         <Download className="h-3.5 w-3.5" />
                         PDF
                       </a>
+                      <PaymentDialog
+                        bookingId={row.id}
+                        invoiceNo={row.invoiceNo}
+                        total={row.total}
+                        paid={row.paid}
+                      />
                       <WhatsAppShareDialog
                         bookingId={row.id}
                         invoiceNo={row.invoiceNo}
