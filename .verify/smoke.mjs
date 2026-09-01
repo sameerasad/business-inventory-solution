@@ -110,8 +110,25 @@ const YEAR = new Date().getFullYear();
 // Markers include the *rendered value* of pre-selected dropdowns: Radix leaves a
 // pre-selected trigger blank unless the label is passed explicitly, so these
 // assertions are what stop that regressing.
+// Every page must be reachable from the nav, on every page. A link silently
+// missing from the nav is indistinguishable from the page not existing - which
+// is exactly what an overflowing single-row nav used to cause.
+const NAV_LINKS = [
+  "/dashboard",
+  "/bookings/new",
+  "/sales/new",
+  "/batches/new",
+  "/bookings",
+  "/sales",
+  "/batches",
+  "/products",
+  "/areas",
+].map((href) => `href="${href}"`);
+
 const pages = [
   ["/", ["Dashboard"]],
+  ["/dashboard", NAV_LINKS],
+  ["/areas", NAV_LINKS],
   ["/bookings", ["Bookings", "Invoice", "Booked value"]],
   [
     "/bookings/new",
