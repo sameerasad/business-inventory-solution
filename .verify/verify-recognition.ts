@@ -11,15 +11,18 @@ import { createBatchAction } from "@/actions/batches";
 import { createBookingAction, softDeleteBookingAction } from "@/actions/bookings";
 import { createSaleAction } from "@/actions/sales";
 import { deletePaymentAction, recordPaymentAction } from "@/actions/payments";
+import { createBookerAction } from "@/actions/bookers";
 import {
   getAwaitingPayment,
   getCashByArea,
+  getCashByBooker,
   getCashByCategory,
   getCashByPackaging,
   getCashKpis,
   getCashMonthlyTrend,
+  type CashScope,
 } from "@/lib/recognition";
-import { getStockLevels, type Scope } from "@/lib/queries";
+import { getStockLevels } from "@/lib/queries";
 import { yearRange } from "@/lib/dates";
 
 let checks = 0;
@@ -43,8 +46,13 @@ function fd(v: Record<string, string>): FormData {
 const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
 
 const YEAR = 2026;
-const F = { year: YEAR, categoryId: null, areaId: null };
-const scope = (): Scope => ({ ...yearRange(YEAR), categoryId: null, areaId: null });
+const F = { year: YEAR, categoryId: null, areaId: null, bookerId: null };
+const scope = (): CashScope => ({
+  ...yearRange(YEAR),
+  categoryId: null,
+  areaId: null,
+  bookerId: null,
+});
 
 async function main() {
   const mango = await prisma.product.findUniqueOrThrow({ where: { sku: "MNG-BTL-250" } });
@@ -268,6 +276,95 @@ async function main() {
     "profit is capped with it (10 x 250 = 2,500)",
     near(k6.year.profit, 900 + 2500),
     k6.year.profit,
+  );
+
+  section("the booker dimension");
+  // A booker takes one order; the counter sales already recorded above have no
+  // booker at all, which is what the "no booker" bucket has to account for.
+  const madeBooker = await createBookerAction(emptyActionState, fd({ name: "Rec Booker" }));
+  ok("booker created", madeBooker.ok, madeBooker);
+  const recBooker = await prisma.booker.findFirstOrThrow({ where: { name: "Rec Booker" } });
+
+  const attributed = await createBookingAction(
+    emptyActionState,
+    fd({
+      bookerId: String(recBooker.id),
+      customerName: "Attributed",
+      areaId: String(area.id),
+      bookingDate: `${YEAR}-08-01`,
+      lines: JSON.stringify([{ productId: mango.id, quantity: 4, unitPrice: 500 }]),
+      idempotencyKey: "rec-booker-1",
+    }),
+  );
+  ok("their booking was taken", attributed.ok, attributed);
+  const attributedBooking = await prisma.booking.findFirstOrThrow({
+    where: { idempotencyKey: "rec-booker-1" },
+  });
+
+  const before = await getCashKpis(F);
+  const byBookerBefore = await getCashByBooker(scope());
+  ok(
+    "unpaid, so nothing is credited to them yet",
+    !byBookerBefore.some((r) => r.label === "Rec Booker"),
+    byBookerBefore.map((r) => r.label),
+  );
+
+  const halfPaid = await recordPaymentAction(
+    emptyActionState,
+    fd({
+      bookingId: String(attributedBooking.id),
+      amount: "1000",
+      paidOn: `${YEAR}-08-10`,
+      idempotencyKey: "rec-booker-pay",
+    }),
+  );
+  ok("half of the 2,000 order is paid", halfPaid.ok, halfPaid);
+
+  const byBooker = await getCashByBooker(scope());
+  const mine = byBooker.find((r) => r.label === "Rec Booker");
+  ok("they now have a row", mine != null, byBooker.map((r) => r.label));
+  ok("credited only the 1,000 received", near(mine?.revenue ?? 0, 1000), mine?.revenue);
+
+  const noBooker = byBooker.find((r) => r.label === "Counter sale (no booker)");
+  ok("counter sales are their own row, not dropped", noBooker != null, byBooker.map((r) => r.label));
+  ok(
+    "the by-booker rows still add up to total revenue",
+    near(
+      byBooker.reduce((t, r) => t + r.revenue, 0),
+      before.year.revenue + 1000,
+    ),
+    [byBooker.reduce((t, r) => t + r.revenue, 0), before.year.revenue + 1000],
+  );
+
+  const filtered = await getCashKpis({ ...F, bookerId: recBooker.id });
+  ok("filtering by booker isolates their 1,000", near(filtered.year.revenue, 1000), filtered.year.revenue);
+  ok(
+    "and their profit on it (1,000/2,000 of 4 x 300 margin)",
+    near(filtered.year.profit, 600),
+    filtered.year.profit,
+  );
+  ok(
+    "delivered units follow the same filter (4 packs)",
+    filtered.year.units === 4,
+    filtered.year.units,
+  );
+  ok(
+    "the remaining 1,000 shows as awaiting payment for them",
+    near(await getAwaitingPayment({ areaId: null, bookerId: recBooker.id }), 1000),
+    await getAwaitingPayment({ areaId: null, bookerId: recBooker.id }),
+  );
+  const trendFiltered = await getCashMonthlyTrend({ ...F, bookerId: recBooker.id });
+  ok(
+    "and it lands in August, the month it was paid",
+    near(trendFiltered[7].revenue, 1000) && trendFiltered.every((m, i) => i === 7 || m.revenue === 0),
+    trendFiltered.filter((m) => m.revenue > 0),
+  );
+
+  const unattributedFilter = await getCashKpis({ ...F, bookerId: 999999 });
+  ok(
+    "an unknown booker yields nothing rather than everything",
+    near(unattributedFilter.year.revenue, 0),
+    unattributedFilter.year.revenue,
   );
 
   section("awaiting payment never goes negative");

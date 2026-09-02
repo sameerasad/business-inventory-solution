@@ -20,6 +20,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/forms/form-bits";
+import Link from "next/link";
+import { Users } from "lucide-react";
+
+type AreaBooker = { id: number; name: string; isActive: boolean };
 
 /**
  * Areas and their shops. Sales are grouped by area on the dashboard, and a shop
@@ -29,7 +33,13 @@ import { SubmitButton } from "@/components/forms/form-bits";
  * Both are soft-deleted and both refuse to disappear while sales point at them -
  * removing one would leave those sales without the label the dashboard groups by.
  */
-export function AreaManager({ areas }: { areas: AreaWithShops[] }) {
+export function AreaManager({
+  areas,
+  bookersByArea,
+}: {
+  areas: AreaWithShops[];
+  bookersByArea: Map<number, AreaBooker[]>;
+}) {
   return (
     <div className="space-y-5">
       <Card>
@@ -50,7 +60,7 @@ export function AreaManager({ areas }: { areas: AreaWithShops[] }) {
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {areas.map((area) => (
-            <AreaCard key={area.id} area={area} />
+            <AreaCard key={area.id} area={area} bookers={bookersByArea.get(area.id) ?? []} />
           ))}
         </div>
       )}
@@ -58,12 +68,13 @@ export function AreaManager({ areas }: { areas: AreaWithShops[] }) {
   );
 }
 
-function AreaCard({ area }: { area: AreaWithShops }) {
+function AreaCard({ area, bookers }: { area: AreaWithShops; bookers: AreaBooker[] }) {
   const [renaming, setRenaming] = useState(false);
 
   return (
     <Card>
       <CardContent className="space-y-4 p-5">
+        <BookerLine bookers={bookers} />
         <div className="flex items-start justify-between gap-3">
           {renaming ? (
             <div className="flex-1">
@@ -359,5 +370,38 @@ function DeleteButton({
         <span className="max-w-[220px] text-right text-xs text-destructive">{state.message}</span>
       ) : null}
     </form>
+  );
+}
+
+/**
+ * Who covers this area.
+ *
+ * An area with nobody assigned is a hole in the plan, so it says so plainly
+ * instead of showing an empty space that reads as "fine".
+ */
+function BookerLine({ bookers }: { bookers: AreaBooker[] }) {
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+      <Users className="h-3.5 w-3.5 text-muted-foreground" />
+      {bookers.length === 0 ? (
+        <>
+          <span className="text-muted-foreground">No booker assigned.</span>
+          <Link href="/bookers" className="font-medium underline">
+            Assign one
+          </Link>
+        </>
+      ) : (
+        <>
+          <span className="text-muted-foreground">Covered by</span>
+          {bookers.map((b, i) => (
+            <span key={b.id} className={b.isActive ? "font-medium" : "text-muted-foreground"}>
+              {b.name}
+              {!b.isActive ? " (retired)" : ""}
+              {i < bookers.length - 1 ? "," : ""}
+            </span>
+          ))}
+        </>
+      )}
+    </p>
   );
 }

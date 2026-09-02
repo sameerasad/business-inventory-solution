@@ -57,6 +57,7 @@ const RECOGNITION = Prisma.sql`
   capped_payments AS (
     SELECT
       p.booking_id,
+      bk.booker_id,
       p.paid_on,
       LEAST(
         p.amount,
@@ -82,6 +83,7 @@ const RECOGNITION = Prisma.sql`
     -- 1. Cash received against a booking, spread across its lines pro rata.
     SELECT
       cp.paid_on                                                            AS on_date,
+      cp.booker_id                                                          AS booker_id,
       s.product_id                                                          AS product_id,
       s.area_id                                                             AS area_id,
       s.shop_id                                                             AS shop_id,
@@ -95,8 +97,10 @@ const RECOGNITION = Prisma.sql`
     UNION ALL
 
     -- 2. Counter sales: paid at the till, so recognised in full on the day.
+    --    Nobody books a counter sale, so there is no booker to credit it to.
     SELECT
       s.sale_date,
+      NULL::int,
       s.product_id,
       s.area_id,
       s.shop_id,
@@ -118,13 +122,23 @@ function d(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function where(scope: Scope): Prisma.Sql {
+/**
+ * The cash queries take one dimension the accrual queries in queries.ts do not:
+ * the booker. It is a separate type rather than an optional field on Scope so a
+ * bookerId can never be passed to a query that would silently ignore it.
+ */
+export type CashScope = Scope & { bookerId: number | null };
+
+function where(scope: CashScope): Prisma.Sql {
   const parts: Prisma.Sql[] = [
     Prisma.sql`r.on_date >= ${d(scope.start)}::date`,
     Prisma.sql`r.on_date < ${d(scope.end)}::date`,
   ];
   if (scope.categoryId != null) parts.push(Prisma.sql`p.category_id = ${scope.categoryId}`);
   if (scope.areaId != null) parts.push(Prisma.sql`r.area_id = ${scope.areaId}`);
+  // A counter sale has no booker, so filtering by one correctly excludes them:
+  // that money was not booked by anybody.
+  if (scope.bookerId != null) parts.push(Prisma.sql`r.booker_id = ${scope.bookerId}`);
   return Prisma.sql`WHERE ${Prisma.join(parts, " AND ")}`;
 }
 
@@ -136,7 +150,7 @@ const FROM_RECOGNISED = Prisma.sql`
 
 /* ----------------------------------------------------------------- KPI totals */
 
-async function totals(scope: Scope): Promise<{ revenue: number; profit: number }> {
+async function totals(scope: CashScope): Promise<{ revenue: number; profit: number }> {
   const rows = await prisma.$queryRaw<{ revenue: number; profit: number }[]>(Prisma.sql`
     ${RECOGNITION}
     SELECT ${REVENUE} AS revenue, ${PROFIT} AS profit
@@ -152,7 +166,7 @@ async function totals(scope: Scope): Promise<{ revenue: number; profit: number }
  * Deliberately not on the cash basis: a part-paid order did not ship 44.4 packs.
  * The dashboard labels this separately for exactly that reason.
  */
-async function deliveredUnits(scope: Scope): Promise<number> {
+async function deliveredUnits(scope: CashScope): Promise<number> {
   const parts: Prisma.Sql[] = [
     Prisma.sql`s.is_deleted = false`,
     Prisma.sql`b.is_deleted = false`,
@@ -161,12 +175,16 @@ async function deliveredUnits(scope: Scope): Promise<number> {
   ];
   if (scope.categoryId != null) parts.push(Prisma.sql`p.category_id = ${scope.categoryId}`);
   if (scope.areaId != null) parts.push(Prisma.sql`s.area_id = ${scope.areaId}`);
+  // Counter sales have no booking and therefore no booker, so a booker filter
+  // excludes them here too - consistent with the revenue figures beside it.
+  if (scope.bookerId != null) parts.push(Prisma.sql`bk.booker_id = ${scope.bookerId}`);
 
   const rows = await prisma.$queryRaw<{ units: number }[]>(Prisma.sql`
     SELECT COALESCE(SUM(s.quantity), 0)::int AS units
     FROM sales s
     JOIN batches b ON b.id = s.batch_id
     JOIN products p ON p.id = s.product_id
+    LEFT JOIN bookings bk ON bk.id = s.booking_id
     WHERE ${Prisma.join(parts, " AND ")}
   `);
   return rows[0]?.units ?? 0;
@@ -186,8 +204,9 @@ export async function getCashKpis(filters: {
   year: number;
   categoryId: number | null;
   areaId: number | null;
+  bookerId: number | null;
 }): Promise<CashKpis> {
-  const { year, categoryId, areaId } = filters;
+  const { year, categoryId, areaId, bookerId } = filters;
   const isCurrentYear = year === currentYear();
   const yr = yearRange(year);
   const monthIndex0 = isCurrentYear ? currentMonthIndex0() : 11;
@@ -195,13 +214,15 @@ export async function getCashKpis(filters: {
   const dr = dayRange(todayUtc());
 
   const [yearT, monthT, todayT, yearUnits, monthUnits, todayUnits, awaiting] = await Promise.all([
-    totals({ ...yr, categoryId, areaId }),
-    totals({ ...mr, categoryId, areaId }),
-    isCurrentYear ? totals({ ...dr, categoryId, areaId }) : Promise.resolve({ revenue: 0, profit: 0 }),
-    deliveredUnits({ ...yr, categoryId, areaId }),
-    deliveredUnits({ ...mr, categoryId, areaId }),
-    isCurrentYear ? deliveredUnits({ ...dr, categoryId, areaId }) : Promise.resolve(0),
-    getAwaitingPayment({ areaId }),
+    totals({ ...yr, categoryId, areaId, bookerId }),
+    totals({ ...mr, categoryId, areaId, bookerId }),
+    isCurrentYear
+      ? totals({ ...dr, categoryId, areaId, bookerId })
+      : Promise.resolve({ revenue: 0, profit: 0 }),
+    deliveredUnits({ ...yr, categoryId, areaId, bookerId }),
+    deliveredUnits({ ...mr, categoryId, areaId, bookerId }),
+    isCurrentYear ? deliveredUnits({ ...dr, categoryId, areaId, bookerId }) : Promise.resolve(0),
+    getAwaitingPayment({ areaId, bookerId }),
   ]);
 
   return {
@@ -219,9 +240,14 @@ export async function getCashKpis(filters: {
  * revenue sitting in the pipeline. Capped the same way, so an overpaid or
  * broken booking cannot push it negative.
  */
-export async function getAwaitingPayment(filters: { areaId: number | null }): Promise<number> {
+export async function getAwaitingPayment(filters: {
+  areaId: number | null;
+  bookerId?: number | null;
+}): Promise<number> {
   const areaClause =
     filters.areaId != null ? Prisma.sql`AND bk.area_id = ${filters.areaId}` : Prisma.empty;
+  const bookerClause =
+    filters.bookerId != null ? Prisma.sql`AND bk.booker_id = ${filters.bookerId}` : Prisma.empty;
 
   const rows = await prisma.$queryRaw<{ awaiting: number }[]>(Prisma.sql`
     SELECT COALESCE(SUM(GREATEST(0, t.total - COALESCE(pay.paid, 0))), 0)::float8 AS awaiting
@@ -238,7 +264,7 @@ export async function getAwaitingPayment(filters: { areaId: number | null }): Pr
       FROM payments p WHERE p.is_deleted = false
       GROUP BY p.booking_id
     ) pay ON pay.booking_id = bk.id
-    WHERE bk.is_deleted = false ${areaClause}
+    WHERE bk.is_deleted = false ${areaClause} ${bookerClause}
   `);
   return rows[0]?.awaiting ?? 0;
 }
@@ -251,11 +277,13 @@ export async function getCashMonthlyTrend(filters: {
   year: number;
   categoryId: number | null;
   areaId: number | null;
+  bookerId: number | null;
 }): Promise<CashMonthPoint[]> {
-  const scope: Scope = {
+  const scope: CashScope = {
     ...yearRange(filters.year),
     categoryId: filters.categoryId,
     areaId: filters.areaId,
+    bookerId: filters.bookerId,
   };
   const rows = await prisma.$queryRaw<{ month: number; revenue: number; profit: number }[]>(
     Prisma.sql`
@@ -281,7 +309,7 @@ export async function getCashMonthlyTrend(filters: {
 /* ----------------------------------------------------------------- breakdowns */
 
 async function breakdown(
-  scope: Scope,
+  scope: CashScope,
   groupExpr: Prisma.Sql,
   extraJoins?: Prisma.Sql,
   limit?: number,
@@ -312,7 +340,7 @@ async function breakdown(
   }));
 }
 
-export function getCashByPackaging(scope: Scope) {
+export function getCashByPackaging(scope: CashScope) {
   return breakdown(scope, Prisma.sql`p.packaging_type`);
 }
 
@@ -326,16 +354,16 @@ function variantSortKey(label: string): number {
   return value * (unit === "l" ? 1000 : 1) * scale;
 }
 
-export async function getCashByVariant(scope: Scope): Promise<Breakdown[]> {
+export async function getCashByVariant(scope: CashScope): Promise<Breakdown[]> {
   const rows = await breakdown(scope, Prisma.sql`p.variant_value`);
   return rows.sort((a, b) => variantSortKey(a.label) - variantSortKey(b.label));
 }
 
-export function getCashByProductName(scope: Scope) {
+export function getCashByProductName(scope: CashScope) {
   return breakdown(scope, Prisma.sql`p.name`);
 }
 
-export function getCashByCategory(scope: Scope) {
+export function getCashByCategory(scope: CashScope) {
   return breakdown(
     scope,
     Prisma.sql`c.name`,
@@ -343,15 +371,31 @@ export function getCashByCategory(scope: Scope) {
   );
 }
 
-export function getCashByArea(scope: Scope) {
+export function getCashByArea(scope: CashScope) {
   return breakdown(scope, Prisma.sql`a.name`, Prisma.sql`JOIN areas a ON a.id = r.area_id`);
 }
 
-export function getCashByShop(scope: Scope, limit = 10) {
+export function getCashByShop(scope: CashScope, limit = 10) {
   return breakdown(
     scope,
     Prisma.sql`COALESCE(sh.name, ${"Direct Sale (no shop)"})`,
     Prisma.sql`LEFT JOIN shops sh ON sh.id = r.shop_id`,
+    limit,
+  );
+}
+
+/**
+ * Cash revenue and profit per booker.
+ *
+ * Counter sales have no booker, so rather than dropping them - which would make
+ * this chart disagree with every other total on the page - they appear as their
+ * own row, the same way a shopless sale does in the shop chart.
+ */
+export function getCashByBooker(scope: CashScope, limit?: number) {
+  return breakdown(
+    scope,
+    Prisma.sql`COALESCE(bo.name, ${"Counter sale (no booker)"})`,
+    Prisma.sql`LEFT JOIN bookers bo ON bo.id = r.booker_id`,
     limit,
   );
 }

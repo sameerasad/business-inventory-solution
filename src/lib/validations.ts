@@ -354,3 +354,52 @@ const bookerFields = {
 
 export const createBookerSchema = z.object(bookerFields);
 export const updateBookerSchema = z.object({ id: dbId("Booker"), ...bookerFields });
+
+/**
+ * Territory assignment: the whole set of areas for one booker, replaced at once.
+ *
+ * Sent as a JSON array rather than repeated checkbox fields so an empty
+ * selection is unambiguous - an unchecked checkbox group posts nothing at all,
+ * which is indistinguishable from "the form never rendered" and would silently
+ * skip clearing a territory.
+ */
+export const setBookerAreasSchema = z.object({
+  bookerId: dbId("Booker"),
+  areaIds: z
+    .string()
+    .trim()
+    .min(1, "Area selection is required")
+    .transform((raw, ctx) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Area selection was malformed",
+        });
+        return z.NEVER;
+      }
+      if (!Array.isArray(parsed)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Area selection was malformed",
+        });
+        return z.NEVER;
+      }
+      const ids: number[] = [];
+      for (const value of parsed) {
+        const n = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+        if (!Number.isInteger(n) || n <= 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Area selection was malformed",
+          });
+          return z.NEVER;
+        }
+        ids.push(n);
+      }
+      // The same area twice is a UI slip, not an error worth blocking on.
+      return [...new Set(ids)];
+    }),
+});

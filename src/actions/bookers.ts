@@ -9,6 +9,7 @@ import {
   createBookerSchema,
   failure,
   idOnlySchema,
+  setBookerAreasSchema,
   success,
   updateBookerSchema,
   zodFieldErrors,
@@ -17,6 +18,7 @@ import {
 
 function revalidateBookers() {
   revalidatePath("/bookers");
+  revalidatePath("/areas");
   revalidatePath("/bookings");
   revalidatePath("/bookings/new");
   revalidatePath("/dashboard");
@@ -192,4 +194,74 @@ export async function deleteBookerAction(
   });
   revalidateBookers();
   return success(`Booker "${booker.name}" removed.`);
+}
+
+/**
+ * Replace a booker's territory with exactly the areas given.
+ *
+ * Replace, not add: the form shows the full list with the current areas ticked,
+ * so what it posts IS the new territory. Doing it in one transaction means a
+ * half-applied territory can never be read by the reports.
+ *
+ * Assignment is deliberately advisory. It does not stop the booker taking an
+ * order in an area that is not theirs - covering for someone off sick is normal
+ * - it just means that order shows up as off-territory in the reports.
+ */
+export async function setBookerAreasAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = setBookerAreasSchema.safeParse({
+    bookerId: formData.get("bookerId") ?? "",
+    areaIds: formData.get("areaIds") ?? "",
+  });
+  if (!parsed.success) {
+    return failure("Could not save the territory.", zodFieldErrors(parsed.error));
+  }
+  const { bookerId, areaIds } = parsed.data;
+
+  const booker = await prisma.booker.findUnique({
+    where: { id: bookerId },
+    select: { id: true, name: true, isDeleted: true },
+  });
+  if (!booker || booker.isDeleted) return failure("Booker not found.");
+
+  // Silently dropping an id that names a deleted area would look like the save
+  // failed, so the mismatch is reported instead.
+  const areas = areaIds.length
+    ? await prisma.area.findMany({
+        where: { id: { in: areaIds }, isDeleted: false },
+        select: { id: true },
+      })
+    : [];
+  if (areas.length !== areaIds.length) {
+    return failure("One of those areas no longer exists. Reload the page and try again.");
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.bookerArea.deleteMany({ where: { bookerId } });
+      if (areas.length > 0) {
+        await tx.bookerArea.createMany({
+          data: areas.map((a) => ({ bookerId, areaId: a.id })),
+        });
+      }
+      await writeAudit(tx, {
+        entityType: "booker",
+        entityId: bookerId,
+        action: "booker.areas_assigned",
+        payload: { areaIds: areas.map((a) => a.id) },
+      });
+    });
+  } catch (error) {
+    console.error("setBookerAreasAction failed", error);
+    return failure("Could not save the territory. Please try again.");
+  }
+
+  revalidateBookers();
+  return success(
+    areas.length === 0
+      ? `${booker.name} now has no areas assigned.`
+      : `${booker.name} now covers ${areas.length} area${areas.length === 1 ? "" : "s"}.`,
+  );
 }

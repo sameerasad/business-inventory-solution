@@ -140,7 +140,17 @@ const pages = [
   ["/bookings", ["Bookings", "Invoice", "Booked value", "Booker", ">All bookers</span>"]],
   [
     "/bookers",
-    ["Bookers", "Booked value", "Collected", "Manage bookers", "Add booker", "No bookers yet"],
+    [
+      "Bookers",
+      "Booked value",
+      "Collected",
+      "Territory",
+      "Manage bookers",
+      "Add booker",
+      "No bookers yet",
+      // With no bookers, every area is unassigned and the page must say so.
+      "Nobody is assigned to",
+    ],
   ],
   [
     "/bookings/new",
@@ -169,6 +179,8 @@ const pages = [
       `>${YEAR}</span>`,
       ">All categories</span>",
       ">All areas</span>",
+      ">All bookers</span>",
+      "Revenue &amp; profit by booker",
       "Bottle",
       "Tetra Pack",
       "Downtown",
@@ -179,6 +191,8 @@ const pages = [
   ["/dashboard?year=2020", ["Dashboard", `>${YEAR}</span>`]],
   ["/dashboard?year=notanumber", ["Dashboard", `>${YEAR}</span>`]],
   ["/dashboard?category=999999", ["Dashboard", ">All categories</span>"]],
+  ["/dashboard?booker=999999", ["Dashboard", ">All bookers</span>"]],
+  ["/dashboard?booker=notanumber", ["Dashboard", ">All bookers</span>"]],
   ["/dashboard?period=month", ["Revenue &amp; profit by area"]],
   ["/batches/new", ["Receive stock", "Unit cost", "Received date", "SKU", "Select a category"]],
   [
@@ -192,7 +206,18 @@ const pages = [
     ],
   ],
   ["/products", ["Products", "MNG-BTL-250", "Current stock", "CHO-BAR-10", "Stock value at cost"]],
-  ["/areas", ["Areas &amp; Shops", "Downtown", "Central Mart", "New area"]],
+  [
+    "/areas",
+    [
+      "Areas &amp; Shops",
+      "Downtown",
+      "Central Mart",
+      "New area",
+      // Coverage is shown per area, and an unassigned one links to the fix.
+      "No booker assigned",
+      'href="/bookers"',
+    ],
+  ],
   ["/batches", ["Batches", "Remaining", "Unit cost", "MNG-BTL-250", ">All products</span>"]],
   ["/batches?status=active", ["Batches", ">Active (stock left)</span>"]],
   ["/sales", ["Sales", "Profit", "Margin", "Direct sale", ">All areas</span>", "Source", "Counter sale"]],

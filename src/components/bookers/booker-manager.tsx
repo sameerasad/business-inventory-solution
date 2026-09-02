@@ -17,6 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { SubmitButton } from "@/components/forms/form-bits";
+import { TerritoryEditor, type AreaChoice } from "@/components/bookers/territory-editor";
 
 export type BookerAdmin = {
   id: number;
@@ -26,6 +27,8 @@ export type BookerAdmin = {
   notes: string | null;
   isActive: boolean;
   bookings: number;
+  /** Their assigned areas - the territory they are responsible for. */
+  areas: AreaChoice[];
 };
 
 /**
@@ -37,7 +40,7 @@ export type BookerAdmin = {
  * mistake, and is refused the moment they have a booking - otherwise the
  * performance history would lose the attribution it is made of.
  */
-export function BookerManager({ bookers }: { bookers: BookerAdmin[] }) {
+export function BookerManager({ bookers, areas }: { bookers: BookerAdmin[]; areas: AreaChoice[] }) {
   const [adding, setAdding] = useState(false);
 
   return (
@@ -68,7 +71,7 @@ export function BookerManager({ bookers }: { bookers: BookerAdmin[] }) {
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
           {bookers.map((b) => (
-            <BookerCard key={b.id} booker={b} />
+            <BookerCard key={b.id} booker={b} areas={areas} />
           ))}
         </div>
       )}
@@ -76,7 +79,7 @@ export function BookerManager({ bookers }: { bookers: BookerAdmin[] }) {
   );
 }
 
-function BookerCard({ booker }: { booker: BookerAdmin }) {
+function BookerCard({ booker, areas }: { booker: BookerAdmin; areas: AreaChoice[] }) {
   const [editing, setEditing] = useState(false);
 
   return (
@@ -92,33 +95,42 @@ function BookerCard({ booker }: { booker: BookerAdmin }) {
             onCancel={() => setEditing(false)}
           />
         ) : (
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="flex items-center gap-2 text-sm font-semibold">
-                <span className="truncate">{booker.name}</span>
-                {booker.code ? (
-                  <span className="font-mono text-xs text-muted-foreground">{booker.code}</span>
+          <div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 text-sm font-semibold">
+                  <span className="truncate">{booker.name}</span>
+                  {booker.code ? (
+                    <span className="font-mono text-xs text-muted-foreground">{booker.code}</span>
+                  ) : null}
+                  {!booker.isActive ? <Badge variant="outline">Retired</Badge> : null}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {[booker.phone, `${booker.bookings} booking${booker.bookings === 1 ? "" : "s"}`]
+                    .filter(Boolean)
+                    .join("  ·  ")}
+                </p>
+                {booker.notes ? (
+                  <p className="mt-1 text-xs text-muted-foreground">{booker.notes}</p>
                 ) : null}
-                {!booker.isActive ? <Badge variant="outline">Retired</Badge> : null}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {[booker.phone, `${booker.bookings} booking${booker.bookings === 1 ? "" : "s"}`]
-                  .filter(Boolean)
-                  .join("  ·  ")}
-              </p>
-              {booker.notes ? (
-                <p className="mt-1 text-xs text-muted-foreground">{booker.notes}</p>
-              ) : null}
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </Button>
+                <ToggleActive booker={booker} />
+                <DeleteBooker booker={booker} />
+              </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1">
-              <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-                <Pencil className="h-3.5 w-3.5" />
-                Edit
-              </Button>
-              <ToggleActive booker={booker} />
-              <DeleteBooker booker={booker} />
-            </div>
+            <TerritoryEditor
+              bookerId={booker.id}
+              bookerName={booker.name}
+              areas={areas}
+              assigned={booker.areas}
+            />
           </div>
         )}
       </CardContent>
@@ -183,7 +195,12 @@ function BookerForm({
             disabled={isPending}
           />
         </Field>
-        <Field label="Phone" htmlFor={`bk-phone-${id}`} error={state.fieldErrors.phone} hint="Optional">
+        <Field
+          label="Phone"
+          htmlFor={`bk-phone-${id}`}
+          error={state.fieldErrors.phone}
+          hint="Optional"
+        >
           <Input
             id={`bk-phone-${id}`}
             name="phone"
@@ -219,10 +236,7 @@ function BookerForm({
 }
 
 function ToggleActive({ booker }: { booker: BookerAdmin }) {
-  const [state, formAction, isPending] = useActionState(
-    toggleBookerActiveAction,
-    emptyActionState,
-  );
+  const [state, formAction, isPending] = useActionState(toggleBookerActiveAction, emptyActionState);
   return (
     <form action={formAction}>
       <input type="hidden" name="id" value={booker.id} />

@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/table";
 import { dateOnly, money, qty } from "@/lib/format";
 import { currentYear } from "@/lib/dates";
-import { getBookerPerformance, getUncoveredAreas } from "@/lib/bookers";
+import { getBookerPerformance, getUnassignedAreas, getUncoveredAreas } from "@/lib/bookers";
 import { getCashYears } from "@/lib/recognition";
 import { prisma } from "@/lib/db";
 
@@ -63,9 +63,10 @@ export default async function BookersPage({
   ]);
   const year = yearParam && years.includes(yearParam) ? yearParam : (years[0] ?? currentYear());
 
-  const [perf, uncovered, bookers] = await Promise.all([
+  const [perf, uncovered, unassigned, bookers] = await Promise.all([
     getBookerPerformance({ year, areaId: parseId(areaParam) }),
     getUncoveredAreas({ year }),
+    getUnassignedAreas(),
     prisma.booker.findMany({
       where: { isDeleted: false },
       orderBy: [{ isActive: "desc" }, { name: "asc" }],
@@ -77,6 +78,10 @@ export default async function BookersPage({
         notes: true,
         isActive: true,
         _count: { select: { bookings: true } },
+        areas: {
+          orderBy: { area: { name: "asc" } },
+          select: { area: { select: { id: true, name: true } } },
+        },
       },
     }),
   ]);
@@ -106,7 +111,7 @@ export default async function BookersPage({
     <div>
       <PageHeader
         title="Bookers"
-        description={`Who took which orders, and what came of them. Booking an order is the easy half - the columns that matter most are Collected and Overdue. Figures are for ${year}.`}
+        description={`Who took which orders, and what came of them. Booking an order is the easy half - the columns that matter most are Collected and Overdue. Territory is areas visited out of areas assigned. Figures are for ${year}.`}
       />
 
       <Suspense
@@ -136,6 +141,13 @@ export default async function BookersPage({
         </Alert>
       ) : null}
 
+      {unassigned.length > 0 ? (
+        <Alert tone="info" className="mb-4">
+          <strong>Nobody is assigned to {unassigned.length} area(s):</strong>{" "}
+          {unassigned.join(", ")}. Assign them to a booker below so it is clear who is responsible.
+        </Alert>
+      ) : null}
+
       {uncovered.length > 0 ? (
         <Alert tone="error" className="mb-4">
           <strong>No orders at all from {uncovered.length} area(s) in {year}:</strong>{" "}
@@ -158,7 +170,7 @@ export default async function BookersPage({
               <TableHead className="text-right">Outstanding</TableHead>
               <TableHead className="text-right">Overdue 30d+</TableHead>
               <TableHead className="text-right">Days to settle</TableHead>
-              <TableHead className="text-right">Areas</TableHead>
+              <TableHead className="text-right">Territory</TableHead>
               <TableHead className="text-right">Shops</TableHead>
               <TableHead className="text-right">Units</TableHead>
               <TableHead>Last order</TableHead>
@@ -225,7 +237,36 @@ export default async function BookersPage({
                   <TableCell className="num text-right text-muted-foreground">
                     {r.avgDaysToSettle == null ? "—" : `${r.avgDaysToSettle.toFixed(0)}d`}
                   </TableCell>
-                  <TableCell className="num text-right">{r.areasCovered}</TableCell>
+                  {/* Visited out of assigned is the number that matters: four
+                      areas on paper and one visited is the whole story. With no
+                      territory set there is nothing to compare against, so it
+                      falls back to a plain count of areas reached. */}
+                  <TableCell className="num text-right">
+                    {r.assignedAreas === 0 ? (
+                      <span title="No territory assigned yet">
+                        {r.areasCovered}
+                        <span className="ml-1 text-muted-foreground">/ —</span>
+                      </span>
+                    ) : (
+                      <span
+                        title={`Took orders in ${r.assignedVisited} of the ${r.assignedAreas} area(s) assigned to them`}
+                        className={
+                          r.assignedVisited < r.assignedAreas ? "text-destructive" : undefined
+                        }
+                      >
+                        {r.assignedVisited}/{r.assignedAreas}
+                      </span>
+                    )}
+                    {r.offTerritoryValue > 0.005 ? (
+                      <Badge
+                        variant="outline"
+                        className="ml-1.5 font-normal"
+                        title={`${money(r.offTerritoryValue)} booked outside their assigned areas`}
+                      >
+                        off
+                      </Badge>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="num text-right">{r.shopsCovered}</TableCell>
                   <TableCell className="num text-right text-muted-foreground">
                     {qty(r.units)}
@@ -261,7 +302,14 @@ export default async function BookersPage({
       </Card>
 
       <h2 className="mb-3 text-sm font-semibold">Manage bookers</h2>
-      <BookerManager bookers={bookers.map((b) => ({ ...b, bookings: b._count.bookings }))} />
+      <BookerManager
+        areas={areas}
+        bookers={bookers.map(({ _count, areas: assigned, ...b }) => ({
+          ...b,
+          bookings: _count.bookings,
+          areas: assigned.map((x) => x.area),
+        }))}
+      />
     </div>
   );
 }

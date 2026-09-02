@@ -25,12 +25,19 @@ export function DashboardFilters({
   years,
   categories,
   areas,
+  bookers,
   selected,
 }: {
   years: number[];
   categories: { id: number; name: string }[];
   areas: { id: number; name: string }[];
-  selected: { year: number; categoryId: number | null; areaId: number | null };
+  bookers: { id: number; name: string }[];
+  selected: {
+    year: number;
+    categoryId: number | null;
+    areaId: number | null;
+    bookerId: number | null;
+  };
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -57,6 +64,10 @@ export function DashboardFilters({
     selected.areaId == null
       ? "All areas"
       : (areas.find((a) => a.id === selected.areaId)?.name ?? "All areas");
+  const bookerLabel =
+    selected.bookerId == null
+      ? "All bookers"
+      : (bookers.find((b) => b.id === selected.bookerId)?.name ?? "All bookers");
 
   return (
     <div className="mb-5 flex flex-wrap items-end gap-3 rounded-lg border bg-card p-3">
@@ -110,6 +121,26 @@ export function DashboardFilters({
             {areas.map((a) => (
               <SelectItem key={a.id} value={String(a.id)}>
                 {a.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="w-[190px] space-y-1.5">
+        <Label htmlFor="filter-booker">Booker</Label>
+        <Select
+          value={selected.bookerId == null ? ALL : String(selected.bookerId)}
+          onValueChange={(v) => setParam("booker", v)}
+        >
+          <SelectTrigger id="filter-booker" aria-label="Booker">
+            <SelectValueLabel label={bookerLabel} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All bookers</SelectItem>
+            {bookers.map((b) => (
+              <SelectItem key={b.id} value={String(b.id)}>
+                {b.name}
               </SelectItem>
             ))}
           </SelectContent>

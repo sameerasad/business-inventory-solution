@@ -55,7 +55,7 @@ export function BookingForm({
 }: {
   products: BookableProduct[];
   areas: AreaOption[];
-  bookers: { id: number; name: string; code: string | null }[];
+  bookers: { id: number; name: string; code: string | null; areaIds: number[] }[];
 }) {
   const [state, formAction, isPending] = useActionState(createBookingAction, emptyActionState);
   const { key: idempotencyKey, rotate } = useIdempotencyKey();
@@ -91,7 +91,21 @@ export function BookingForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
+  const selectedBooker = bookers.find((b) => String(b.id) === bookerId) ?? null;
   const selectedArea = areas.find((a) => String(a.id) === areaId) ?? null;
+
+  // Territory is advisory: covering for someone off sick is normal, so an
+  // out-of-territory order is flagged rather than blocked. It only means
+  // anything once the booker actually has areas assigned.
+  const offTerritory =
+    selectedBooker != null &&
+    selectedBooker.areaIds.length > 0 &&
+    selectedArea != null &&
+    !selectedBooker.areaIds.includes(selectedArea.id);
+  const territoryNames =
+    selectedBooker == null
+      ? []
+      : areas.filter((a) => selectedBooker.areaIds.includes(a.id)).map((a) => a.name);
   const shopOptions = useMemo(() => {
     if (!selectedArea) return [];
     const extra = addedShops
@@ -210,7 +224,9 @@ export function BookingForm({
               hint={
                 bookers.length === 0
                   ? "No bookers yet - add them on the Bookers page to track performance."
-                  : "Who took this order. Drives the Bookers report."
+                  : territoryNames.length > 0
+                    ? `Covers ${territoryNames.join(", ")}.`
+                    : "Who took this order. Drives the Bookers report."
               }
             >
               <Select
@@ -264,7 +280,17 @@ export function BookingForm({
 
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Area" htmlFor="area" required error={state.fieldErrors.areaId}>
+            <Field
+              label="Area"
+              htmlFor="area"
+              required
+              error={state.fieldErrors.areaId}
+              hint={
+                offTerritory
+                  ? `Outside ${selectedBooker!.name}'s areas. This still saves - it is reported as off-territory.`
+                  : undefined
+              }
+            >
               <Select
                 value={areaId}
                 disabled={isPending}

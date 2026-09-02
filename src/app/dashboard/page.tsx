@@ -15,9 +15,12 @@ import { CHART } from "@/components/charts/theme";
 import { Alert } from "@/components/ui/alert";
 import { money, MONTH_LABELS } from "@/lib/format";
 import { currentMonthIndex0, currentYear, monthRange, yearRange } from "@/lib/dates";
-import { getCategories, type Scope } from "@/lib/queries";
+import { getCategories } from "@/lib/queries";
+import type { CashScope } from "@/lib/recognition";
+import { getActiveBookers } from "@/lib/bookers";
 import {
   getCashByArea,
+  getCashByBooker,
   getCashByCategory,
   getCashByPackaging,
   getCashByProductName,
@@ -50,12 +53,19 @@ export default async function DashboardPage({
 }) {
   const sp = await searchParams;
 
-  const [years, categories, areaRows] = await Promise.all([
+  const [years, categories, areaRows, bookerRows] = await Promise.all([
     getCashYears(),
     getCategories(),
     prisma.area.findMany({
       where: { isDeleted: false },
       orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    // Retired bookers stay selectable here: last year's figures are still
+    // theirs, and hiding them would make a past year unexplainable.
+    prisma.booker.findMany({
+      where: { isDeleted: false },
+      orderBy: [{ isActive: "desc" }, { name: "asc" }],
       select: { id: true, name: true },
     }),
   ]);
@@ -64,17 +74,23 @@ export default async function DashboardPage({
   const year = yearParam && years.includes(yearParam) ? yearParam : (years[0] ?? currentYear());
   const categoryId = parseId(sp.category);
   const areaId = parseId(sp.area);
+  const bookerId = parseId(sp.booker);
   const period: "year" | "month" = sp.period === "month" ? "month" : "year";
 
-  const filters = { year, categoryId, areaId };
-  const yearScope: Scope = { ...yearRange(year), categoryId, areaId };
+  const filters = { year, categoryId, areaId, bookerId };
+  const yearScope: CashScope = {
+    ...yearRange(year),
+    categoryId,
+    areaId,
+    bookerId,
+  };
 
   // The area / shop charts can be narrowed to a single month. For a past year
   // "this month" is meaningless, so that toggle uses December of that year.
   const monthIndex0 = year === currentYear() ? currentMonthIndex0() : 11;
-  const geoScope: Scope =
+  const geoScope: CashScope =
     period === "month"
-      ? { ...monthRange(year, monthIndex0), categoryId, areaId }
+      ? { ...monthRange(year, monthIndex0), categoryId, areaId, bookerId }
       : yearScope;
   const geoLabel = period === "month" ? `${MONTH_LABELS[monthIndex0]} ${year}` : String(year);
 
@@ -83,23 +99,29 @@ export default async function DashboardPage({
   // an explicit filter always wins.
   const juiceCategoryId = categories.find((c) => c.name === JUICE_CATEGORY_NAME)?.id ?? null;
   const flavorCategoryId = categoryId ?? juiceCategoryId;
-  const flavorScope: Scope = { ...yearScope, categoryId: flavorCategoryId };
+  const flavorScope: CashScope = { ...yearScope, categoryId: flavorCategoryId };
   const flavorCategoryName =
     categories.find((c) => c.id === flavorCategoryId)?.name ?? "all categories";
 
-  const [kpis, trend, packaging, variants, flavors, byArea, byShop, byCategory] = await Promise.all([
-    getCashKpis(filters),
-    getCashMonthlyTrend(filters),
-    getCashByPackaging(yearScope),
-    getCashByVariant(yearScope),
-    getCashByProductName(flavorScope),
-    getCashByArea(geoScope),
-    getCashByShop(geoScope, 10),
-    getCashByCategory(yearScope),
-  ]);
+  const [kpis, trend, packaging, variants, flavors, byArea, byShop, byCategory, byBooker] =
+    await Promise.all([
+      getCashKpis(filters),
+      getCashMonthlyTrend(filters),
+      getCashByPackaging(yearScope),
+      getCashByVariant(yearScope),
+      getCashByProductName(flavorScope),
+      getCashByArea(geoScope),
+      getCashByShop(geoScope, 10),
+      getCashByCategory(yearScope),
+      // Unfiltered by booker on purpose: a chart comparing bookers is useless
+      // when narrowed to one, so it always shows the whole field.
+      getCashByBooker({ ...yearScope, bookerId: null }),
+    ]);
 
   const hasAnyData = kpis.year.revenue > 0 || trend.some((m) => m.revenue > 0);
+  const isFiltered = categoryId != null || areaId != null || bookerId != null;
   const selectedAreaName = areaRows.find((a) => a.id === areaId)?.name ?? null;
+  const selectedBookerName = bookerRows.find((b) => b.id === bookerId)?.name ?? null;
   const trendLegend = [
     { color: CHART.revenue, label: "Revenue" },
     { color: CHART.profit, label: "Profit" },
@@ -111,7 +133,7 @@ export default async function DashboardPage({
         title="Dashboard"
         description={`Revenue and profit for ${year}${
           selectedAreaName ? ` in ${selectedAreaName}` : ""
-        }, counted when the money arrives. A delivered order counts only once it is paid - partly paid orders count in proportion, dated by the payment. Units are what physically went out.`}
+        }${selectedBookerName ? `, booked by ${selectedBookerName}` : ""}, counted when the money arrives. A delivered order counts only once it is paid - partly paid orders count in proportion, dated by the payment. Units are what physically went out.`}
       />
 
       <Suspense fallback={<FilterBarSkeleton />}>
@@ -119,15 +141,27 @@ export default async function DashboardPage({
           years={years}
           categories={categories}
           areas={areaRows}
-          selected={{ year, categoryId, areaId }}
+          bookers={bookerRows}
+          selected={{ year, categoryId, areaId, bookerId }}
         />
       </Suspense>
 
       {!hasAnyData ? (
         <Alert tone="info" className="mb-5">
-          No money received in {year} yet. Bookings count once they are paid - record a payment on
-          the <strong>Bookings</strong> page - and a counter sale on <strong>New Sale</strong> counts
-          straight away.
+          {/* With a filter on, "nothing received" is almost always the filter
+              rather than the business, and saying so saves a wild goose chase. */}
+          {isFiltered ? (
+            <>
+              Nothing was received in {year} matching these filters. Clear them to see the whole
+              picture.
+            </>
+          ) : (
+            <>
+              No money received in {year} yet. Bookings count once they are paid - record a payment
+              on the <strong>Bookings</strong> page - and a counter sale on{" "}
+              <strong>New Sale</strong> counts straight away.
+            </>
+          )}
         </Alert>
       ) : null}
 
@@ -219,6 +253,16 @@ export default async function DashboardPage({
             height={290}
           >
             <RevenueProfitBars data={byArea} labelWidth={112} />
+          </ChartShell>
+
+          <ChartShell
+            title="Revenue &amp; profit by booker"
+            description={`Whose orders the money came from, ${year}. Counted when it was paid, so a booker who sells hard and collects slowly sits lower here than on the Bookers page.`}
+            action={<ChartLegend items={trendLegend} />}
+            isEmpty={byBooker.length === 0}
+            height={290}
+          >
+            <RevenueProfitBars data={byBooker} labelWidth={128} />
           </ChartShell>
 
           <ChartShell

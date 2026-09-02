@@ -41,6 +41,7 @@ model Area {
   shops     Shop[]
   sales     Sale[]
   bookings  Booking[]
+  bookers   BookerArea[]
 
   @@index([isDeleted])
   @@map("areas")
@@ -256,7 +257,27 @@ model Booker {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   bookings  Booking[]
+  /// Territory: the areas this booker is responsible for.
+  areas     BookerArea[]
 
   @@index([isDeleted, isActive])
   @@map("bookers")
+}
+
+/// Which areas a booker is responsible for - their territory.
+///
+/// Many-to-many on purpose: a booker covers several areas, and a large area is
+/// sometimes split between two bookers. Assignment is who SHOULD be selling
+/// there; the bookings say who actually did, and the gap between the two is the
+/// point of tracking it.
+model BookerArea {
+  bookerId   Int      @map("booker_id")
+  areaId     Int      @map("area_id")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+  booker     Booker   @relation(fields: [bookerId], references: [id], onDelete: Cascade)
+  area       Area     @relation(fields: [areaId], references: [id], onDelete: Cascade)
+
+  @@id([bookerId, areaId])
+  @@index([areaId])
+  @@map("booker_areas")
 }

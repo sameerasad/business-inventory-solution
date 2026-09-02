@@ -9,13 +9,16 @@ import { recordPaymentAction } from "@/actions/payments";
 import {
   createBookerAction,
   deleteBookerAction,
+  setBookerAreasAction,
   toggleBookerActiveAction,
   updateBookerAction,
 } from "@/actions/bookers";
 import {
   getActiveBookers,
+  getAreaCoverage,
   getBookerCoverage,
   getBookerPerformance,
+  getUnassignedAreas,
   getUncoveredAreas,
 } from "@/lib/bookers";
 import { getBookingList } from "@/lib/bookings";
@@ -279,6 +282,175 @@ async function main() {
   ok("booked value drops by 4,500", near(after.bookedValue, before.bookedValue - 4500), after.bookedValue);
   ok("collection rate recomputes to 100%", near(after.collectionRate ?? 0, 100), after.collectionRate);
 
+  section("territory: assigning areas");
+  const south = await prisma.area.findFirstOrThrow({ where: { name: "South Zone" } });
+
+  ok(
+    "nothing is assigned to begin with",
+    (await getActiveBookers()).every((b) => b.areaIds.length === 0),
+  );
+  const allUnassigned = await getUnassignedAreas();
+  ok("so every area reports as unassigned", allUnassigned.length >= 4, allUnassigned);
+
+  const assign1 = await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: String(imran.id), areaIds: JSON.stringify([downtown.id]) }),
+  );
+  ok("Imran is assigned Downtown", assign1.ok, assign1);
+  ok(
+    "the booking form now knows his territory",
+    (await getActiveBookers()).find((b) => b.id === imran.id)?.areaIds.join() ===
+      String(downtown.id),
+  );
+  ok("Downtown is no longer unassigned", !(await getUnassignedAreas()).includes("Downtown"));
+
+  let perfT = await getBookerPerformance({ year: YEAR, areaId: null });
+  const tImran = perfT.rows.find((r) => r.id === imran.id)!;
+  ok("assigned areas = 1", tImran.assignedAreas === 1, tImran.assignedAreas);
+  ok("and he visited it", tImran.assignedVisited === 1, tImran.assignedVisited);
+  ok("nothing off-territory", near(tImran.offTerritoryValue, 0), tImran.offTerritoryValue);
+
+  section("territory: work outside it is flagged, not blocked");
+  // Bilal booked in Downtown AND North Zone. Assign him Downtown only.
+  const assign2 = await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: String(bilal.id), areaIds: JSON.stringify([downtown.id]) }),
+  );
+  ok("Bilal is assigned Downtown only", assign2.ok, assign2);
+
+  perfT = await getBookerPerformance({ year: YEAR, areaId: null });
+  let tBilal = perfT.rows.find((r) => r.id === bilal.id)!;
+  ok(
+    "his North Zone order reads as off-territory",
+    near(tBilal.offTerritoryValue, 9000),
+    tBilal.offTerritoryValue,
+  );
+  ok(
+    "visited 1 of his 1 assigned area",
+    tBilal.assignedVisited === 1 && tBilal.assignedAreas === 1,
+    tBilal,
+  );
+  ok("but areasCovered still counts both", tBilal.areasCovered === 2, tBilal.areasCovered);
+  ok(
+    "and his booked value is untouched by any of it",
+    near(tBilal.bookedValue, 18000),
+    tBilal.bookedValue,
+  );
+
+  const widened = await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: String(bilal.id), areaIds: JSON.stringify([downtown.id, north.id]) }),
+  );
+  ok("widening his territory to both areas saves", widened.ok, widened);
+  perfT = await getBookerPerformance({ year: YEAR, areaId: null });
+  tBilal = perfT.rows.find((r) => r.id === bilal.id)!;
+  ok("off-territory drops to zero", near(tBilal.offTerritoryValue, 0), tBilal.offTerritoryValue);
+  ok("visited 2 of 2", tBilal.assignedVisited === 2 && tBilal.assignedAreas === 2, tBilal);
+
+  section("territory: assigned but never visited is the gap worth seeing");
+  const three = await setBookerAreasAction(
+    emptyActionState,
+    fd({
+      bookerId: String(bilal.id),
+      areaIds: JSON.stringify([downtown.id, north.id, south.id]),
+    }),
+  );
+  ok("South Zone added to his territory", three.ok, three);
+  perfT = await getBookerPerformance({ year: YEAR, areaId: null });
+  tBilal = perfT.rows.find((r) => r.id === bilal.id)!;
+  ok("3 assigned, 2 visited", tBilal.assignedAreas === 3 && tBilal.assignedVisited === 2, tBilal);
+  ok(
+    "South Zone is assigned yet still has no orders - a different problem from being unassigned",
+    !(await getUnassignedAreas()).includes("South Zone") &&
+      (await getUncoveredAreas({ year: YEAR })).includes("South Zone"),
+  );
+
+  section("territory: replace and clear");
+  const replaced = await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: String(bilal.id), areaIds: JSON.stringify([north.id]) }),
+  );
+  ok("saving replaces the whole set rather than adding to it", replaced.ok, replaced);
+  ok(
+    "only North Zone remains",
+    (await prisma.bookerArea.count({ where: { bookerId: bilal.id } })) === 1,
+  );
+  const cleared = await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: String(bilal.id), areaIds: "[]" }),
+  );
+  ok("an empty selection clears the territory", cleared.ok, cleared);
+  ok("no rows left", (await prisma.bookerArea.count({ where: { bookerId: bilal.id } })) === 0);
+  perfT = await getBookerPerformance({ year: YEAR, areaId: null });
+  tBilal = perfT.rows.find((r) => r.id === bilal.id)!;
+  ok(
+    "with nothing assigned, off-territory reports 0 rather than everything",
+    near(tBilal.offTerritoryValue, 0),
+    tBilal.offTerritoryValue,
+  );
+
+  const dupes = await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: String(bilal.id), areaIds: JSON.stringify([north.id, north.id]) }),
+  );
+  ok("the same area sent twice is deduped, not an error", dupes.ok, dupes);
+  ok("one row", (await prisma.bookerArea.count({ where: { bookerId: bilal.id } })) === 1);
+
+  const bogus = await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: String(bilal.id), areaIds: JSON.stringify([999999]) }),
+  );
+  ok("an area that does not exist is refused", !bogus.ok, bogus);
+  ok(
+    "and the existing territory is left alone",
+    (await prisma.bookerArea.count({ where: { bookerId: bilal.id } })) === 1,
+  );
+  const malformed = await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: String(bilal.id), areaIds: "not json" }),
+  );
+  ok("malformed input is refused", !malformed.ok, malformed);
+  const unknownBooker = await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: "999999", areaIds: JSON.stringify([north.id]) }),
+  );
+  ok("so is an unknown booker", !unknownBooker.ok, unknownBooker);
+
+  section("territory: the area's point of view");
+  const coverage2 = await getAreaCoverage({ year: YEAR });
+  ok("every live area has a row", coverage2.length >= 4, coverage2.length);
+  const dtRow = coverage2.find((c) => c.areaName === "Downtown")!;
+  ok("Downtown names Imran", dtRow.bookers.some((b) => b.id === imran.id), dtRow.bookers);
+  ok(
+    "Bilal is no longer on Downtown after the replace",
+    !dtRow.bookers.some((b) => b.id === bilal.id),
+    dtRow.bookers,
+  );
+  ok("Downtown's activity is counted", dtRow.bookings >= 1 && dtRow.value > 0, dtRow);
+  const onlineRow = coverage2.find((c) => c.areaName === "Online")!;
+  ok(
+    "an area with nobody assigned reports an empty list",
+    onlineRow.bookers.length === 0,
+    onlineRow,
+  );
+  ok("and no activity", onlineRow.bookings === 0 && near(onlineRow.value, 0), onlineRow);
+
+  section("territory: a removed booker stops covering their areas");
+  const temp = await createBookerAction(emptyActionState, fd({ name: "Temp Cover" }));
+  ok("temp booker created", temp.ok, temp);
+  const tempBooker = await prisma.booker.findFirstOrThrow({ where: { name: "Temp Cover" } });
+  await setBookerAreasAction(
+    emptyActionState,
+    fd({ bookerId: String(tempBooker.id), areaIds: JSON.stringify([south.id]) }),
+  );
+  ok("South Zone is covered by them", !(await getUnassignedAreas()).includes("South Zone"));
+  const removedTemp = await deleteBookerAction(emptyActionState, fd({ id: String(tempBooker.id) }));
+  ok("they are removed", removedTemp.ok, removedTemp);
+  ok(
+    "South Zone reads as unassigned again",
+    (await getUnassignedAreas()).includes("South Zone"),
+    await getUnassignedAreas(),
+  );
   console.log(`\n${checks - failures}/${checks} booker checks passed`);
   if (failures > 0) process.exitCode = 1;
 }
