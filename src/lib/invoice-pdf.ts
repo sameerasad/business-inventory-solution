@@ -2,6 +2,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf
 
 import type { Invoice } from "@/lib/bookings";
 import { dateOnly, money, qty } from "@/lib/format";
+import { business } from "@/lib/business";
 
 /**
  * Renders an invoice to a real PDF.
@@ -15,16 +16,8 @@ import { dateOnly, money, qty } from "@/lib/format";
  * and never unit cost or profit.
  */
 
-/** Your own details, printed at the top. Override in .env. */
-function seller() {
-  return {
-    name: process.env.BUSINESS_NAME?.trim() || "Your Business Name",
-    address: process.env.BUSINESS_ADDRESS?.trim() || "",
-    phone: process.env.BUSINESS_PHONE?.trim() || "",
-    email: process.env.BUSINESS_EMAIL?.trim() || "",
-    taxId: process.env.BUSINESS_TAX_ID?.trim() || "",
-  };
-}
+/** Your own details, printed at the top. Same source as the site header. */
+const seller = business;
 
 /**
  * The invoice bills in packs, whatever the product record calls its unit

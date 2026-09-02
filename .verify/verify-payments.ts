@@ -278,7 +278,7 @@ async function main() {
   ok('a part-paid invoice says "BALANCE DUE"', partPdf.includes("BALANCE DUE"), partPdf.slice(0, 200));
 
   section("bookings list carries the money picture");
-  const list = await getBookingList({ from: null, to: null, areaId: null, q: null, page: 1 });
+  const list = await getBookingList({ from: null, to: null, areaId: null, bookerId: null, q: null, page: 1 });
   const row = list.rows.find((r) => r.id === booking.id)!;
   ok("row total", Math.abs(row.total - TOTAL) < 0.005, row.total);
   ok("row paid", Math.abs(row.paid - 25000) < 0.005, row.paid);

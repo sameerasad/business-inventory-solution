@@ -51,13 +51,18 @@ function blankLine(): Line {
 export function BookingForm({
   products,
   areas,
+  bookers,
 }: {
   products: BookableProduct[];
   areas: AreaOption[];
+  bookers: { id: number; name: string; code: string | null }[];
 }) {
   const [state, formAction, isPending] = useActionState(createBookingAction, emptyActionState);
   const { key: idempotencyKey, rotate } = useIdempotencyKey();
 
+  // Remembered per browser: a booker enters order after order as themselves,
+  // so re-picking their own name every time is pure friction.
+  const [bookerId, setBookerId] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [areaId, setAreaId] = useState("");
@@ -75,6 +80,7 @@ export function BookingForm({
     if (state.ok) {
       // A booker takes one order after another; clear the order but keep the
       // area so the next entry is quicker.
+      // bookerId deliberately survives: the same person takes the next order.
       setCustomerName("");
       setCustomerPhone("");
       setNotes("");
@@ -154,6 +160,7 @@ export function BookingForm({
     <form action={formAction} className="space-y-5">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <input type="hidden" name="areaId" value={areaId} />
+      <input type="hidden" name="bookerId" value={bookerId} />
       <input type="hidden" name="shopId" value={shopId === NO_SHOP ? "" : shopId} />
       <input type="hidden" name="lines" value={linesPayload} />
 
@@ -194,6 +201,36 @@ export function BookingForm({
                 disabled={isPending}
                 required
               />
+            </Field>
+
+            <Field
+              label="Booker"
+              htmlFor="booker"
+              error={state.fieldErrors.bookerId}
+              hint={
+                bookers.length === 0
+                  ? "No bookers yet - add them on the Bookers page to track performance."
+                  : "Who took this order. Drives the Bookers report."
+              }
+            >
+              <Select
+                value={bookerId}
+                disabled={isPending || bookers.length === 0}
+                onValueChange={setBookerId}
+              >
+                <SelectTrigger id="booker">
+                  <SelectValue
+                    placeholder={bookers.length === 0 ? "No bookers added" : "Select a booker"}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {bookers.map((b) => (
+                    <SelectItem key={b.id} value={String(b.id)}>
+                      {b.code ? `${b.name} (${b.code})` : b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Field>
 
             <Field

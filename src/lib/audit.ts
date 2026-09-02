@@ -18,7 +18,8 @@ export type AuditableEntity =
   | "area"
   | "shop"
   | "booking"
-  | "payment";
+  | "payment"
+  | "booker";
 
 type Tx = Prisma.TransactionClient | PrismaClient;
 

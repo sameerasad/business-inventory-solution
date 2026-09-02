@@ -7,12 +7,17 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { getBookableProducts } from "@/lib/bookings";
 import { getAreasWithShops } from "@/lib/queries";
+import { getActiveBookers } from "@/lib/bookers";
 
 export const metadata: Metadata = { title: "New Booking" };
 export const dynamic = "force-dynamic";
 
 export default async function NewBookingPage() {
-  const [products, areas] = await Promise.all([getBookableProducts(), getAreasWithShops()]);
+  const [products, areas, bookers] = await Promise.all([
+    getBookableProducts(),
+    getAreasWithShops(),
+    getActiveBookers(),
+  ]);
 
   const inStock = products.filter((p) => p.available > 0);
   const blocked = products.length === 0 ? "products" : areas.length === 0 ? "areas" : null;
@@ -56,7 +61,7 @@ export default async function NewBookingPage() {
               first.
             </Alert>
           ) : null}
-          <BookingForm products={products} areas={areas} />
+          <BookingForm products={products} areas={areas} bookers={bookers} />
         </>
       )}
     </div>

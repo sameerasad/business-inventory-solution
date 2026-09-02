@@ -181,6 +181,8 @@ model Booking {
   shareToken     String?   @unique @map("share_token")
   customerName   String?   @map("customer_name")
   customerPhone  String?   @map("customer_phone")
+  /// Who took the order. Nullable because bookings predate the bookers module.
+  bookerId       Int?      @map("booker_id")
   areaId         Int       @map("area_id")
   shopId         Int?      @map("shop_id")
   bookingDate    DateTime  @map("booking_date") @db.Date
@@ -194,6 +196,7 @@ model Booking {
   shop           Shop?     @relation(fields: [shopId], references: [id], onDelete: Restrict)
   sales          Sale[]
   payments       Payment[]
+  booker         Booker?   @relation(fields: [bookerId], references: [id])
 
   @@index([isDeleted, bookingDate])
   @@index([bookingDate])
@@ -235,4 +238,25 @@ model Payment {
   @@index([bookingId, isDeleted])
   @@index([paidOn])
   @@map("payments")
+}
+
+/// A person who takes orders. Bookings are attributed to one, which is what
+/// makes per-booker performance measurable at all - `created_by` was only ever a
+/// text label from an environment variable.
+model Booker {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  /// Optional short code / employee number used on paperwork.
+  code      String?
+  phone     String?
+  notes     String?
+  /// Retired bookers keep all their history but drop out of the booking picker.
+  isActive  Boolean   @default(true) @map("is_active")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  bookings  Booking[]
+
+  @@index([isDeleted, isActive])
+  @@map("bookers")
 }

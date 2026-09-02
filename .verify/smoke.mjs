@@ -124,18 +124,35 @@ const NAV_LINKS = [
   "/sales",
   "/batches",
   "/products",
+  "/bookers",
   "/areas",
 ].map((href) => `href="${href}"`);
 
 const pages = [
   ["/", ["Dashboard"]],
   ["/dashboard", NAV_LINKS],
+  // The header brand is the business name from BUSINESS_NAME, not a hardcoded
+  // one, and it must not wrap: the subtitle is the tell that the two-tier
+  // header rendered rather than the old single squeezed row.
+  ["/dashboard", ["Inventory &amp; profit", 'href="/dashboard"']],
   ["/receivables", ["Receivables", "Outstanding", "Collected", "Invoiced"]],
   ["/areas", NAV_LINKS],
-  ["/bookings", ["Bookings", "Invoice", "Booked value"]],
+  ["/bookings", ["Bookings", "Invoice", "Booked value", "Booker", ">All bookers</span>"]],
+  [
+    "/bookers",
+    ["Bookers", "Booked value", "Collected", "Manage bookers", "Add booker", "No bookers yet"],
+  ],
   [
     "/bookings/new",
-    ["New booking", "Customer &amp; date", "Customer name", "Add line", "Order total"],
+    [
+      "New booking",
+      "Customer &amp; date",
+      "Customer name",
+      "Add line",
+      "Order total",
+      // With no bookers seeded the picker must say so rather than look broken.
+      "No bookers added",
+    ],
   ],
   [
     "/dashboard",

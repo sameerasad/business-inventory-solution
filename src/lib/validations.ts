@@ -310,6 +310,7 @@ const bookingLinesFromJson = z
   });
 
 export const createBookingSchema = z.object({
+  bookerId: optionalDbId,
   // Optional: a walk-in or cash sale often has no name worth recording.
   customerName: z
     .string()
@@ -331,3 +332,25 @@ export const createBookingSchema = z.object({
   idempotencyKey,
 });
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;
+
+/* ------------------------------------------------------------------- bookers */
+
+const bookerFields = {
+  name: shortName("Booker name", 120),
+  code: z
+    .string()
+    .trim()
+    .max(30, "Code cannot exceed 30 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
+  phone: z
+    .string()
+    .trim()
+    .max(40, "Phone cannot exceed 40 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
+  notes: optionalNotes,
+};
+
+export const createBookerSchema = z.object(bookerFields);
+export const updateBookerSchema = z.object({ id: dbId("Booker"), ...bookerFields });

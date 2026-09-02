@@ -51,14 +51,20 @@ export default async function BookingsPage({
   const fromParam = first(sp.from);
   const toParam = first(sp.to);
   const areaParam = first(sp.area);
+  const bookerParam = first(sp.booker);
   const pageParam = Number.parseInt(first(sp.page) ?? "1", 10);
 
   const from = fromParam && isDateOnly(fromParam) ? fromParam : null;
   const to = toParam && isDateOnly(toParam) ? toParam : null;
   const invalidRange = from != null && to != null && from > to;
 
-  const [areas, list] = await Promise.all([
+  const [areas, bookers, list] = await Promise.all([
     prisma.area.findMany({
+      where: { isDeleted: false },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.booker.findMany({
       where: { isDeleted: false },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
@@ -67,6 +73,7 @@ export default async function BookingsPage({
       from: invalidRange ? null : from,
       to: invalidRange ? null : to,
       areaId: parseId(areaParam),
+      bookerId: parseId(bookerParam),
       q: null,
       page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1,
     }),
@@ -83,6 +90,15 @@ export default async function BookingsPage({
       allLabel: "All areas",
       width: "w-[180px]",
       options: areas.map((a) => ({ value: String(a.id), label: a.name })),
+    },
+    {
+      kind: "select",
+      key: "booker",
+      label: "Booker",
+      value: bookerParam ?? "all",
+      allLabel: "All bookers",
+      width: "w-[180px]",
+      options: bookers.map((b) => ({ value: String(b.id), label: b.name })),
     },
   ];
 
@@ -138,7 +154,7 @@ export default async function BookingsPage({
               <TableHead className="text-right">Paid</TableHead>
               <TableHead className="text-right">Balance</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Booked by</TableHead>
+              <TableHead>Booker</TableHead>
               <TableHead className="text-right">Invoice</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -195,8 +211,10 @@ export default async function BookingsPage({
                   <TableCell>
                     <PaymentStatusBadge total={row.total} paid={row.paid} />
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                    {row.createdBy}
+                  <TableCell className="whitespace-nowrap text-xs">
+                    {row.bookerName ?? (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1.5">

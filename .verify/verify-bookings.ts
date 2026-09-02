@@ -181,7 +181,7 @@ async function main() {
   );
 
   section("bookings listing reconciles with the dashboard");
-  const list = await getBookingList({ from: null, to: null, areaId: null, q: null, page: 1 });
+  const list = await getBookingList({ from: null, to: null, areaId: null, bookerId: null, q: null, page: 1 });
   ok("1 booking listed", list.total === 1, list.total);
   const row = list.rows[0];
   ok("listed total matches the order value", Math.abs(row.total - expectedRevenue) < 0.005, row.total);
@@ -426,7 +426,7 @@ async function main() {
     Math.abs(kpisAfter.year.revenue - 120) < 0.005,
     kpisAfter.year.revenue,
   );
-  const listAfter = await getBookingList({ from: null, to: null, areaId: null, q: null, page: 1 });
+  const listAfter = await getBookingList({ from: null, to: null, areaId: null, bookerId: null, q: null, page: 1 });
   ok("cancelled booking hidden from the list", listAfter.total === 2, listAfter.total);
   const cancelledInvoice = await getInvoice(booking.id);
   ok("cancelled booking still has an invoice record", cancelledInvoice !== null);

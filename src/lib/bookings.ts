@@ -10,6 +10,7 @@ export type BookingListFilters = {
   from: string | null;
   to: string | null;
   areaId: number | null;
+  bookerId: number | null;
   q: string | null;
   page: number;
 };
@@ -24,6 +25,7 @@ export type BookingRow = {
   shopName: string | null;
   shopPhone: string | null;
   shareToken: string | null;
+  bookerName: string | null;
   lineCount: number;
   units: number;
   total: number;
@@ -39,6 +41,7 @@ function bookingWhere(filters: BookingListFilters): Prisma.Sql {
   if (filters.from) parts.push(Prisma.sql`b.booking_date >= ${filters.from}::date`);
   if (filters.to) parts.push(Prisma.sql`b.booking_date <= ${filters.to}::date`);
   if (filters.areaId != null) parts.push(Prisma.sql`b.area_id = ${filters.areaId}`);
+  if (filters.bookerId != null) parts.push(Prisma.sql`b.booker_id = ${filters.bookerId}`);
   if (filters.q) {
     const like = `%${filters.q}%`;
     parts.push(
@@ -78,6 +81,7 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
         a.name                                     AS "areaName",
         sh.name                                    AS "shopName",
         sh.phone                                   AS "shopPhone",
+        bo.name                                    AS "bookerName",
         COALESCE(agg.line_count, 0)::int           AS "lineCount",
         COALESCE(agg.units, 0)::int                AS "units",
         COALESCE(agg.total, 0)::float8             AS "total",
@@ -89,6 +93,7 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
       FROM bookings b
       JOIN areas a ON a.id = b.area_id
       LEFT JOIN shops sh ON sh.id = b.shop_id
+      LEFT JOIN bookers bo ON bo.id = b.booker_id
       LEFT JOIN (
         SELECT
           s.booking_id,

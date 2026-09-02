@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db";
 import { currentActor, writeAudit } from "@/lib/audit";
 import { parseDateOnly } from "@/lib/dates";
 import { getInvoice } from "@/lib/bookings";
+import { business } from "@/lib/business";
 import {
   createBookingSchema,
   failure,
@@ -90,6 +91,7 @@ export async function createBookingAction(
   formData: FormData,
 ): Promise<ActionState> {
   const parsed = createBookingSchema.safeParse({
+    bookerId: formData.get("bookerId") ?? undefined,
     customerName: formData.get("customerName") ?? undefined,
     customerPhone: formData.get("customerPhone") ?? undefined,
     areaId: formData.get("areaId") ?? "",
@@ -176,6 +178,7 @@ export async function createBookingAction(
         data: {
           invoiceNo,
           shareToken: newShareToken(),
+          bookerId: input.bookerId,
           customerName: input.customerName,
           customerPhone: input.customerPhone,
           areaId: input.areaId,
@@ -247,6 +250,7 @@ export async function createBookingAction(
         payload: {
           invoiceNo: booking.invoiceNo,
           customer: input.customerName,
+          bookerId: input.bookerId,
           lines: lines.map((l) => ({
             sku: bySku.get(l.productId)!.sku,
             quantity: l.quantity,
@@ -334,7 +338,7 @@ export async function getInvoiceShareData(bookingId: number): Promise<
   return {
     token,
     invoiceNo: invoice.invoiceNo,
-    businessName: process.env.BUSINESS_NAME?.trim() || "Your Business Name",
+    businessName: business().name,
     bookingDate: invoice.bookingDate.toISOString().slice(0, 10),
     customerName: invoice.customerName,
     shopName: invoice.shopName,
