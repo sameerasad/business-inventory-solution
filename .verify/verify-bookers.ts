@@ -14,12 +14,14 @@ import {
   updateBookerAction,
 } from "@/actions/bookers";
 import {
+  attributeUnattributedBookings,
   getActiveBookers,
   getAreaCoverage,
   getBookerCoverage,
   getBookerPerformance,
   getUnassignedAreas,
   getUncoveredAreas,
+  getUnattributedBookings,
 } from "@/lib/bookers";
 import { getBookingList } from "@/lib/bookings";
 
@@ -451,6 +453,148 @@ async function main() {
     (await getUnassignedAreas()).includes("South Zone"),
     await getUnassignedAreas(),
   );
+  section("backfilling history onto a booker");
+  // Two bookings with no booker exist at this point: the Rs 450 one recorded
+  // above, plus one cancelled here, standing in for everything booked before
+  // the booker field existed.
+  const oldCancelled = await createBookingAction(
+    emptyActionState,
+    fd({
+      customerName: "Legacy Cancelled",
+      areaId: String(south.id),
+      bookingDate: `${YEAR}-02-01`,
+      lines: JSON.stringify([{ productId: product.id, quantity: 2, unitPrice: 450 }]),
+      idempotencyKey: "bkr-legacy-cancelled",
+    }),
+  );
+  ok("a second unattributed booking exists", oldCancelled.ok, oldCancelled);
+  await softDeleteBookingAction(
+    emptyActionState,
+    fd({
+      id: String(
+        (
+          await prisma.booking.findFirstOrThrow({
+            where: { idempotencyKey: "bkr-legacy-cancelled" },
+          })
+        ).id,
+      ),
+    }),
+  );
+
+  const backlog = await getUnattributedBookings();
+  ok("the backlog is found", backlog.bookings === 2, backlog);
+  ok(
+    "including the cancelled one, counted separately",
+    backlog.cancelled === 1,
+    backlog.cancelled,
+  );
+  ok(
+    "its value is the live 450 only - a cancelled order has no sales left",
+    near(backlog.value, 450),
+    backlog.value,
+  );
+  ok(
+    "the dates span both",
+    backlog.firstDate?.toISOString().slice(0, 10) === `${YEAR}-02-01` &&
+      backlog.lastDate?.toISOString().slice(0, 10) === `${YEAR}-03-20`,
+    [backlog.firstDate, backlog.lastDate],
+  );
+  ok(
+    "and the areas they were taken in are reported",
+    backlog.areas.map((x) => x.name).sort().join(",") === "Downtown,South Zone",
+    backlog.areas,
+  );
+
+  const imranBefore = (await getBookerPerformance({ year: YEAR, areaId: null })).rows.find(
+    (r) => r.id === imran.id,
+  )!;
+  const result = await attributeUnattributedBookings({
+    bookerId: imran.id,
+    assignAreas: false,
+  });
+  ok("both bookings were attributed", result.bookings === 2, result);
+  ok(
+    "nothing is unattributed any more",
+    (await getUnattributedBookings()).bookings === 0,
+  );
+
+  let perfB = await getBookerPerformance({ year: YEAR, areaId: null });
+  const imranAfter = perfB.rows.find((r) => r.id === imran.id)!;
+  ok(
+    "his live booking count went up by one, not two - the cancelled one stays cancelled",
+    imranAfter.bookings === imranBefore.bookings + 1,
+    [imranBefore.bookings, imranAfter.bookings],
+  );
+  ok(
+    "the 450 is now his",
+    near(imranAfter.bookedValue, imranBefore.bookedValue + 450),
+    imranAfter.bookedValue,
+  );
+  ok("and the unattributed total is zero", near(perfB.totals.unattributed, 0), perfB.totals);
+  ok(
+    "the figures still tie: rows sum to the page total",
+    near(
+      perfB.rows.reduce((t, r) => t + r.bookedValue, 0),
+      perfB.totals.bookedValue,
+    ),
+  );
+
+  section("backfill is safe to repeat and never overwrites");
+  const ownedBefore = await prisma.booking.count({ where: { bookerId: bilal.id } });
+  const again = await attributeUnattributedBookings({
+    bookerId: imran.id,
+    assignAreas: false,
+  });
+  ok("a second run changes nothing", again.bookings === 0, again);
+  ok(
+    "Bilal keeps every booking that was already his",
+    (await prisma.booking.count({ where: { bookerId: bilal.id } })) === ownedBefore,
+  );
+
+  section("backfill can adopt the implied territory");
+  // Imran was assigned Downtown earlier; the backlog also covered South Zone.
+  const orphan = await createBookingAction(
+    emptyActionState,
+    fd({
+      customerName: "Another Legacy",
+      areaId: String(south.id),
+      bookingDate: `${YEAR}-02-05`,
+      lines: JSON.stringify([{ productId: product.id, quantity: 1, unitPrice: 450 }]),
+      idempotencyKey: "bkr-legacy-2",
+    }),
+  );
+  ok("one more unattributed booking, in South Zone", orphan.ok, orphan);
+  const withAreas = await attributeUnattributedBookings({
+    bookerId: imran.id,
+    assignAreas: true,
+  });
+  ok("it was attributed", withAreas.bookings === 1, withAreas);
+  ok(
+    "South Zone was added to his territory",
+    (await prisma.bookerArea.count({
+      where: { bookerId: imran.id, areaId: south.id },
+    })) === 1,
+  );
+  ok(
+    "Downtown was not duplicated by re-assigning it",
+    (await prisma.bookerArea.count({
+      where: { bookerId: imran.id, areaId: downtown.id },
+    })) === 1,
+  );
+  perfB = await getBookerPerformance({ year: YEAR, areaId: null });
+  ok(
+    "so his South Zone work is no longer off-territory",
+    near(perfB.rows.find((r) => r.id === imran.id)!.offTerritoryValue, 0),
+    perfB.rows.find((r) => r.id === imran.id)!.offTerritoryValue,
+  );
+
+  let threw = false;
+  try {
+    await attributeUnattributedBookings({ bookerId: 999999, assignAreas: false });
+  } catch {
+    threw = true;
+  }
+  ok("an unknown booker is refused rather than silently doing nothing", threw);
   console.log(`\n${checks - failures}/${checks} booker checks passed`);
   if (failures > 0) process.exitCode = 1;
 }

@@ -94,6 +94,8 @@ const EXPECTED_TABLES = [
   "bookings",
   "invoice_counters",
   "payments",
+  "bookers",
+  "booker_areas",
 ];
 
 async function main(): Promise<number> {

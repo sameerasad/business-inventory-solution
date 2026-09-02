@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { yearRange } from "@/lib/dates";
+import { writeAudit } from "@/lib/audit";
 
 /**
  * Per-booker performance.
@@ -363,4 +364,129 @@ export async function getUnassignedAreas(): Promise<string[]> {
     select: { name: true },
   });
   return rows.map((r) => r.name);
+}
+
+/* ------------------------------------------------------- historical backfill */
+
+export type UnattributedSummary = {
+  bookings: number;
+  /** Of those, ones already cancelled - counted separately so the number adds up. */
+  cancelled: number;
+  value: number;
+  firstDate: Date | null;
+  lastDate: Date | null;
+  /** Areas those bookings were taken in, which is the territory they imply. */
+  areas: { id: number; name: string }[];
+};
+
+/**
+ * Everything booked before the booker field existed.
+ *
+ * The booker column was added to a business that had already been running, so
+ * every earlier booking has no booker and sits outside the performance figures.
+ * This describes that backlog so it can be attributed in one go.
+ */
+export async function getUnattributedBookings(): Promise<UnattributedSummary> {
+  const rows = await prisma.$queryRaw<
+    {
+      bookings: number;
+      cancelled: number;
+      value: number;
+      firstDate: Date | null;
+      lastDate: Date | null;
+    }[]
+  >(Prisma.sql`
+    SELECT
+      COUNT(*)::int                                                 AS "bookings",
+      COUNT(*) FILTER (WHERE bk.is_deleted)::int                    AS "cancelled",
+      COALESCE(SUM(t.total), 0)::float8                             AS "value",
+      MIN(bk.booking_date)                                          AS "firstDate",
+      MAX(bk.booking_date)                                          AS "lastDate"
+    FROM bookings bk
+    LEFT JOIN (
+      SELECT s.booking_id, SUM(s.sale_price * s.quantity) AS total
+      FROM sales s
+      JOIN batches b ON b.id = s.batch_id
+      WHERE s.is_deleted = false AND b.is_deleted = false AND s.booking_id IS NOT NULL
+      GROUP BY s.booking_id
+    ) t ON t.booking_id = bk.id
+    WHERE bk.booker_id IS NULL
+  `);
+
+  const areas = await prisma.area.findMany({
+    where: { bookings: { some: { bookerId: null } } },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+
+  const row = rows[0];
+  return {
+    bookings: row?.bookings ?? 0,
+    cancelled: row?.cancelled ?? 0,
+    value: row?.value ?? 0,
+    firstDate: row?.firstDate ?? null,
+    lastDate: row?.lastDate ?? null,
+    areas,
+  };
+}
+
+/**
+ * Attribute every booking that has no booker to one person.
+ *
+ * Only ever touches rows where booker_id IS NULL, so it is safe to run twice and
+ * can never overwrite an attribution somebody made deliberately. Cancelled
+ * bookings are included: they are still work that was done, and leaving them out
+ * would mean restoring one later brought back an unattributed row.
+ *
+ * The whole thing is one transaction with one audit entry, because it is one
+ * decision - not several hundred.
+ */
+export async function attributeUnattributedBookings(options: {
+  bookerId: number;
+  /** Also make every area in that backlog part of the booker's territory. */
+  assignAreas: boolean;
+}): Promise<{ bookings: number; areasAssigned: number }> {
+  const booker = await prisma.booker.findUnique({
+    where: { id: options.bookerId },
+    select: { id: true, name: true, isDeleted: true },
+  });
+  if (!booker || booker.isDeleted) {
+    throw new Error(`No live booker with id ${options.bookerId}`);
+  }
+
+  const before = await getUnattributedBookings();
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.booking.updateMany({
+      where: { bookerId: null },
+      data: { bookerId: booker.id },
+    });
+
+    let areasAssigned = 0;
+    if (options.assignAreas && before.areas.length > 0) {
+      // skipDuplicates: an area they are already assigned to must not fail the
+      // whole backfill on the composite primary key.
+      const result = await tx.bookerArea.createMany({
+        data: before.areas.map((a) => ({ bookerId: booker.id, areaId: a.id })),
+        skipDuplicates: true,
+      });
+      areasAssigned = result.count;
+    }
+
+    await writeAudit(tx, {
+      entityType: "booker",
+      entityId: booker.id,
+      action: "booker.backfilled_attribution",
+      payload: {
+        bookings: updated.count,
+        cancelledIncluded: before.cancelled,
+        value: before.value,
+        from: before.firstDate ? before.firstDate.toISOString().slice(0, 10) : null,
+        to: before.lastDate ? before.lastDate.toISOString().slice(0, 10) : null,
+        areasAssigned,
+      },
+    });
+
+    return { bookings: updated.count, areasAssigned };
+  });
 }

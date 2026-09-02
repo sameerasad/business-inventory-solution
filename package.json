@@ -29,7 +29,8 @@
     "verify:payments": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-payments.ts\"",
     "db:check-payments": "tsx scripts/check-payments.ts",
     "verify:recognition": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-recognition.ts\"",
-    "verify:bookers": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-bookers.ts\""
+    "verify:bookers": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-bookers.ts\"",
+    "db:backfill-booker": "tsx scripts/backfill-booker.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
