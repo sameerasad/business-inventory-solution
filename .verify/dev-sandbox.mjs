@@ -1,7 +1,7 @@
 /**
  * Run the whole app with no PostgreSQL installed.
  *
- *   npm run dev:sandbox     ->  http://localhost:3000
+ *   npm run dev:sandbox     ->  prints the URL it picked (3000 if free)
  *
  * Boots PGlite (real PostgreSQL, compiled to WebAssembly) on a local socket,
  * applies the migrations, seeds the catalog, then starts `next dev` pointed at
@@ -16,10 +16,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import { freePortFrom } from "./free-port.mjs";
 
-const PG_PORT = Number(process.env.SANDBOX_PG_PORT ?? 54329);
-const APP_PORT = Number(process.env.PORT ?? 3000);
+/**
+ * Both ports are chosen at runtime rather than fixed, so the sandbox can run
+ * alongside a normal `npm run dev` - which is the whole point of having a
+ * throwaway database.
+ */
+async function pick(start, label) {
+  const port = await freePortFrom(start, label);
+  if (port !== start) console.log(`  ${label} ${start} is busy - using ${port} instead`);
+  return port;
+}
+
 const DATA_DIR = path.join(process.cwd(), ".verify", "pgdata");
+const PG_PORT = await pick(Number(process.env.SANDBOX_PG_PORT ?? 54329), "database port");
+const APP_PORT = await pick(Number(process.env.PORT ?? 3000), "app port");
 
 const url =
   `postgresql://postgres:postgres@127.0.0.1:${PG_PORT}/postgres` +

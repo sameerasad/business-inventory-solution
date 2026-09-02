@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
 
 import { PageHeader } from "@/components/page-header";
@@ -12,21 +13,20 @@ import { RevenueProfitBars } from "@/components/charts/revenue-profit-bars";
 import { RevenueProfitTrend } from "@/components/charts/revenue-profit-trend";
 import { CHART } from "@/components/charts/theme";
 import { Alert } from "@/components/ui/alert";
-import { MONTH_LABELS } from "@/lib/format";
+import { money, MONTH_LABELS } from "@/lib/format";
 import { currentMonthIndex0, currentYear, monthRange, yearRange } from "@/lib/dates";
+import { getCategories, type Scope } from "@/lib/queries";
 import {
-  getAvailableYears,
-  getCategories,
-  getKpis,
-  getMonthlyTrend,
-  getRevenueByArea,
-  getRevenueByCategory,
-  getRevenueByPackaging,
-  getRevenueByProductName,
-  getRevenueByShop,
-  getRevenueByVariant,
-  type Scope,
-} from "@/lib/queries";
+  getCashByArea,
+  getCashByCategory,
+  getCashByPackaging,
+  getCashByProductName,
+  getCashByShop,
+  getCashByVariant,
+  getCashKpis,
+  getCashMonthlyTrend,
+  getCashYears,
+} from "@/lib/recognition";
 import { prisma } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -51,7 +51,7 @@ export default async function DashboardPage({
   const sp = await searchParams;
 
   const [years, categories, areaRows] = await Promise.all([
-    getAvailableYears(),
+    getCashYears(),
     getCategories(),
     prisma.area.findMany({
       where: { isDeleted: false },
@@ -88,17 +88,17 @@ export default async function DashboardPage({
     categories.find((c) => c.id === flavorCategoryId)?.name ?? "all categories";
 
   const [kpis, trend, packaging, variants, flavors, byArea, byShop, byCategory] = await Promise.all([
-    getKpis(filters),
-    getMonthlyTrend(filters),
-    getRevenueByPackaging(yearScope),
-    getRevenueByVariant(yearScope),
-    getRevenueByProductName(flavorScope),
-    getRevenueByArea(geoScope),
-    getRevenueByShop(geoScope, 10),
-    getRevenueByCategory(yearScope),
+    getCashKpis(filters),
+    getCashMonthlyTrend(filters),
+    getCashByPackaging(yearScope),
+    getCashByVariant(yearScope),
+    getCashByProductName(flavorScope),
+    getCashByArea(geoScope),
+    getCashByShop(geoScope, 10),
+    getCashByCategory(yearScope),
   ]);
 
-  const hasAnyData = kpis.year.units > 0 || trend.some((m) => m.units > 0);
+  const hasAnyData = kpis.year.revenue > 0 || trend.some((m) => m.revenue > 0);
   const selectedAreaName = areaRows.find((a) => a.id === areaId)?.name ?? null;
   const trendLegend = [
     { color: CHART.revenue, label: "Revenue" },
@@ -111,7 +111,7 @@ export default async function DashboardPage({
         title="Dashboard"
         description={`Revenue and profit for ${year}${
           selectedAreaName ? ` in ${selectedAreaName}` : ""
-        }. Profit is derived from each sale price minus the unit cost of the batch it came from.`}
+        }, counted when the money arrives. A delivered order counts only once it is paid - partly paid orders count in proportion, dated by the payment. Units are what physically went out.`}
       />
 
       <Suspense fallback={<FilterBarSkeleton />}>
@@ -125,12 +125,23 @@ export default async function DashboardPage({
 
       {!hasAnyData ? (
         <Alert tone="info" className="mb-5">
-          No sales recorded for {year} yet. Receive stock on the <strong>New Batch</strong> page,
-          then record a sale on <strong>New Sale</strong> and the charts below will fill in.
+          No money received in {year} yet. Bookings count once they are paid - record a payment on
+          the <strong>Bookings</strong> page - and a counter sale on <strong>New Sale</strong> counts
+          straight away.
         </Alert>
       ) : null}
 
       {/* ---------------------------------------------------------- KPI cards */}
+      {kpis.awaitingPayment > 0.005 ? (
+        <Alert tone="info" className="mb-5">
+          <strong>{money(kpis.awaitingPayment)}</strong> of delivered goods has not been paid for
+          yet, so it is not counted below.{" "}
+          <Link href="/receivables" className="font-medium underline">
+            See receivables
+          </Link>
+        </Alert>
+      ) : null}
+
       <section aria-label="Headline figures" className="mb-5 grid gap-4 md:grid-cols-3">
         <KpiCard
           label="Today"

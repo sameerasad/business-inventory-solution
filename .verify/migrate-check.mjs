@@ -5,10 +5,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import { freePortFrom } from "./free-port.mjs";
 
 const migrationsDir = path.join(process.cwd(), "prisma", "migrations");
 
-const PORT = 54340;
+const PORT = await freePortFrom(54340, "database port");
 const url = `postgresql://postgres:postgres@127.0.0.1:${PORT}/postgres?schema=public&connection_limit=1&statement_cache_size=0`;
 const db = await PGlite.create();
 const server = new PGLiteSocketServer({ db, port: PORT, host: "127.0.0.1" });

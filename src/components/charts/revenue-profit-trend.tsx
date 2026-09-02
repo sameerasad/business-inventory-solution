@@ -11,10 +11,12 @@ import {
   YAxis,
 } from "recharts";
 
-import type { MonthPoint } from "@/lib/queries";
 import { moneyCompact } from "@/lib/format";
 import { ChartTooltip } from "@/components/charts/chart-tooltip";
 import { AXIS_LINE, AXIS_TICK, CHART, MARGIN, RADIUS_VERTICAL } from "@/components/charts/theme";
+
+/** Anything with a label plus the two money series. */
+export type TrendPoint = { label: string; revenue: number; profit: number };
 
 /**
  * Dashboard chart 1 - monthly revenue (bars) against profit (line).
@@ -24,7 +26,7 @@ import { AXIS_LINE, AXIS_TICK, CHART, MARGIN, RADIUS_VERTICAL } from "@/componen
  * A second axis would let the two series be scaled independently and would make
  * that gap meaningless.
  */
-export function RevenueProfitTrend({ data }: { data: MonthPoint[] }) {
+export function RevenueProfitTrend({ data }: { data: TrendPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={data} margin={MARGIN} barCategoryGap="22%">

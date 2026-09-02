@@ -9,6 +9,7 @@ import { Pagination } from "@/components/pagination";
 import { SoftDeleteButton } from "@/components/forms/soft-delete-button";
 import { softDeleteSaleAction } from "@/actions/sales";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -101,7 +102,7 @@ export default async function SalesPage({
     <div>
       <PageHeader
         title="Sales"
-        description="Profit on each line is the sale price minus the unit cost of the batch it came from, times the quantity. It is calculated on read, never stored."
+        description="Every unit that left stock, whether from a booking or over the counter. A line with an invoice number came from a booking and only counts as revenue once that invoice is paid; a counter sale counted the moment it was recorded."
         action={
           <Button asChild>
             <Link href="/sales/new">Record a sale</Link>
@@ -136,6 +137,7 @@ export default async function SalesPage({
               <TableHead>Date</TableHead>
               <TableHead>SKU</TableHead>
               <TableHead>Product</TableHead>
+              <TableHead>Source</TableHead>
               <TableHead>Batch</TableHead>
               <TableHead className="text-right">Qty</TableHead>
               <TableHead className="text-right">Sale price</TableHead>
@@ -151,7 +153,7 @@ export default async function SalesPage({
           <TableBody>
             {list.rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={13} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={14} className="py-10 text-center text-muted-foreground">
                   No sales match these filters.{" "}
                   <Link href="/sales/new" className="underline">
                     Record a sale
@@ -169,6 +171,13 @@ export default async function SalesPage({
                     <span className="ml-1 text-xs text-muted-foreground">
                       {row.packagingType} {row.variantValue}
                     </span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {row.invoiceNo ? (
+                      <span className="font-mono text-xs">{row.invoiceNo}</span>
+                    ) : (
+                      <Badge variant="outline">Counter sale</Badge>
+                    )}
                   </TableCell>
                   <TableCell className="num text-muted-foreground">#{row.batchId}</TableCell>
                   <TableCell className="num text-right">{qty(row.quantity)}</TableCell>

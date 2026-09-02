@@ -20,7 +20,7 @@ export default async function NewSalePage() {
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Record a sale"
-        description="A sale draws down one specific batch. That batch supplies the unit cost, which is what profit is calculated against."
+        description="For an over-the-counter cash sale: money changes hands now, so it counts as revenue immediately and no invoice is created. For an order a shop will pay for later, use New Booking instead - that produces an invoice and tracks what is owed."
         action={
           <Button variant="outline" asChild>
             <Link href="/sales">All sales</Link>

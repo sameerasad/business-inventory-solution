@@ -11,8 +11,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import { freePortFrom } from "./free-port.mjs";
 
-const PORT = 54355;
+const PORT = await freePortFrom(54355, "database port");
 const url = `postgresql://postgres:postgres@127.0.0.1:${PORT}/postgres?schema=public&statement_cache_size=0&connection_limit=1&pool_timeout=60`;
 
 let checks = 0;

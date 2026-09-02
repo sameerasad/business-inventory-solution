@@ -5,9 +5,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import { freePortFrom } from "./free-port.mjs";
 
-const PG_PORT = 54332;
-const APP_PORT = 3111;
+const PG_PORT = await freePortFrom(54332, "database port");
+const APP_PORT = await freePortFrom(3111, "app port");
 const url = `postgresql://postgres:postgres@127.0.0.1:${PG_PORT}/postgres?schema=public&connection_limit=1&statement_cache_size=0&pool_timeout=60`;
 
 const db = await PGlite.create();
@@ -146,8 +147,8 @@ const pages = [
       "Category split",
       "Revenue &amp; profit by area",
       "Top shops",
-      "This Month",
-      "This Year",
+      "Received",
+      "Delivered",
       `>${YEAR}</span>`,
       ">All categories</span>",
       ">All areas</span>",
@@ -177,7 +178,7 @@ const pages = [
   ["/areas", ["Areas &amp; Shops", "Downtown", "Central Mart", "New area"]],
   ["/batches", ["Batches", "Remaining", "Unit cost", "MNG-BTL-250", ">All products</span>"]],
   ["/batches?status=active", ["Batches", ">Active (stock left)</span>"]],
-  ["/sales", ["Sales", "Profit", "Margin", "Direct sale", ">All areas</span>"]],
+  ["/sales", ["Sales", "Profit", "Margin", "Direct sale", ">All areas</span>", "Source", "Counter sale"]],
   ["/sales?from=2020-01-01&to=2020-12-31", ["No sales match these filters"]],
   ["/sales?from=2030-01-01&to=2020-12-31", ["date filter was ignored"]],
 ];

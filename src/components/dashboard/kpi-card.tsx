@@ -33,7 +33,7 @@ export function KpiCard({
         </div>
 
         <p className="mt-2 text-2xl font-semibold tracking-tight">{money(data.revenue)}</p>
-        <p className="text-xs text-muted-foreground">Revenue</p>
+        <p className="text-xs text-muted-foreground">Received</p>
 
         <div className="mt-3 flex items-baseline justify-between gap-2 border-t pt-3">
           <div>
@@ -54,7 +54,7 @@ export function KpiCard({
           </div>
           <div className="text-right">
             <p className="num text-sm font-medium">{qty(data.units)}</p>
-            <p className="text-xs text-muted-foreground">Units</p>
+            <p className="text-xs text-muted-foreground">Delivered</p>
           </div>
         </div>
       </CardContent>

@@ -124,6 +124,8 @@ export type SaleRow = {
   marginPct: number | null;
   areaName: string;
   shopName: string | null;
+  /** The booking this line came from, if any. Null means a counter sale. */
+  invoiceNo: string | null;
   notes: string | null;
   createdBy: string;
   createdAt: Date;
@@ -178,6 +180,7 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
              THEN ((s.sale_price - b.unit_cost) / s.sale_price * 100)::float8
              END                                      AS "marginPct",
         a.name                                        AS "areaName",
+        bk.invoice_no                                 AS "invoiceNo",
         sh.name                                       AS "shopName",
         s.notes                                       AS "notes",
         s.created_by                                  AS "createdBy",
@@ -187,6 +190,7 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
       JOIN products p  ON p.id = s.product_id
       JOIN areas a     ON a.id = s.area_id
       LEFT JOIN shops sh ON sh.id = s.shop_id
+      LEFT JOIN bookings bk ON bk.id = s.booking_id
       ${clause}
       ORDER BY s.sale_date DESC, s.id DESC
       LIMIT ${PAGE_SIZE} OFFSET ${offset}

@@ -3,8 +3,9 @@
 import { spawn } from "node:child_process";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import { freePortFrom } from "./free-port.mjs";
 
-const PORT = 54330;
+const PORT = await freePortFrom(54330, "database port");
 const url = `postgresql://postgres:postgres@127.0.0.1:${PORT}/postgres?schema=public&connection_limit=1&statement_cache_size=0`;
 const db = await PGlite.create();
 const server = new PGLiteSocketServer({ db, port: PORT, host: "127.0.0.1" });
