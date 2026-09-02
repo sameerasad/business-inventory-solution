@@ -374,6 +374,10 @@ export async function softDeleteBookingAction(
           invoiceNo: true,
           isDeleted: true,
           sales: { where: { isDeleted: false }, select: { id: true, batchId: true, quantity: true } },
+          // Cancelling must void the money as well as the goods. Leaving a
+          // payment live against a cancelled order makes "collected" claim cash
+          // for something that was never sold.
+          payments: { where: { isDeleted: false }, select: { id: true, amount: true } },
         },
       });
       if (!booking) return null;
@@ -386,17 +390,32 @@ export async function softDeleteBookingAction(
           data: { remainingQty: { increment: sale.quantity } },
         });
       }
+      for (const payment of booking.payments) {
+        await tx.payment.update({ where: { id: payment.id }, data: { isDeleted: true } });
+      }
       await tx.booking.update({ where: { id }, data: { isDeleted: true } });
 
       const returned = booking.sales.reduce((sum, s) => sum + s.quantity, 0);
+      const reversed = booking.payments.reduce((sum, p) => sum + Number(p.amount), 0);
       await writeAudit(tx, {
         entityType: "booking",
         entityId: id,
         action: "booking.cancelled",
-        payload: { reason, invoiceNo: booking.invoiceNo, unitsReturned: returned },
+        payload: {
+          reason,
+          invoiceNo: booking.invoiceNo,
+          unitsReturned: returned,
+          paymentsReversed: booking.payments.length,
+          amountReversed: reversed,
+        },
       });
 
-      return `Booking ${booking.invoiceNo} cancelled. ${returned} unit(s) returned to stock.`;
+      return (
+        `Booking ${booking.invoiceNo} cancelled. ${returned} unit(s) returned to stock` +
+        (booking.payments.length > 0
+          ? `, and ${booking.payments.length} payment(s) totalling ${reversed.toFixed(2)} reversed.`
+          : ".")
+      );
     });
 
     if (message === null) return failure("Booking not found.");

@@ -430,10 +430,25 @@ export type ReceivableRow = {
  * Everything still owed, oldest first. Aging comes from the booking date, which
  * is when the goods went out - that is the day the clock starts.
  */
+/**
+ * A booking whose recorded payments exceed the value of its live sales. That
+ * should be impossible through the app, and it is what makes "collected" larger
+ * than "invoiced" - so it is reported rather than hidden.
+ */
+export type PaymentAnomaly = {
+  id: number;
+  invoiceNo: string;
+  bookingCancelled: boolean;
+  saleValue: number;
+  paid: number;
+  excess: number;
+};
+
 export async function getReceivables(filters: { areaId: number | null } = { areaId: null }): Promise<{
   rows: ReceivableRow[];
   totals: { invoiced: number; collected: number; outstanding: number };
   buckets: { label: string; count: number; amount: number }[];
+  anomalies: PaymentAnomaly[];
 }> {
   const areaClause =
     filters.areaId != null ? Prisma.sql`AND b.area_id = ${filters.areaId}` : Prisma.empty;
@@ -512,6 +527,32 @@ export async function getReceivables(filters: { areaId: number | null } = { area
     };
   });
 
+  // Payments with no live sale value behind them, on live OR cancelled
+  // bookings. Cancelled ones are included because they are invisible everywhere
+  // else in the app, so this is the only place they can be noticed.
+  const anomalies = await prisma.$queryRaw<PaymentAnomaly[]>(Prisma.sql`
+    SELECT
+      b.id                                        AS "id",
+      b.invoice_no                                AS "invoiceNo",
+      b.is_deleted                                AS "bookingCancelled",
+      COALESCE(t.total, 0)::float8                AS "saleValue",
+      pay.paid::float8                            AS "paid",
+      (pay.paid - COALESCE(t.total, 0))::float8   AS "excess"
+    FROM bookings b
+    JOIN (
+      SELECT p.booking_id, SUM(p.amount) AS paid
+      FROM payments p WHERE p.is_deleted = false
+      GROUP BY p.booking_id
+    ) pay ON pay.booking_id = b.id
+    LEFT JOIN (
+      SELECT s.booking_id, SUM(s.sale_price * s.quantity) AS total
+      FROM sales s WHERE s.is_deleted = false AND s.booking_id IS NOT NULL
+      GROUP BY s.booking_id
+    ) t ON t.booking_id = b.id
+    WHERE pay.paid - COALESCE(t.total, 0) > 0.005
+    ORDER BY (pay.paid - COALESCE(t.total, 0)) DESC
+  `);
+
   return {
     rows,
     totals: {
@@ -520,5 +561,6 @@ export async function getReceivables(filters: { areaId: number | null } = { area
       outstanding: rows.reduce((sum, r) => sum + r.balance, 0),
     },
     buckets,
+    anomalies,
   };
 }

@@ -26,7 +26,8 @@
     "db:clear": "tsx scripts/clear-data.ts",
     "db:prices": "tsx scripts/prices.ts",
     "verify:whatsapp": "tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-whatsapp.ts",
-    "verify:payments": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-payments.ts\""
+    "verify:payments": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-payments.ts\"",
+    "db:check-payments": "tsx scripts/check-payments.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

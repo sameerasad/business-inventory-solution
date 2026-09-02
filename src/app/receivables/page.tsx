@@ -82,6 +82,32 @@ export default async function ReceivablesPage({
         <ListFilters filters={filters} />
       </Suspense>
 
+      {/* Collected can only exceed Invoiced if money is recorded against a
+          booking with no sales behind it. That is a data fault, not a figure to
+          present as if it were meaningful - so it is named explicitly. */}
+      {data.anomalies.length > 0 ? (
+        <Alert tone="error" className="mb-4">
+          <p className="font-medium">
+            {data.anomalies.length} booking(s) have payments with no matching sales, totalling{" "}
+            {money(data.anomalies.reduce((sum, a) => sum + a.excess, 0))}. That is why Collected is
+            higher than Invoiced.
+          </p>
+          <ul className="mt-2 space-y-1 text-xs">
+            {data.anomalies.map((a) => (
+              <li key={a.id}>
+                <span className="font-mono">{a.invoiceNo}</span>
+                {a.bookingCancelled ? " (cancelled) " : " "}— sales {money(a.saleValue)}, paid{" "}
+                {money(a.paid)}, unmatched <strong>{money(a.excess)}</strong>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs">
+            Reverse the payment from the Bookings page, or run{" "}
+            <code className="font-mono">npm run db:check-payments</code> to see the detail.
+          </p>
+        </Alert>
+      ) : null}
+
       <div className="mb-4 grid gap-4 sm:grid-cols-3">
         <Tile label="Invoiced" value={money(data.totals.invoiced)} />
         <Tile label="Collected" value={money(data.totals.collected)} tone="gain" />

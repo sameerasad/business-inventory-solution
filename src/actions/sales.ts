@@ -196,6 +196,16 @@ export async function createSaleAction(
   }
 }
 
+class PaidBookingError extends Error {
+  constructor(
+    public invoiceNo: string,
+    public paymentCount: number,
+  ) {
+    super(`${invoiceNo} has payments recorded`);
+    this.name = "PaidBookingError";
+  }
+}
+
 class InsufficientStockError extends Error {
   constructor(public batchId: number) {
     super(`Batch ${batchId} has insufficient stock`);
@@ -223,10 +233,30 @@ export async function softDeleteSaleAction(
     const message = await prisma.$transaction(async (tx) => {
       const sale = await tx.sale.findUnique({
         where: { id },
-        select: { id: true, isDeleted: true, batchId: true, quantity: true },
+        select: {
+          id: true,
+          isDeleted: true,
+          batchId: true,
+          quantity: true,
+          bookingId: true,
+          booking: {
+            select: {
+              invoiceNo: true,
+              _count: { select: { payments: { where: { isDeleted: false } } } },
+            },
+          },
+        },
       });
       if (!sale) return null;
       if (sale.isDeleted) return `Sale #${id} is already removed.`;
+
+      // Removing a sale shrinks its booking's invoice value. If money has been
+      // received against that booking, the result is an invoice worth less than
+      // has been paid for it - which is what makes "collected" exceed
+      // "invoiced". Reverse the payment first, deliberately.
+      if (sale.booking && sale.booking._count.payments > 0) {
+        throw new PaidBookingError(sale.booking.invoiceNo, sale.booking._count.payments);
+      }
 
       await tx.sale.update({ where: { id }, data: { isDeleted: true } });
       await tx.batch.update({
@@ -247,6 +277,13 @@ export async function softDeleteSaleAction(
     revalidateSales();
     return success(message);
   } catch (error) {
+    if (error instanceof PaidBookingError) {
+      return failure(
+        `This sale belongs to ${error.invoiceNo}, which has ${error.paymentCount} payment(s) recorded against it. ` +
+          "Reverse the payment on the Bookings page first, or cancel the whole booking - " +
+          "otherwise the invoice would be worth less than has been paid for it.",
+      );
+    }
     console.error("softDeleteSaleAction failed", error);
     return failure("Could not remove the sale. Please try again.");
   }

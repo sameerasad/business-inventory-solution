@@ -254,10 +254,14 @@ async function main() {
     token !== null && /^[A-Za-z0-9_-]{20,}$/.test(token),
     token,
   );
+  // NOT "does the token contain the id's digits" - a random 22-character string
+  // contains "1" about half the time, which made this test flaky rather than
+  // meaningful. What matters is that it is not the id and carries real entropy.
+  ok("token is not just the id", token !== String(booking.id), token);
   ok(
-    "token is not derivable from the id",
-    token !== null && !token.includes(String(booking.id)),
-    token,
+    "token has high character diversity",
+    token !== null && new Set(token).size >= 12,
+    token === null ? null : new Set(token).size,
   );
   const tokenAgain = await getInvoiceShareToken(booking.id);
   ok("asking twice returns the same token", tokenAgain === token, { token, tokenAgain });

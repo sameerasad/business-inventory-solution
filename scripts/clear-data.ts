@@ -46,7 +46,8 @@ async function counts(prisma: PrismaClient): Promise<Counts> {
       (SELECT COUNT(*)::int FROM sales)            AS sales,
       (SELECT COUNT(*)::int FROM bookings)         AS bookings,
       (SELECT COUNT(*)::int FROM audit_logs)       AS audit_logs,
-      (SELECT COUNT(*)::int FROM invoice_counters) AS invoice_counters
+      (SELECT COUNT(*)::int FROM invoice_counters) AS invoice_counters,
+      (SELECT COUNT(*)::int FROM payments)         AS payments
   `);
   return rows[0];
 }
@@ -100,6 +101,8 @@ async function main(): Promise<number> {
     // Order matters: every foreign key is onDelete: Restrict, so children go
     // before parents. One transaction, so a failure leaves the data untouched.
     await prisma.$transaction(async (tx) => {
+      // Payments reference bookings with onDelete: Restrict, so they go first.
+      await tx.$executeRawUnsafe(`DELETE FROM payments`);
       await tx.$executeRawUnsafe(`DELETE FROM sales`);
       await tx.$executeRawUnsafe(`DELETE FROM bookings`);
       await tx.$executeRawUnsafe(`DELETE FROM batches`);
@@ -113,7 +116,7 @@ async function main(): Promise<number> {
 
       // Restart the id sequences so the first real batch is #1 again. Products
       // and categories keep their sequences, since their rows survive.
-      const resets = ["sales", "bookings", "batches", "audit_logs"];
+      const resets = ["sales", "bookings", "batches", "audit_logs", "payments"];
       if (!keepGeography) resets.push("shops", "areas");
       for (const t of resets) {
         await tx.$executeRawUnsafe(
@@ -132,6 +135,7 @@ async function main(): Promise<number> {
       after.batches === 0 &&
       after.audit_logs === 0 &&
       after.invoice_counters === 0 &&
+      after.payments === 0 &&
       (keepGeography || (after.areas === 0 && after.shops === 0));
 
     console.log("");

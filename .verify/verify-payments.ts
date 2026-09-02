@@ -19,6 +19,7 @@ import {
   paymentStatus,
 } from "@/lib/bookings";
 import { getKpis, getStockLevels } from "@/lib/queries";
+import { softDeleteSaleAction } from "@/actions/sales";
 import { renderInvoicePdf } from "@/lib/invoice-pdf";
 import { pdfText } from "./pdf-text";
 
@@ -284,9 +285,72 @@ async function main() {
   ok("row balance", Math.abs(row.balance - 20000) < 0.005, row.balance);
   ok("filtered collected total", Math.abs(list.totals.collected - 25000) < 0.005, list.totals);
 
-  section("a cancelled booking takes no payment");
+  section("a sale cannot be removed while its booking has payments");
+  // This is the hole that lets "collected" exceed "invoiced": shrink the
+  // invoice, leave the money.
+  const liveSale = await prisma.sale.findFirstOrThrow({
+    where: { bookingId: booking.id, isDeleted: false },
+    select: { id: true },
+  });
+  const blocked = await softDeleteSaleAction(emptyActionState, fd({ id: String(liveSale.id) }));
+  ok("removing it is refused", !blocked.ok, blocked);
+  ok(
+    "the message names the invoice and the payments",
+    (blocked.message ?? "").includes(booking.invoiceNo) &&
+      (blocked.message ?? "").toLowerCase().includes("payment"),
+    blocked.message,
+  );
+  ok(
+    "the sale is still live",
+    (await prisma.sale.findUniqueOrThrow({ where: { id: liveSale.id } })).isDeleted === false,
+  );
+  const noAnomaly = await getReceivables();
+  ok("no anomalies while everything reconciles", noAnomaly.anomalies.length === 0, noAnomaly.anomalies);
+  ok(
+    "collected never exceeds invoiced",
+    noAnomaly.totals.collected <= noAnomaly.totals.invoiced + 0.005,
+    noAnomaly.totals,
+  );
+
+  section("anomaly detection catches an unbacked payment");
+  // Reproduce the real fault by going round the app, exactly as raw SQL would.
+  await prisma.$executeRawUnsafe(
+    `UPDATE sales SET is_deleted = true WHERE booking_id = ${booking.id}`,
+  );
+  const broken = await getReceivables();
+  ok("the anomaly is reported", broken.anomalies.length === 1, broken.anomalies);
+  ok(
+    "it names the invoice and the unmatched amount",
+    broken.anomalies[0]?.invoiceNo === booking.invoiceNo &&
+      Math.abs(broken.anomalies[0].excess - 25000) < 0.005,
+    broken.anomalies[0],
+  );
+  // Put it back so the remaining checks run against sane data.
+  await prisma.$executeRawUnsafe(
+    `UPDATE sales SET is_deleted = false WHERE booking_id = ${booking.id}`,
+  );
+  ok("anomaly clears once the sales are back", (await getReceivables()).anomalies.length === 0);
+
+  section("cancelling a booking reverses its payments");
   const { softDeleteBookingAction } = await import("@/actions/bookings");
-  await softDeleteBookingAction(emptyActionState, fd({ id: String(booking.id) }));
+  const beforeCancelPaid = (await getBookingBalance(booking.id))!.paid;
+  ok("it had money against it", beforeCancelPaid > 0, beforeCancelPaid);
+  const cancelled = await softDeleteBookingAction(emptyActionState, fd({ id: String(booking.id) }));
+  ok("cancelled", cancelled.ok, cancelled);
+  ok(
+    "the message says payments were reversed",
+    (cancelled.message ?? "").toLowerCase().includes("reversed"),
+    cancelled.message,
+  );
+  ok(
+    "no live payments remain on it",
+    (await prisma.payment.count({ where: { bookingId: booking.id, isDeleted: false } })) === 0,
+  );
+  const afterCancelR = await getReceivables();
+  ok("cancelling leaves no anomaly behind", afterCancelR.anomalies.length === 0, afterCancelR.anomalies);
+  ok("and no collected money", afterCancelR.totals.collected === 0, afterCancelR.totals);
+
+  section("a cancelled booking takes no payment");
   const afterCancel = await recordPaymentAction(
     emptyActionState,
     fd({
