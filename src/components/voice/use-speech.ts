@@ -182,15 +182,33 @@ export function useSpeech({
  * back to whatever it has, and the answer is on screen regardless. Speech is the
  * convenience here, not the delivery mechanism.
  */
-export function speak(text: string, lang: SpeechLang) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+export function speak(text: string, lang: SpeechLang, onDone?: () => void) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    onDone?.();
+    return;
+  }
   try {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang === "ur-PK" ? "ur-PK" : "en-US";
     utterance.rate = 1;
+    // onDone is what makes hands-free possible: the microphone must not open
+    // until the app has stopped talking, or it hears itself and "confirms"
+    // whatever it just read out.
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      onDone?.();
+    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    // A voice that never fires onend - which happens on some Android builds -
+    // must not leave the flow stuck waiting forever.
+    window.setTimeout(finish, Math.min(15000, 2000 + text.length * 90));
     window.speechSynthesis.speak(utterance);
   } catch {
     // A missing voice is not worth interrupting anything for.
+    onDone?.();
   }
 }

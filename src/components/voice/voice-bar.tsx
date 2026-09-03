@@ -1,15 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Check, Loader2, Mic, MicOff, Square, X } from "lucide-react";
 
-import { interpretVoiceAction, type VoiceResult } from "@/actions/voice";
+import {
+  interpretVoiceAction,
+  transcribeAndInterpretAction,
+  type VoiceResult,
+} from "@/actions/voice";
 import { createBookingAction } from "@/actions/bookings";
 import { recordPaymentAction } from "@/actions/payments";
 import { createBatchAction } from "@/actions/batches";
 import { createSaleAction } from "@/actions/sales";
+import { createShopAction } from "@/actions/areas";
+import { parseConfirmation } from "@/lib/voice/parse";
 import { Input } from "@/components/ui/input";
 import { emptyActionState, type ActionState } from "@/lib/validations";
 import { Alert } from "@/components/ui/alert";
@@ -17,9 +23,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { speak, useSpeech, type SpeechLang } from "@/components/voice/use-speech";
+import { useRecorder } from "@/components/voice/use-recorder";
 import { cn } from "@/lib/utils";
 
 const LANG_KEY = "voice-lang";
+const HANDS_FREE_KEY = "voice-hands-free";
+const ENGINE_KEY = "voice-engine";
+
+/**
+ * Which engine turns speech into text.
+ *
+ * "browser" is instant and free but weak on Urdu. "whisper" records a clip,
+ * sends it to our own server, and gets it transcribed by Whisper - noticeably
+ * better on Urdu and on Urdu-English mixing, at the cost of a second or two.
+ */
+type Engine = "browser" | "whisper";
 
 const EXAMPLES: Record<SpeechLang, string[]> = {
   "en-PK": [
@@ -45,12 +63,24 @@ const EXAMPLES: Record<SpeechLang, string[]> = {
  * button. Speech recognition confuses fifteen and fifty, and this app moves
  * stock and money.
  */
-export function VoiceBar() {
+export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: boolean }) {
   const router = useRouter();
   const [lang, setLang] = useState<SpeechLang>("en-PK");
   const [result, setResult] = useState<VoiceResult | null>(null);
   const [thinking, setThinking] = useState(false);
   const [typed, setTyped] = useState("");
+  const [engine, setEngine] = useState<Engine>("browser");
+  const [handsFree, setHandsFree] = useState(false);
+  const [awaitingYes, setAwaitingYes] = useState(false);
+  const [whisperError, setWhisperError] = useState<string | null>(null);
+
+  // The microphone has one channel, so the handler needs to know whether the
+  // next thing it hears is a command or the answer to "save karoon?". A ref
+  // rather than state because the recogniser's callback must see the current
+  // value, not the one captured when it started listening.
+  const modeRef = useRef<"command" | "confirm">("command");
+  const pendingRef = useRef<WriteCommand | null>(null);
+  const startRef = useRef<() => void>(() => {});
   const [saveState, setSaveState] = useState<ActionState | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -59,10 +89,28 @@ export function VoiceBar() {
     try {
       const saved = window.localStorage.getItem(LANG_KEY);
       if (saved === "en-PK" || saved === "ur-PK") setLang(saved);
+      setHandsFree(window.localStorage.getItem(HANDS_FREE_KEY) === "on");
+      // Whisper is the better engine for Urdu, so it is the default when the
+      // server has it - but a stored choice always wins.
+      const storedEngine = window.localStorage.getItem(ENGINE_KEY);
+      if (storedEngine === "whisper" || storedEngine === "browser") {
+        setEngine(whisperAvailable ? storedEngine : "browser");
+      } else if (whisperAvailable) {
+        setEngine("whisper");
+      }
     } catch {
       // Private mode or blocked storage; the default is fine.
     }
   }, []);
+
+  const chooseEngine = (next: Engine) => {
+    setEngine(next);
+    try {
+      window.localStorage.setItem(ENGINE_KEY, next);
+    } catch {
+      // Only affects the next visit.
+    }
+  };
 
   const chooseLang = (next: SpeechLang) => {
     setLang(next);
@@ -73,25 +121,67 @@ export function VoiceBar() {
     }
   };
 
+  /**
+   * What to do with an understood command, whichever engine produced it.
+   *
+   * Kept in one place so the two engines cannot drift apart on the part that
+   * matters - which commands act immediately and which wait for a human.
+   */
+  const applyResultRef = useRef<(r: VoiceResult) => Promise<void>>(async () => {});
+  const applyResult = useCallback(
+    (interpreted: VoiceResult) => applyResultRef.current(interpreted),
+    [],
+  );
+
+  const runSave = useCallback(
+    async (command: WriteCommand) => {
+      setSaving(true);
+      try {
+        const outcome = await ACTIONS[command.kind](emptyActionState, buildPayload(command));
+        setSaveState(outcome);
+        if (outcome.ok) router.refresh();
+        return outcome;
+      } finally {
+        setSaving(false);
+        setAwaitingYes(false);
+        pendingRef.current = null;
+      }
+    },
+    [router],
+  );
+
   const handleFinal = useCallback(
     async (said: string) => {
+      // Hands-free: this utterance is the answer to "save karoon?", not a new
+      // command. Only an unmistakable yes saves; a no, a mumble, or somebody
+      // still talking all cancel, because the alternative is writing a record
+      // nobody agreed to.
+      if (modeRef.current === "confirm") {
+        modeRef.current = "command";
+        const pending = pendingRef.current;
+        if (parseConfirmation(said) === "confirm" && pending) {
+          const outcome = await runSave(pending);
+          speak(outcome.ok ? "Saved." : "That did not save.", lang);
+        } else {
+          setAwaitingYes(false);
+          pendingRef.current = null;
+          setSaveState({ ok: false, message: "Not saved - nothing was changed.", fieldErrors: {} });
+          speak("Cancelled.", lang);
+        }
+        return;
+      }
+
       setThinking(true);
       setSaveState(null);
       try {
-        const interpreted = await interpretVoiceAction(said);
-        setResult(interpreted);
-
-        // Safe to act on at once: neither changes anything.
-        if (interpreted.command.kind === "navigate") {
-          router.push(interpreted.command.href);
-        } else if (interpreted.answer) {
-          speak(interpreted.answer.speech, lang);
-        }
+        await applyResult(await interpretVoiceAction(said));
       } finally {
         setThinking(false);
       }
     },
-    [lang, router],
+    // applyResult changes with the same dependencies and is defined below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handsFree, lang, router, runSave],
   );
 
   const { supported, state, transcript, error, start, stop } = useSpeech({
@@ -99,16 +189,89 @@ export function VoiceBar() {
     onFinal: handleFinal,
   });
 
-  const listening = state === "listening";
+  // The Whisper path: record, upload, and feed the understood command into the
+  // same handler the browser engine uses - so hands-free, the confirmation
+  // cards and every safety rule behave identically whichever engine is on.
+  const handleClip = useCallback(
+    async (audio: Blob) => {
+      setThinking(true);
+      setSaveState(null);
+      try {
+        const form = new FormData();
+        form.append("audio", audio, "command.webm");
+        form.append("language", lang === "ur-PK" ? "ur" : "en");
+        const outcome = await transcribeAndInterpretAction(form);
+        if (!outcome.ok) {
+          setWhisperError(outcome.reason);
+          return;
+        }
+        setWhisperError(null);
+        await applyResult(outcome.result);
+      } finally {
+        setThinking(false);
+      }
+    },
+    // applyResult is stable for the same reasons handleFinal is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lang],
+  );
+
+  const recorder = useRecorder({ onClip: handleClip });
+
+  startRef.current = engine === "whisper" ? recorder.start : start;
+
+  applyResultRef.current = async (interpreted: VoiceResult) => {
+    setResult(interpreted);
+    const command = interpreted.command;
+
+    // Safe to act on at once: neither changes anything.
+    if (command.kind === "navigate") {
+      router.push(command.href);
+      return;
+    }
+    if (interpreted.answer) {
+      speak(interpreted.answer.speech, lang);
+      return;
+    }
+
+    // A complete write, hands-free: read it back and listen for a yes. The
+    // microphone only opens once the app has finished speaking, or it would
+    // hear its own voice and confirm itself.
+    const writable =
+      command.kind === "booking" ||
+      command.kind === "payment" ||
+      command.kind === "batch" ||
+      command.kind === "sale" ||
+      command.kind === "shop";
+    if (handsFree && writable && command.missing.length === 0) {
+      pendingRef.current = command;
+      modeRef.current = "confirm";
+      setAwaitingYes(true);
+      speak(`${interpreted.summary} Save?`, lang, () => startRef.current());
+    }
+  };
+
+  const usingWhisper = engine === "whisper" && whisperAvailable;
+  const listening = usingWhisper ? recorder.state === "recording" : state === "listening";
+  const micUsable = usingWhisper ? recorder.supported : supported;
+  const activeError = usingWhisper ? (whisperError ?? recorder.error) : error;
   const command = result?.command;
 
   return (
     <Card className="mb-4 overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 p-4">
-        {supported ? (
+        {micUsable ? (
           <Button
             type="button"
-            onClick={listening ? stop : start}
+            onClick={
+              listening
+                ? usingWhisper
+                  ? recorder.stop
+                  : stop
+                : usingWhisper
+                  ? () => void recorder.start()
+                  : start
+            }
             disabled={thinking}
             variant={listening ? "destructive" : "default"}
             className="h-11 min-w-[150px]"
@@ -116,12 +279,12 @@ export function VoiceBar() {
             {listening ? (
               <>
                 <Square className="h-4 w-4" />
-                Stop
+                {usingWhisper ? `Stop (${recorder.seconds}s)` : "Stop"}
               </>
             ) : thinking ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Working
+                {usingWhisper ? "Transcribing" : "Working"}
               </>
             ) : (
               <>
@@ -132,9 +295,41 @@ export function VoiceBar() {
           </Button>
         ) : null}
 
-        {/* One engine per language: the browser cannot detect which is being
-            spoken, so it has to be told. */}
-        {supported ? (
+        {whisperAvailable ? (
+          <div role="group" aria-label="Engine" className="inline-flex rounded-md border p-0.5">
+            {(
+              [
+                ["whisper", "Whisper"],
+                ["browser", "Browser"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => chooseEngine(value)}
+                aria-pressed={engine === value}
+                disabled={listening || thinking}
+                title={
+                  value === "whisper"
+                    ? "Records a clip and transcribes it on the server. Much better at Urdu, takes a second or two."
+                    : "The browser's own recognition. Instant, but weak on Urdu."
+                }
+                className={cn(
+                  "rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
+                  engine === value
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {/* One engine per language: neither engine can detect which is being
+            spoken, so both have to be told. */}
+        {micUsable ? (
           <div role="group" aria-label="Language" className="inline-flex rounded-md border p-0.5">
             {(
               [
@@ -161,12 +356,33 @@ export function VoiceBar() {
           </div>
         ) : null}
 
+        {supported ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={handsFree}
+              onChange={(e) => {
+                setHandsFree(e.target.checked);
+                try {
+                  window.localStorage.setItem(HANDS_FREE_KEY, e.target.checked ? "on" : "off");
+                } catch {
+                  // Only affects the next visit.
+                }
+              }}
+              className="h-4 w-4"
+            />
+            <span className="text-muted-foreground">Hands-free</span>
+          </label>
+        ) : null}
+
         <p aria-live="polite" className="min-w-0 flex-1 text-sm">
           {listening ? (
             <span className="text-muted-foreground">{transcript || "Listening..."}</span>
           ) : result ? (
             <span>
-              <span className="text-muted-foreground">Heard: </span>
+              <span className="text-muted-foreground">
+                Heard{usingWhisper ? " (Whisper)" : ""}:{" "}
+              </span>
               &ldquo;{result.transcript}&rdquo;
             </span>
           ) : (
@@ -190,9 +406,18 @@ export function VoiceBar() {
         ) : null}
       </div>
 
-      {error ? (
+      {awaitingYes ? (
         <div className="border-t px-4 py-3">
-          <Alert tone="error">{error}</Alert>
+          <Alert tone="info">
+            Say <strong>haan</strong> to save, or <strong>nahi</strong> to cancel. Anything else
+            cancels.
+          </Alert>
+        </div>
+      ) : null}
+
+      {activeError ? (
+        <div className="border-t px-4 py-3">
+          <Alert tone="error">{activeError}</Alert>
         </div>
       ) : null}
 
@@ -224,10 +449,10 @@ export function VoiceBar() {
             Run
           </Button>
         </form>
-        {!supported ? (
+        {!micUsable ? (
           <p className="mt-2 text-xs text-muted-foreground">
-            This browser has no speech recognition, so the microphone is hidden. Typing works
-            exactly the same - it is the same interpreter.
+            This browser cannot use the microphone, so it is hidden. Typing works exactly the same -
+            it is the same interpreter.
           </p>
         ) : null}
       </div>
@@ -269,21 +494,14 @@ export function VoiceBar() {
           {command.kind === "booking" ||
           command.kind === "payment" ||
           command.kind === "batch" ||
-          command.kind === "sale" ? (
+          command.kind === "sale" ||
+          command.kind === "shop" ? (
             <ConfirmWrite
               command={command}
               saving={saving}
               saveState={saveState}
-              onSave={async (formData) => {
-                setSaving(true);
-                try {
-                  const action = ACTIONS[command.kind];
-                  const outcome = await action(emptyActionState, formData);
-                  setSaveState(outcome);
-                  if (outcome.ok) router.refresh();
-                } finally {
-                  setSaving(false);
-                }
+              onSave={async () => {
+                await runSave(command);
               }}
             />
           ) : null}
@@ -297,11 +515,82 @@ export function VoiceBar() {
  * Every write goes through the SAME server action a typed form uses, so voice
  * gets no shortcut around validation, stock checks or the audit trail.
  */
+type WriteCommand = Extract<
+  VoiceResult["command"],
+  { kind: "booking" | "payment" | "batch" | "sale" | "shop" }
+>;
+
+/**
+ * The form payload for a proposal.
+ *
+ * Module-level so the Save button and a spoken "haan" build the identical
+ * FormData - two code paths to the same write would be two chances to drift.
+ */
+function buildPayload(command: WriteCommand): FormData {
+  const form = new FormData();
+  if (command.kind === "booking") {
+    form.set("bookingDate", command.date);
+    form.set("areaId", String(command.areaId ?? ""));
+    if (command.shopId != null) form.set("shopId", String(command.shopId));
+    if (command.bookerId != null) form.set("bookerId", String(command.bookerId));
+    if (command.customerPhone) form.set("customerPhone", command.customerPhone);
+    form.set(
+      "lines",
+      JSON.stringify(
+        command.lines.map((l) => ({
+          productId: l.productId,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+        })),
+      ),
+    );
+    // A key per proposal, so pressing Save twice cannot book twice.
+    form.set(
+      "idempotencyKey",
+      `voice-${command.date}-${command.lines[0]?.productId}-${command.lines[0]?.quantity}-${command.areaId}`,
+    );
+  } else if (command.kind === "batch") {
+    form.set("productId", String(command.productId));
+    form.set("quantity", String(command.quantity));
+    form.set("unitCost", String(command.unitCost ?? ""));
+    form.set("receivedDate", command.date);
+    form.set(
+      "idempotencyKey",
+      `voice-batch-${command.productId}-${command.quantity}-${command.unitCost}-${command.date}`,
+    );
+  } else if (command.kind === "sale") {
+    form.set("productId", String(command.productId));
+    form.set("quantity", String(command.quantity));
+    form.set("salePrice", String(command.unitPrice));
+    form.set("saleDate", command.date);
+    form.set("areaId", String(command.areaId ?? ""));
+    if (command.shopId != null) form.set("shopId", String(command.shopId));
+    // A counter sale needs a batch, and voice does not choose batches - the
+    // oldest one with stock is the same FIFO rule a booking uses.
+    form.set("batchId", String(command.batchId ?? ""));
+    form.set(
+      "idempotencyKey",
+      `voice-sale-${command.productId}-${command.quantity}-${command.date}`,
+    );
+  } else if (command.kind === "shop") {
+    form.set("areaId", String(command.areaId ?? ""));
+    form.set("name", command.name);
+    if (command.phone) form.set("phone", command.phone);
+  } else {
+    form.set("bookingId", String(command.bookingId ?? ""));
+    form.set("amount", String(command.amount ?? ""));
+    form.set("paidOn", command.date);
+    form.set("method", "Cash");
+    form.set("idempotencyKey", `voice-${command.bookingId}-${command.amount}-${command.date}`);
+  }
+  return form;
+}
 const ACTIONS = {
   booking: createBookingAction,
   payment: recordPaymentAction,
   batch: createBatchAction,
   sale: createSaleAction,
+  shop: createShopAction,
 } as const;
 
 /**
@@ -317,67 +606,14 @@ function ConfirmWrite({
   saveState,
   onSave,
 }: {
-  command: Extract<VoiceResult["command"], { kind: "booking" | "payment" | "batch" | "sale" }>;
+  command: WriteCommand;
   saving: boolean;
   saveState: ActionState | null;
   onSave: (formData: FormData) => Promise<void>;
 }) {
   const blocked = command.missing.length > 0;
 
-  const submit = () => {
-    const form = new FormData();
-    if (command.kind === "booking") {
-      form.set("bookingDate", command.date);
-      form.set("areaId", String(command.areaId ?? ""));
-      if (command.shopId != null) form.set("shopId", String(command.shopId));
-      if (command.bookerId != null) form.set("bookerId", String(command.bookerId));
-      form.set(
-        "lines",
-        JSON.stringify(
-          command.lines.map((l) => ({
-            productId: l.productId,
-            quantity: l.quantity,
-            unitPrice: l.unitPrice,
-          })),
-        ),
-      );
-      // A key per proposal, so pressing Save twice cannot book twice.
-      form.set(
-        "idempotencyKey",
-        `voice-${command.date}-${command.lines[0]?.productId}-${command.lines[0]?.quantity}-${command.areaId}`,
-      );
-    } else if (command.kind === "batch") {
-      form.set("productId", String(command.productId));
-      form.set("quantity", String(command.quantity));
-      form.set("unitCost", String(command.unitCost ?? ""));
-      form.set("receivedDate", command.date);
-      form.set(
-        "idempotencyKey",
-        `voice-batch-${command.productId}-${command.quantity}-${command.unitCost}-${command.date}`,
-      );
-    } else if (command.kind === "sale") {
-      form.set("productId", String(command.productId));
-      form.set("quantity", String(command.quantity));
-      form.set("salePrice", String(command.unitPrice));
-      form.set("saleDate", command.date);
-      form.set("areaId", String(command.areaId ?? ""));
-      if (command.shopId != null) form.set("shopId", String(command.shopId));
-      // A counter sale needs a batch, and voice does not choose batches - the
-      // oldest one with stock is the same FIFO rule a booking uses.
-      form.set("batchId", String(command.batchId ?? ""));
-      form.set(
-        "idempotencyKey",
-        `voice-sale-${command.productId}-${command.quantity}-${command.date}`,
-      );
-    } else {
-      form.set("bookingId", String(command.bookingId ?? ""));
-      form.set("amount", String(command.amount ?? ""));
-      form.set("paidOn", command.date);
-      form.set("method", "Cash");
-      form.set("idempotencyKey", `voice-${command.bookingId}-${command.amount}-${command.date}`);
-    }
-    void onSave(form);
-  };
+  const submit = () => void onSave(buildPayload(command));
 
   return (
     <div className="space-y-3">
@@ -414,6 +650,9 @@ function ConfirmWrite({
               />
               <Row label="Date" value={command.date} />
               {command.bookerName ? <Row label="Booker" value={command.bookerName} /> : null}
+              {command.customerPhone ? (
+                <Row label="Customer phone" value={command.customerPhone} />
+              ) : null}
               {command.lines.length > 1 ? (
                 <Row
                   label="Order total"
@@ -437,6 +676,20 @@ function ConfirmWrite({
                 missing={command.unitCost == null}
               />
               <Row label="Received on" value={command.date} />
+            </>
+          ) : command.kind === "shop" ? (
+            <>
+              <Row
+                label="Shop name"
+                value={command.name || "missing"}
+                missing={command.name.length === 0}
+              />
+              <Row
+                label="In area"
+                value={command.areaName ?? "missing"}
+                missing={command.areaId == null}
+              />
+              {command.phone ? <Row label="Phone" value={command.phone} /> : null}
             </>
           ) : command.kind === "sale" ? (
             <>
@@ -525,6 +778,7 @@ const KIND_LABEL = {
   payment: "Payment",
   batch: "Stock in",
   sale: "Cash sale",
+  shop: "New shop",
 } as const;
 
 function Row({ label, value, missing }: { label: string; value: string; missing?: boolean }) {

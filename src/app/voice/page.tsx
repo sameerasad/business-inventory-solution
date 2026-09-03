@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { PageHeader } from "@/components/page-header";
 import { VoiceBar } from "@/components/voice/voice-bar";
+import { voiceEnginesAvailable } from "@/actions/voice";
 import { Card } from "@/components/ui/card";
 
 export const metadata: Metadata = { title: "Voice" };
@@ -15,15 +16,19 @@ export const dynamic = "force-dynamic";
  * recording, and this is the kind of thing someone opens deliberately, puts the
  * phone down, and works through a stack of order slips with.
  */
-export default function VoicePage() {
+export default async function VoicePage() {
+  // Asked on the server: whether Whisper is available depends on an API key
+  // that must never reach the browser.
+  const { groq } = await voiceEnginesAvailable();
+
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Voice"
-        description="Speak in English or Urdu. Opening a page and asking for a figure happen straight away. An order or a payment is only filled in for you - you still press Save."
+        description="Speak in English or Urdu. Opening a page and asking for a figure happen straight away. Anything that writes is filled in for you and waits for a yes - either the Save button, or your voice with Hands-free on."
       />
 
-      <VoiceBar />
+      <VoiceBar whisperAvailable={groq} />
 
       <Card className="p-5">
         <h2 className="text-sm font-semibold">What you can say</h2>
@@ -89,6 +94,17 @@ export default function VoicePage() {
             ]}
           />
           <Phrases
+            title="Add a shop"
+            note="Filled in for you. The name is dictated, so check the spelling."
+            items={[
+              ["new shop Al Madina Store in Downtown", "nai dukan Al Madina Store Downtown mein"],
+              [
+                "add shop Bismillah Kiryana in North Zone phone 03211234567",
+                "nai dukan Bismillah Kiryana North Zone mein phone 03211234567",
+              ],
+            ]}
+          />
+          <Phrases
             title="Record a payment"
             note="Filled in for you. You press Save."
             items={[
@@ -123,6 +139,25 @@ export default function VoicePage() {
             <strong className="text-foreground">No microphone? Type it.</strong> The box above the
             examples runs the same interpreter, which is also the quickest way to check a phrasing
             or fix one that was misheard.
+          </p>
+          <p>
+            <strong className="text-foreground">Hands-free</strong> reads the proposal back and
+            listens for an answer, so a whole order can be done without touching anything. Only a
+            clear <strong>haan</strong>, <strong>ji</strong>, <strong>yes</strong> or{" "}
+            <strong>save karo</strong> saves it. A no, a mumble, silence, or you carrying on talking
+            all cancel - the safe outcome is always the one that writes nothing.
+          </p>
+          <p>
+            <strong className="text-foreground">A phone number can be dictated</strong> - ten or
+            more digits are read as a phone, never as a quantity or a price. Customer names are
+            still typed: a misheard name is printed on the invoice and goes to the customer.
+          </p>
+          <p>
+            <strong className="text-foreground">Two engines.</strong> <strong>Whisper</strong>{" "}
+            records a short clip and transcribes it on the server - much better at Urdu and at
+            mixing Urdu with English, and it is told your shop and area names in advance so it can
+            produce them. <strong>Browser</strong> is Google&rsquo;s built-in recognition: instant,
+            but weak on Urdu. Both send audio off the device; both are free.
           </p>
           <p>
             Needs Chrome, Edge or a recent Safari, and an internet connection - the browser does the
