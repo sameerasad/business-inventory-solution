@@ -35,6 +35,9 @@ model Category {
 model Area {
   id        Int       @id @default(autoincrement())
   name      String    @unique
+  /// A short word to say out loud for this record, when its real name is hard
+  /// for speech recognition to hear. Voice matches on the name OR this.
+  voiceAlias String?  @map("voice_alias")
   isDeleted Boolean   @default(false) @map("is_deleted")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -51,6 +54,9 @@ model Shop {
   id        Int       @id @default(autoincrement())
   areaId    Int       @map("area_id")
   name      String
+  /// A short word to say out loud for this record, when its real name is hard
+  /// for speech recognition to hear. Voice matches on the name OR this.
+  voiceAlias String?  @map("voice_alias")
   /// Optional delivery address. Entered once per shop and printed on every
   /// invoice for that shop, so a booker never retypes it.
   address   String?
@@ -249,6 +255,9 @@ model Booker {
   name      String    @unique
   /// Optional short code / employee number used on paperwork.
   code      String?
+  /// A short word to say out loud for this record, when its real name is hard
+  /// for speech recognition to hear. Voice matches on the name OR this.
+  voiceAlias String?  @map("voice_alias")
   phone     String?
   notes     String?
   /// Retired bookers keep all their history but drop out of the booking picker.

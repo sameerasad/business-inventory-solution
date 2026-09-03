@@ -56,6 +56,17 @@ const optionalNotes = z
   .optional()
   .transform((v) => (v ? v : null));
 
+/**
+ * A spoken nickname. Short by design: the point is a word the speech engine can
+ * hear reliably, and a long alias defeats that.
+ */
+const voiceAlias = z
+  .string()
+  .trim()
+  .max(40, "Voice name cannot exceed 40 characters")
+  .optional()
+  .transform((v) => (v ? v : null));
+
 const shortName = (label: string, max = 120) =>
   z
     .string()
@@ -133,11 +144,13 @@ export const areaSchema = z.object({
 export const updateAreaSchema = z.object({
   id: dbId("Area"),
   name: shortName("Area name"),
+  voiceAlias,
 });
 
 export const shopSchema = z.object({
   areaId: dbId("Area"),
   name: shortName("Shop name"),
+  voiceAlias,
   address: z
     .string()
     .trim()
@@ -155,6 +168,7 @@ export const shopSchema = z.object({
 export const updateShopSchema = z.object({
   id: dbId("Shop"),
   name: shortName("Shop name"),
+  voiceAlias,
   address: z
     .string()
     .trim()
@@ -223,7 +237,12 @@ export function deriveSku(input: {
   const packPart = packSource.slice(0, 3).toUpperCase().padEnd(3, "X");
 
   const digits = input.variantValue.replace(/[^0-9]/g, "");
-  const variantPart = digits || input.variantValue.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase();
+  const variantPart =
+    digits ||
+    input.variantValue
+      .replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 4)
+      .toUpperCase();
 
   return [namePart, packPart, variantPart].filter(Boolean).join("-");
 }
@@ -263,10 +282,7 @@ export function success(message: string): ActionState {
  * server works out which batches to draw from.
  */
 export const bookingLineSchema = z.object({
-  productId: z
-    .number()
-    .int()
-    .positive("Pick a product for every line"),
+  productId: z.number().int().positive("Pick a product for every line"),
   quantity: z
     .number()
     .int("Quantity must be a whole number")
@@ -278,8 +294,11 @@ export const bookingLineSchema = z.object({
     .max(10_000_000, "Unit price is unrealistically large")
     // Money is stored to 2 decimals; reject anything finer so the invoice total
     // and the recorded revenue can never disagree by a rounding artefact.
-    .refine((n) => Number.isInteger(Math.round(n * 100)) && Math.abs(n * 100 - Math.round(n * 100)) < 1e-9,
-      "Unit price cannot have more than 2 decimals"),
+    .refine(
+      (n) =>
+        Number.isInteger(Math.round(n * 100)) && Math.abs(n * 100 - Math.round(n * 100)) < 1e-9,
+      "Unit price cannot have more than 2 decimals",
+    ),
 });
 export type BookingLineInput = z.infer<typeof bookingLineSchema>;
 
@@ -298,7 +317,10 @@ const bookingLinesFromJson = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Could not read the order lines" });
       return z.NEVER;
     }
-    const result = z.array(bookingLineSchema).min(1, "Add at least one product line").safeParse(parsed);
+    const result = z
+      .array(bookingLineSchema)
+      .min(1, "Add at least one product line")
+      .safeParse(parsed);
     if (!result.success) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -337,6 +359,7 @@ export type CreateBookingInput = z.infer<typeof createBookingSchema>;
 
 const bookerFields = {
   name: shortName("Booker name", 120),
+  voiceAlias,
   code: z
     .string()
     .trim()

@@ -77,6 +77,7 @@ export default async function BookersPage({
         phone: true,
         notes: true,
         isActive: true,
+        voiceAlias: true,
         _count: { select: { bookings: true } },
         areas: {
           orderBy: { area: { name: "asc" } },

@@ -85,6 +85,8 @@ function AreaCard({ area, bookers }: { area: AreaWithShops; bookers: AreaBooker[
                 defaultValue={area.name}
                 submitLabel="Save"
                 compact
+                withVoiceAlias
+                defaultVoiceAlias={area.voiceAlias ?? ""}
                 onSuccess={() => setRenaming(false)}
                 onCancel={() => setRenaming(false)}
               />
@@ -93,8 +95,8 @@ function AreaCard({ area, bookers }: { area: AreaWithShops; bookers: AreaBooker[
             <div className="min-w-0">
               <h2 className="truncate text-sm font-semibold">{area.name}</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {area.shops.length} shop{area.shops.length === 1 ? "" : "s"} ·{" "}
-                {area.salesCount} sale{area.salesCount === 1 ? "" : "s"}
+                {area.shops.length} shop{area.shops.length === 1 ? "" : "s"} · {area.salesCount}{" "}
+                sale{area.salesCount === 1 ? "" : "s"}
               </p>
             </div>
           )}
@@ -153,6 +155,7 @@ function ShopRow({
     name: string;
     address: string | null;
     phone: string | null;
+    voiceAlias: string | null;
     salesCount: number;
   };
 }) {
@@ -169,6 +172,8 @@ function ShopRow({
           withShopFields
           defaultAddress={shop.address ?? ""}
           defaultPhone={shop.phone ?? ""}
+          withVoiceAlias
+          defaultVoiceAlias={shop.voiceAlias ?? ""}
           submitLabel="Save"
           compact
           onSuccess={() => setRenaming(false)}
@@ -184,10 +189,11 @@ function ShopRow({
         <span className="flex min-w-0 items-center gap-2">
           <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{shop.name}</span>
-          {shop.salesCount > 0 ? (
-            <Badge variant="outline">{shop.salesCount} sales</Badge>
-          ) : null}
+          {shop.salesCount > 0 ? <Badge variant="outline">{shop.salesCount} sales</Badge> : null}
         </span>
+        {shop.voiceAlias ? (
+          <p className="text-xs text-muted-foreground">Say &ldquo;{shop.voiceAlias}&rdquo;</p>
+        ) : null}
         {shop.address || shop.phone ? (
           <span className="pl-5 text-xs text-muted-foreground">
             {[shop.address, shop.phone].filter(Boolean).join("  ·  ")}
@@ -230,6 +236,8 @@ function NameForm({
   withShopFields,
   defaultAddress = "",
   defaultPhone = "",
+  withVoiceAlias,
+  defaultVoiceAlias = "",
   onSuccess,
   onCancel,
 }: {
@@ -246,6 +254,12 @@ function NameForm({
   withShopFields?: boolean;
   defaultAddress?: string;
   defaultPhone?: string;
+  /**
+   * Offered on rename forms only. A spoken nickname is something you set once
+   * for a record you already have, not a decision to make while creating it.
+   */
+  withVoiceAlias?: boolean;
+  defaultVoiceAlias?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
 }) {
@@ -253,6 +267,7 @@ function NameForm({
   const [value, setValue] = useState(defaultValue);
   const [address, setAddress] = useState(defaultAddress);
   const [phone, setPhone] = useState(defaultPhone);
+  const [alias, setAlias] = useState(defaultVoiceAlias);
 
   useEffect(() => {
     if (state.ok) {
@@ -262,6 +277,7 @@ function NameForm({
         setValue("");
         setAddress("");
         setPhone("");
+        setAlias("");
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -325,6 +341,23 @@ function NameForm({
             aria-label="Shop phone"
             disabled={isPending}
           />
+        </div>
+      ) : null}
+
+      {withVoiceAlias ? (
+        <div>
+          <Input
+            name="voiceAlias"
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            placeholder="Voice name (optional) - e.g. rakshani"
+            aria-label="Voice name"
+            disabled={isPending}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Say this instead of the full name. Useful when speech recognition struggles with the
+            real one.
+          </p>
         </div>
       ) : null}
 

@@ -33,6 +33,7 @@ export async function createBookerAction(
     code: formData.get("code") ?? undefined,
     phone: formData.get("phone") ?? undefined,
     notes: formData.get("notes") ?? undefined,
+    voiceAlias: formData.get("voiceAlias") ?? undefined,
   });
   if (!parsed.success) {
     return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
@@ -96,6 +97,7 @@ export async function updateBookerAction(
     code: formData.get("code") ?? undefined,
     phone: formData.get("phone") ?? undefined,
     notes: formData.get("notes") ?? undefined,
+    voiceAlias: formData.get("voiceAlias") ?? undefined,
   });
   if (!parsed.success) {
     return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));

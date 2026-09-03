@@ -27,6 +27,7 @@ export type BookerAdmin = {
   notes: string | null;
   isActive: boolean;
   bookings: number;
+  voiceAlias: string | null;
   /** Their assigned areas - the territory they are responsible for. */
   areas: AreaChoice[];
 };
@@ -106,7 +107,11 @@ function BookerCard({ booker, areas }: { booker: BookerAdmin; areas: AreaChoice[
                   {!booker.isActive ? <Badge variant="outline">Retired</Badge> : null}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {[booker.phone, `${booker.bookings} booking${booker.bookings === 1 ? "" : "s"}`]
+                  {[
+                    booker.phone,
+                    booker.voiceAlias ? `say "${booker.voiceAlias}"` : null,
+                    `${booker.bookings} booking${booker.bookings === 1 ? "" : "s"}`,
+                  ]
                     .filter(Boolean)
                     .join("  ·  ")}
                 </p>
@@ -158,6 +163,7 @@ function BookerForm({
   const [code, setCode] = useState(defaults?.code ?? "");
   const [phone, setPhone] = useState(defaults?.phone ?? "");
   const [notes, setNotes] = useState(defaults?.notes ?? "");
+  const [alias, setAlias] = useState(defaults?.voiceAlias ?? "");
 
   useEffect(() => {
     if (state.ok) onDone();
@@ -185,7 +191,12 @@ function BookerForm({
             autoFocus
           />
         </Field>
-        <Field label="Code" htmlFor={`bk-code-${id}`} error={state.fieldErrors.code} hint="Optional">
+        <Field
+          label="Code"
+          htmlFor={`bk-code-${id}`}
+          error={state.fieldErrors.code}
+          hint="Optional"
+        >
           <Input
             id={`bk-code-${id}`}
             name="code"
@@ -211,6 +222,22 @@ function BookerForm({
           />
         </Field>
       </div>
+
+      <Field
+        label="Voice name"
+        htmlFor={`bk-voice-${id}`}
+        error={state.fieldErrors.voiceAlias}
+        hint="Optional. Say this instead of the full name when booking by voice."
+      >
+        <Input
+          id={`bk-voice-${id}`}
+          name="voiceAlias"
+          value={alias}
+          onChange={(e) => setAlias(e.target.value)}
+          placeholder="e.g. saifi"
+          disabled={isPending}
+        />
+      </Field>
 
       <Field label="Notes" htmlFor={`bk-notes-${id}`} error={state.fieldErrors.notes}>
         <Input

@@ -399,6 +399,7 @@ export async function getAreasWithShops() {
           name: true,
           address: true,
           phone: true,
+          voiceAlias: true,
           _count: { select: { sales: true } },
         },
       },
@@ -408,12 +409,14 @@ export async function getAreasWithShops() {
   return areas.map((a) => ({
     id: a.id,
     name: a.name,
+    voiceAlias: a.voiceAlias,
     salesCount: a._count.sales,
     shops: a.shops.map((s) => ({
       id: s.id,
       name: s.name,
       address: s.address,
       phone: s.phone,
+      voiceAlias: s.voiceAlias,
       salesCount: s._count.sales,
     })),
   }));
