@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AddShopDialog } from "@/components/forms/add-shop-dialog";
+import { BookingDictate, type DictatedBooking } from "@/components/forms/booking-dictate";
 import { SubmitButton, useIdempotencyKey } from "@/components/forms/form-bits";
 import type { AreaOption } from "@/components/forms/sale-form";
 
@@ -52,10 +53,13 @@ export function BookingForm({
   products,
   areas,
   bookers,
+  whisperAvailable = false,
 }: {
   products: BookableProduct[];
   areas: AreaOption[];
   bookers: { id: number; name: string; code: string | null; areaIds: number[] }[];
+  /** Whether the server can transcribe with Whisper, for the voice filler. */
+  whisperAvailable?: boolean;
 }) {
   const [state, formAction, isPending] = useActionState(createBookingAction, emptyActionState);
   const { key: idempotencyKey, rotate } = useIdempotencyKey();
@@ -75,6 +79,32 @@ export function BookingForm({
   >([]);
 
   const byId = useMemo(() => new Map(products.map((p) => [String(p.id), p])), [products]);
+
+  /**
+   * Writes a dictated order into the form's own state.
+   *
+   * Into the real fields, not a separate preview: that is the whole point of
+   * doing this here rather than on the Voice page. A misheard quantity is then
+   * a number on screen that can be corrected with the keyboard, instead of a
+   * reason to say the entire order again.
+   */
+  const applyDictated = (command: DictatedBooking) => {
+    setBookingDate(command.date);
+    setBookerId(command.bookerId == null ? "" : String(command.bookerId));
+    setCustomerPhone(command.customerPhone ?? "");
+    setAreaId(command.areaId == null ? "" : String(command.areaId));
+    setShopId(command.shopId == null ? NO_SHOP : String(command.shopId));
+    setLines(
+      command.lines.length === 0
+        ? [blankLine()]
+        : command.lines.map((line, index) => ({
+            key: `dictated-${index}-${line.productId}`,
+            productId: String(line.productId),
+            quantity: String(line.quantity),
+            unitPrice: String(line.unitPrice),
+          })),
+    );
+  };
 
   useEffect(() => {
     if (state.ok) {
@@ -194,8 +224,11 @@ export function BookingForm({
 
       {/* ------------------------------------------------ who and when */}
       <Card>
-        <CardHeader>
-          <CardTitle>Customer &amp; date</CardTitle>
+        <CardHeader className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3">
+            <CardTitle>Customer &amp; date</CardTitle>
+            <BookingDictate whisperAvailable={whisperAvailable} onFilled={applyDictated} />
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -266,7 +299,11 @@ export function BookingForm({
               />
             </Field>
 
-            <Field label="Customer phone" htmlFor="customerPhone" error={state.fieldErrors.customerPhone}>
+            <Field
+              label="Customer phone"
+              htmlFor="customerPhone"
+              error={state.fieldErrors.customerPhone}
+            >
               <Input
                 id="customerPhone"
                 name="customerPhone"
@@ -277,7 +314,6 @@ export function BookingForm({
               />
             </Field>
           </div>
-
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
@@ -319,7 +355,11 @@ export function BookingForm({
               hint={selectedArea == null ? "Pick an area first." : undefined}
             >
               <div className="flex items-center gap-2">
-                <Select value={shopId} disabled={isPending || selectedArea == null} onValueChange={setShopId}>
+                <Select
+                  value={shopId}
+                  disabled={isPending || selectedArea == null}
+                  onValueChange={setShopId}
+                >
                   <SelectTrigger id="shop">
                     <SelectValue placeholder="Direct Sale / No Shop" />
                   </SelectTrigger>
@@ -369,9 +409,7 @@ export function BookingForm({
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
-          {state.fieldErrors.lines ? (
-            <Alert tone="error">{state.fieldErrors.lines}</Alert>
-          ) : null}
+          {state.fieldErrors.lines ? <Alert tone="error">{state.fieldErrors.lines}</Alert> : null}
 
           {combinedOverStock.length > 0 ? (
             <Alert tone="error">
@@ -469,9 +507,7 @@ export function BookingForm({
                   className="sm:mb-0.5"
                   aria-label={`Remove line ${index + 1}`}
                   disabled={isPending || lines.length === 1}
-                  onClick={() =>
-                    setLines((prev) => prev.filter((l) => l.key !== row.line.key))
-                  }
+                  onClick={() => setLines((prev) => prev.filter((l) => l.key !== row.line.key))}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -519,10 +555,10 @@ export function BookingForm({
             {areaId === ""
               ? "Pick an area."
               : filledLines.length !== lines.length
-                  ? "Every line needs a product, quantity and price."
-                  : combinedOverStock.length > 0
-                    ? "Reduce the quantities that exceed stock."
-                    : "Add at least one product line."}
+                ? "Every line needs a product, quantity and price."
+                : combinedOverStock.length > 0
+                  ? "Reduce the quantities that exceed stock."
+                  : "Add at least one product line."}
           </p>
         ) : null}
         <Badge variant="outline" className="ml-auto">

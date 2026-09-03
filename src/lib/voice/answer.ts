@@ -281,17 +281,17 @@ export async function getVoiceCatalog() {
     prisma.area.findMany({
       where: { isDeleted: false },
       orderBy: { name: "asc" },
-      select: { id: true, name: true },
+      select: { id: true, name: true, voiceAlias: true },
     }),
     prisma.shop.findMany({
       where: { isDeleted: false },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, areaId: true },
+      select: { id: true, name: true, areaId: true, voiceAlias: true },
     }),
     prisma.booker.findMany({
       where: { isDeleted: false, isActive: true },
       orderBy: { name: "asc" },
-      select: { id: true, name: true },
+      select: { id: true, name: true, voiceAlias: true },
     }),
     // Only invoices with something still owed: a paid one is not what "payment
     // received" refers to, and offering it invites a double entry.

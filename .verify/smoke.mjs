@@ -159,10 +159,14 @@ const pages = [
       "Record a payment",
       "Receive stock",
       "Cash sale at the counter",
+      "Add a shop",
+      // The hands-free toggle and its safety wording must both be on the page.
+      "Hands-free",
+      "all cancel",
       // The typed fallback must render even where speech is unsupported.
       "Or type it",
       // The safety promise is part of the page, not just the code.
-      "you still press Save",
+      "waits for a yes",
     ],
   ],
   [
@@ -191,6 +195,12 @@ const pages = [
       "Order total",
       // The booker picker must offer the seeded booker, not an empty state.
       "Sample Booker",
+      // Dictating the order lives on this page, so its entry point must render
+      // server-side even though the microphone is client-only.
+      // Only the typed half is asserted: the microphone button renders after
+      // hydration, once the browser has said whether it supports recording, so
+      // it is never in the server HTML.
+      "or type the whole order",
     ],
   ],
   [
@@ -259,6 +269,9 @@ const pages = [
       "New area",
       // Coverage is shown per area, and an unassigned one links to the fix.
       "No booker assigned",
+      // The Voice name field is deliberately NOT asserted here: it lives inside
+      // the rename form, which only exists after a click, so the server HTML
+      // cannot contain it. The parser tests cover what it does.
       'href="/bookers"',
     ],
   ],

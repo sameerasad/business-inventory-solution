@@ -227,6 +227,14 @@ export const PHRASES: [RegExp, string][] = [
   [/\bpaid\s+in\s+full\b/g, "paidinfull"],
   [/\bday\s+before\s+yesterday\b/g, "parson"],
   [/\bhow\s+much\b/g, "howmuch"],
+  [/\bnew\s+shop\b/g, "newshop"],
+  [/\badd\s+(?:a\s+)?shop\b/g, "addshop"],
+  // duka{1,2}n, not dukaan?: both "dukan" and "dukaan" are said, and requiring
+  // a double a matched neither of the common spellings.
+  [/\bna(?:i|yi|ya)\s+duka{1,2}n\b/g, "naidukan"],
+  [/\bduka{1,2}n\s+add\b/g, "dukanadd"],
+  [/\bsave\s+kar(?:o|do|dein)\b/g, "save"],
+  [/\bنئی\s*دکان\b/g, "naidukan"],
 ];
 
 /* --------------------------------------------------------------------- dates */
@@ -267,18 +275,34 @@ export const NAVIGATE_VERBS = [
   "goto",
   "navigate",
   "take",
+  "display",
+  // Roman spellings vary with accent, and the engine picks one of them at
+  // random from utterance to utterance - so all of them are listed.
   "kholo",
+  "kholoo",
   "kholiye",
+  "kholein",
   "khol",
+  "kholna",
   "dikhao",
   "dikhaao",
+  "dikhaein",
   "dikha",
   "jao",
+  "jaein",
   "chalo",
+  "lao",
   "کھولو",
+  "کھولیں",
+  "کھول",
+  "کھولنا",
   "دکھاؤ",
+  "دکھائیں",
+  "دکھا",
   "جاؤ",
+  "جائیں",
   "چلو",
+  "لاؤ",
 ];
 
 /** Words that mean "tell me a figure". */
@@ -371,10 +395,22 @@ export const PAYMENT_VERBS = [
  * navigation. Only words that actually describe goods arriving.
  */
 export const BATCH_VERBS = [
-  "aaya", "aaye", "aayi", "aagaye",
-  "khareeda", "kharida", "kharidi", "khareede",
-  "purchase", "purchased", "stockin", "restock",
-  "آیا", "آئے", "خریدا", "خریدے",
+  "aaya",
+  "aaye",
+  "aayi",
+  "aagaye",
+  "khareeda",
+  "kharida",
+  "kharidi",
+  "khareede",
+  "purchase",
+  "purchased",
+  "stockin",
+  "restock",
+  "آیا",
+  "آئے",
+  "خریدا",
+  "خریدے",
 ];
 
 /**
@@ -384,8 +420,13 @@ export const BATCH_VERBS = [
  * "received" - which otherwise means both money arriving and stock arriving.
  */
 export const COST_WORDS = new Set([
-  "cost", "lagat", "kharch", "kharcha", "purchase",
-  "لاگت", "خرچ",
+  "cost",
+  "lagat",
+  "kharch",
+  "kharcha",
+  "purchase",
+  "لاگت",
+  "خرچ",
 ]);
 
 /**
@@ -394,8 +435,13 @@ export const COST_WORDS = new Set([
  * distinction has to be spoken.
  */
 export const COUNTER_WORDS = new Set([
-  "cash", "counter", "nagad", "naqad", "hathon",
-  "نقد", "کاؤنٹر",
+  "cash",
+  "counter",
+  "nagad",
+  "naqad",
+  "hathon",
+  "نقد",
+  "کاؤنٹر",
 ]);
 
 /** Conjunctions that separate one order line from the next. */
@@ -530,6 +576,21 @@ export const PRICE_WORDS = new Set([
   "فی",
 ]);
 
+/**
+ * Words that name a locality in the abstract, and so are never part of a shop's
+ * own name. Distinct from PLACE_WORDS, which includes "shop" and "dukan" -
+ * those ARE part of shop names all the time ("Corner Store", "Kiryana Store").
+ */
+export const LOCALITY_WORDS = new Set([
+  "area",
+  "zone",
+  "ilaqa",
+  "ilaqay",
+  "sector",
+  "علاقہ",
+  "ایریا",
+]);
+
 /** Words that introduce a shop or an area. */
 export const PLACE_WORDS = new Set([
   "shop",
@@ -541,6 +602,108 @@ export const PLACE_WORDS = new Set([
   "دکان",
   "علاقہ",
   "ایریا",
+]);
+
+/* ------------------------------------------------------------ confirmation */
+
+/**
+ * Words that mean yes, and only those.
+ *
+ * The list is deliberately short. Spoken confirmation saves a stock movement,
+ * so anything that is not unmistakably yes has to fall through to cancel -
+ * "hmm", a half-word, or the tail of the previous sentence must never count.
+ */
+export const CONFIRM_WORDS = new Set([
+  "yes",
+  "yeah",
+  "yep",
+  "yup",
+  "save",
+  "ok",
+  "okay",
+  "correct",
+  "confirm",
+  "done",
+  "haan",
+  "han",
+  "haa",
+  "ha",
+  "ji",
+  "jee",
+  "bilkul",
+  "theek",
+  "thik",
+  "sahi",
+  "karo",
+  "ہاں",
+  "جی",
+  "بالکل",
+  "ٹھیک",
+  "صحیح",
+  "کرو",
+  "محفوظ",
+]);
+
+/** Words that mean no. Anything unclear is treated as one of these. */
+export const CANCEL_WORDS = new Set([
+  "no",
+  "nope",
+  "cancel",
+  "stop",
+  "wrong",
+  "wait",
+  "nahi",
+  "nahin",
+  "na",
+  "chodo",
+  "chhodo",
+  "rehne",
+  "ruko",
+  "galat",
+  "band",
+  "نہیں",
+  "نہ",
+  "چھوڑو",
+  "رکو",
+  "غلط",
+  "بند",
+]);
+
+/* ------------------------------------------------------------ new shop */
+
+/** Words that mean "add a shop I have not dealt with before". */
+export const NEW_SHOP_VERBS = [
+  "newshop",
+  "addshop",
+  "shopadd",
+  "naidukan",
+  "nayidukan",
+  "dukanadd",
+  "نئیدکان",
+  "دکاناضافہ",
+];
+
+/**
+ * Words that introduce a phone number.
+ *
+ * A number of ten digits or more is treated as a phone regardless, because no
+ * quantity or price in this business has that many digits - but a marker word
+ * makes a shorter landline work too.
+ */
+export const PHONE_WORDS = new Set([
+  "phone",
+  "number",
+  "mobile",
+  "cell",
+  "contact",
+  "nambar",
+  "number",
+  "mobail",
+  "raabta",
+  "فون",
+  "نمبر",
+  "موبائل",
+  "رابطہ",
 ]);
 
 /* -------------------------------------------------------- product name aliases */
@@ -582,21 +745,61 @@ export const PRODUCT_ALIASES: Record<string, string> = {
 /* --------------------------------------------------------------- destinations */
 
 /** Pages voice can open, with the words that reach them. */
+/**
+ * Pages voice can open, with the words that reach them.
+ *
+ * Every page needs its words in BOTH scripts, and that includes the English
+ * loanwords. Speaking Urdu, "bookings kholo" comes back from the browser as
+ * "بکنگ کھولو" - and Urdu script shares no letters with Roman, so fuzzy matching
+ * cannot bridge the two. A missing script here is not a near miss, it is a
+ * total miss, which is why the same page is listed under half a dozen spellings.
+ *
+ * Loanwords are the ones to watch: Urdu writes "booking" phonetically as بکنگ,
+ * "stock" as اسٹاک, "sales" as سیلز. Those spellings are what the engine
+ * actually produces, so they matter more than the native translations.
+ */
 export const DESTINATIONS: { href: string; label: string; words: string[] }[] = [
   {
     href: "/dashboard",
     label: "Dashboard",
-    words: ["dashboard", "home", "summary", "khulasa", "ڈیش بورڈ", "ہوم"],
+    words: ["dashboard", "home", "summary", "khulasa", "ڈیش بورڈ", "ڈیشبورڈ", "ہوم", "خلاصہ"],
   },
   {
     href: "/bookings/new",
     label: "New Booking",
-    words: ["new booking", "naya order", "naya booking", "booking form", "نیا آرڈر"],
+    words: [
+      "new booking",
+      "naya order",
+      "naya booking",
+      "nayi booking",
+      "booking form",
+      "نیا آرڈر",
+      "نئی بکنگ",
+      "نیا بکنگ",
+      "نئی بُکنگ",
+      "نیا آرڈر لو",
+    ],
   },
   {
     href: "/bookings",
     label: "Bookings",
-    words: ["bookings", "booking", "orders", "invoices", "invoice", "آرڈرز", "آرڈر"],
+    words: [
+      "bookings",
+      "booking",
+      "orders",
+      "invoices",
+      "invoice",
+      // The loanword spellings are what Urdu mode actually returns.
+      "بکنگ",
+      "بکنگز",
+      "بُکنگ",
+      "بکنگیں",
+      "آرڈرز",
+      "آرڈر",
+      "انوائس",
+      "انوائسز",
+      "بل",
+    ],
   },
   {
     href: "/receivables",
@@ -609,40 +812,120 @@ export const DESTINATIONS: { href: string; label: string; words: string[] }[] = 
       "udhaar",
       "baqaya",
       "baqaaya",
+      "wasooli",
       "ادھار",
+      "اُدھار",
       "بقایا",
+      "باقیات",
+      "وصولی",
+      "ریسیویبل",
     ],
   },
   {
     href: "/sales/new",
     label: "New Sale",
-    words: ["new sale", "naya sale", "counter sale", "نئی سیل"],
+    words: [
+      "new sale",
+      "naya sale",
+      "nayi sale",
+      "counter sale",
+      "cash sale",
+      "نئی سیل",
+      "نیا سیل",
+      "کیش سیل",
+      "کاؤنٹر سیل",
+    ],
   },
-  { href: "/sales", label: "Sales", words: ["sales", "sale", "bikri", "بکری", "سیلز"] },
+  {
+    href: "/sales",
+    label: "Sales",
+    words: ["sales", "sale", "bikri", "بکری", "سیلز", "سیل", "فروخت"],
+  },
   {
     href: "/batches/new",
     label: "New Batch",
-    words: ["new batch", "naya batch", "stock in", "نیا بیچ"],
+    words: [
+      "new batch",
+      "naya batch",
+      "stock in",
+      "naya stock",
+      "نیا بیچ",
+      "نیا اسٹاک",
+      "اسٹاک ان",
+    ],
   },
   {
     href: "/batches",
     label: "Batches",
-    words: ["batches", "batch", "stock", "inventory", "maal", "مال", "اسٹاک"],
+    words: [
+      "batches",
+      "batch",
+      "stock",
+      "inventory",
+      "maal",
+      "بیچ",
+      "بیچز",
+      "مال",
+      "اسٹاک",
+      "انوینٹری",
+      "سٹاک",
+    ],
   },
   {
     href: "/products",
     label: "Products",
-    words: ["products", "product", "catalog", "items", "cheezain", "پروڈکٹس", "اشیاء"],
+    words: [
+      "products",
+      "product",
+      "catalog",
+      "items",
+      "cheezain",
+      "پروڈکٹ",
+      "پروڈکٹس",
+      "اشیاء",
+      "آئٹمز",
+      "کیٹلاگ",
+    ],
   },
   {
     href: "/bookers",
     label: "Bookers",
-    words: ["bookers", "booker", "salesman", "salesmen", "staff", "بکرز", "بکر"],
+    words: [
+      "bookers",
+      "booker",
+      "salesman",
+      "salesmen",
+      "staff",
+      "بکرز",
+      "بکر",
+      "سیلزمین",
+      "اسٹاف",
+      "عملہ",
+    ],
+  },
+  {
+    href: "/voice",
+    label: "Voice",
+    words: ["voice", "voice page", "awaz", "آواز", "وائس"],
   },
   {
     href: "/areas",
     label: "Areas & Shops",
-    words: ["areas", "area", "shops", "shop", "ilaqa", "ilaqay", "علاقے", "دکانیں"],
+    words: [
+      "areas",
+      "area",
+      "shops",
+      "shop",
+      "ilaqa",
+      "ilaqay",
+      "dukanain",
+      "علاقے",
+      "علاقہ",
+      "دکانیں",
+      "دکان",
+      "ایریا",
+      "ایریاز",
+    ],
   },
 ];
 

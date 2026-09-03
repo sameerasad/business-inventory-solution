@@ -13,8 +13,13 @@
 
 import {
   BATCH_VERBS,
+  CANCEL_WORDS,
+  CONFIRM_WORDS,
   COST_WORDS,
   COUNTER_WORDS,
+  NEW_SHOP_VERBS,
+  LOCALITY_WORDS,
+  PHONE_WORDS,
   DAY_OFFSETS,
   DESTINATIONS,
   LINE_SEPARATORS,
@@ -29,6 +34,7 @@ import {
   type QueryMetric,
   type QueryPeriod,
 } from "@/lib/voice/lexicon";
+import { readDateOrToday } from "@/lib/voice/dates";
 import {
   allNumbers,
   bestTokenHit,
@@ -57,9 +63,9 @@ export type VoiceCatalog = {
      */
     frontBatchId: number | null;
   }[];
-  areas: { id: number; name: string }[];
-  shops: { id: number; name: string; areaId: number }[];
-  bookers: { id: number; name: string }[];
+  areas: { id: number; name: string; voiceAlias: string | null }[];
+  shops: { id: number; name: string; areaId: number; voiceAlias: string | null }[];
+  bookers: { id: number; name: string; voiceAlias: string | null }[];
   /** Open invoices, so "invoice 12" and "Corner Store ka payment" both resolve. */
   invoices: { id: number; invoiceNo: string; customerName: string | null; balance: number }[];
 };
@@ -96,6 +102,8 @@ export type VoiceCommand =
       shopName: string | null;
       bookerId: number | null;
       bookerName: string | null;
+      /** Dictated digits, when a phone number was said. */
+      customerPhone: string | null;
       date: string;
       /** Things the parser could not fill and a human must. */
       missing: string[];
@@ -142,7 +150,40 @@ export type VoiceCommand =
       warnings: string[];
       confidence: Confidence;
     }
+  | {
+      kind: "shop";
+      name: string;
+      areaId: number | null;
+      areaName: string | null;
+      phone: string | null;
+      missing: string[];
+      warnings: string[];
+      confidence: Confidence;
+    }
   | { kind: "unknown"; reason: string };
+
+/**
+ * Was that a yes?
+ *
+ * Only an unmistakable yes counts. Everything else - a no, a half-word, silence,
+ * the tail of some other sentence - comes back as "cancel", because the thing on
+ * the other side of this decision is a stock movement or a payment. A false no
+ * costs one repeated sentence; a false yes costs a wrong record that nobody
+ * notices for weeks.
+ */
+export function parseConfirmation(transcript: string): "confirm" | "cancel" {
+  const tokens = tokenise(transcript);
+  if (tokens.length === 0) return "cancel";
+
+  // An explicit no anywhere in the utterance wins outright: "haan nahi ruko".
+  if (tokens.some((t) => CANCEL_WORDS.has(t))) return "cancel";
+
+  // A yes has to be most of what was said. "haan" is a yes; a long sentence
+  // that happens to contain "ji" is somebody still talking.
+  const yeses = tokens.filter((t) => CONFIRM_WORDS.has(t)).length;
+  if (yeses === 0) return "cancel";
+  return tokens.length <= 4 ? "confirm" : "cancel";
+}
 
 /* ------------------------------------------------------------------- helpers */
 
@@ -151,16 +192,34 @@ function hasAny(tokens: string[], words: string[]): boolean {
   return tokens.some((t) => set.has(t));
 }
 
-/** Best fuzzy match over named rows, with the runner-up so ties can be flagged. */
+/**
+ * Best fuzzy match over named rows, with the runner-up so ties can be flagged.
+ *
+ * A row may also carry a spoken nickname, and the better of the two scores
+ * wins. Fuzzy matching cannot rescue a transcription that shares no letters
+ * with the target - "Rakshani bazar" heard as "rock shanty bazaar" is not a
+ * near miss, it is a different string - so the alias is the escape hatch: a
+ * word the engine can hear, pointed at the record.
+ */
 function bestMatch<T>(
   spoken: string[],
   rows: T[],
   name: (row: T) => string,
   threshold = 0.6,
+  alias?: (row: T) => string | null,
 ): { row: T; score: number; ambiguous: boolean } | null {
   if (rows.length === 0) return null;
   const scored = rows
-    .map((row) => ({ row, score: nameScore(spoken, name(row)) }))
+    .map((row) => {
+      const spokenAlias = alias?.(row);
+      return {
+        row,
+        score: Math.max(
+          nameScore(spoken, name(row)),
+          spokenAlias ? nameScore(spoken, spokenAlias) : 0,
+        ),
+      };
+    })
     .sort((a, b) => b.score - a.score);
 
   const top = scored[0]!;
@@ -178,16 +237,56 @@ function isoDate(offsetDays: number, today = new Date()): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** An explicit date if one was spoken, otherwise today. */
-function readDate(tokens: string[], today: Date): { date: string; spoken: boolean } {
-  for (const token of tokens) {
-    const offset = DAY_OFFSETS[token];
-    if (offset != null) return { date: isoDate(offset, today), spoken: true };
+/**
+ * A dictated phone number, and the tokens it used up.
+ *
+ * Ten digits or more is a phone whatever else is going on: no quantity, price
+ * or cost in this business has that many. Shorter runs only count when a marker
+ * word like "number" sits beside them, so "500" stays a price.
+ *
+ * The tokens are returned so the caller can take them out before reading
+ * quantities - otherwise "03001234567" would be read as a quantity of three
+ * billion.
+ */
+function readPhone(tokens: string[]): { phone: string | null; used: Set<number> } {
+  const used = new Set<number>();
+
+  // Speech recognition splits a number as often as it joins it, so runs of
+  // consecutive digit tokens are stitched back together.
+  let index = 0;
+  while (index < tokens.length) {
+    if (!/^\d+$/.test(tokens[index]!)) {
+      index += 1;
+      continue;
+    }
+    let end = index;
+    let digits = "";
+    while (end < tokens.length && /^\d+$/.test(tokens[end]!)) {
+      digits += tokens[end]!;
+      end += 1;
+    }
+    const before = tokens[index - 1];
+    const marked = before != null && PHONE_WORDS.has(before);
+    if (digits.length >= 10 || (marked && digits.length >= 7)) {
+      for (let i = index; i < end; i += 1) used.add(i);
+      return { phone: digits, used };
+    }
+    index = end;
   }
-  // A full date is rare in speech but trivial to accept when it appears.
-  const explicit = tokens.find((t) => /^\d{4}-\d{2}-\d{2}$/.test(t));
-  if (explicit) return { date: explicit, spoken: true };
-  return { date: isoDate(0, today), spoken: false };
+
+  return { phone: null, used };
+}
+
+/**
+ * An explicit date if one was spoken, otherwise today.
+ *
+ * Delegates to the date reader, which understands day words, month names and
+ * separated digits - and deliberately does NOT read a bare number as a date,
+ * since in an open sentence every bare number is a quantity, a price or a size.
+ */
+function readDate(tokens: string[], today: Date): { date: string; spoken: boolean } {
+  const found = readDateOrToday(tokens.join(" "), today);
+  return { date: found.date, spoken: found.explicit };
 }
 
 /* --------------------------------------------------------------- the parser */
@@ -228,6 +327,11 @@ export function parseCommand(
     return parseQuery(tokens, catalog);
   }
 
+  // Adding a shop is checked before orders: "nai dukan Al Madina Downtown mein"
+  // names a place and no product, and must not be read as an order to a shop
+  // that sounds a bit like it.
+  if (hasAny(tokens, NEW_SHOP_VERBS)) return parseNewShop(transcript, tokens, catalog);
+
   // Then the writes, most specific first.
   //
   // Stock coming in is checked before payments because "received" means both
@@ -265,6 +369,17 @@ export function parseCommand(
   // A metric word on its own ("profit?") is a question worth answering.
   const metric = matchMetric(tokens);
   if (metric) return parseQuery(tokens, catalog);
+
+  // Saying "kholo" and nothing recognisable after it is a different failure
+  // from saying something unrelated, and worth a different message: the page
+  // name is what was not understood, not the whole sentence.
+  if (navigating) {
+    return {
+      kind: "unknown",
+      reason:
+        'I heard you asking to open something, but not which page. Try the page name on its own, like "bookings" or "udhar".',
+    };
+  }
 
   return {
     kind: "unknown",
@@ -346,7 +461,13 @@ function parseQuery(tokens: string[], catalog: VoiceCatalog): VoiceCommand {
 
   // "mango ka stock kitna hai" is a different question from "stock kitna hai".
   const product = matchProduct(tokens, catalog.products);
-  const shop = bestMatch(tokens, catalog.shops, (x) => x.name, 0.75);
+  const shop = bestMatch(
+    tokens,
+    catalog.shops,
+    (x) => x.name,
+    0.75,
+    (x) => x.voiceAlias,
+  );
   const invoice = shop
     ? null
     : bestMatch(tokens, catalog.invoices, (i) => i.customerName ?? i.invoiceNo, 0.75);
@@ -476,7 +597,13 @@ function readPlace(
   shopName: string | null;
   warning: string | null;
 } {
-  const shop = bestMatch(nameTokens, catalog.shops, (s) => s.name, 0.7);
+  const shop = bestMatch(
+    nameTokens,
+    catalog.shops,
+    (s) => s.name,
+    0.7,
+    (s) => s.voiceAlias,
+  );
   if (shop) {
     return {
       areaId: shop.row.areaId,
@@ -486,7 +613,13 @@ function readPlace(
       warning: null,
     };
   }
-  const area = bestMatch(nameTokens, catalog.areas, (a) => a.name, 0.7);
+  const area = bestMatch(
+    nameTokens,
+    catalog.areas,
+    (a) => a.name,
+    0.7,
+    (a) => a.voiceAlias,
+  );
   if (area) {
     return {
       areaId: area.row.id,
@@ -513,14 +646,25 @@ function parseBooking(tokens: string[], catalog: VoiceCatalog, today: Date): Voi
   const { date, spoken: dateSpoken } = readDate(tokens, today);
   if (!dateSpoken) warnings.push("No date was said, so today is assumed.");
 
-  const nameTokens = tokens.filter((t) => !SALE_VERBS.includes(t) && DAY_OFFSETS[t] == null);
+  // A dictated phone is pulled out first, so its digits can never be mistaken
+  // for a quantity or a price.
+  const { phone, used: phoneTokens } = readPhone(tokens);
+  const withoutPhone = tokens.filter((_, i) => !phoneTokens.has(i));
+
+  const nameTokens = withoutPhone.filter((t) => !SALE_VERBS.includes(t) && DAY_OFFSETS[t] == null);
   const place = readPlace(nameTokens, catalog);
   if (place.warning) warnings.push(place.warning);
   if (place.areaId == null) missing.push("area");
 
-  const booker = bestMatch(nameTokens, catalog.bookers, (b) => b.name, 0.8);
+  const booker = bestMatch(
+    nameTokens,
+    catalog.bookers,
+    (b) => b.name,
+    0.8,
+    (b) => b.voiceAlias,
+  );
 
-  const segments = segmentLines(tokens, catalog);
+  const segments = segmentLines(withoutPhone, catalog);
   const lines: Extract<VoiceCommand, { kind: "booking" }>["lines"] = [];
 
   for (const segment of segments) {
@@ -581,10 +725,80 @@ function parseBooking(tokens: string[], catalog: VoiceCatalog, today: Date): Voi
     shopName: place.shopName,
     bookerId: booker?.row.id ?? null,
     bookerName: booker?.row.name ?? null,
+    customerPhone: phone,
     date,
     missing,
     warnings,
     confidence: missing.length === 0 && warnings.length === 0 ? "high" : "low",
+  };
+}
+
+/**
+ * A new shop: "nai dukan Al Madina Store Downtown mein".
+ *
+ * The name is whatever is left once the verb, the area and the filler are taken
+ * out, title-cased. Dictating a name is the one place voice cannot check itself
+ * - the app has nothing to compare it against - so the card shows exactly what
+ * will be created, and the Areas page can rename it afterwards.
+ */
+function parseNewShop(transcript: string, tokens: string[], catalog: VoiceCatalog): VoiceCommand {
+  const missing: string[] = [];
+  const warnings: string[] = [];
+
+  const area = bestMatch(
+    tokens,
+    catalog.areas,
+    (x) => x.name,
+    0.7,
+    (x) => x.voiceAlias,
+  );
+  if (!area) missing.push("area");
+
+  const { phone } = readPhone(tokens);
+
+  // Every word that is structural rather than part of the name.
+  //
+  // "shop", "store" and "dukan" are NOT dropped: half the shops in this trade
+  // are called something Store or something Kiryana, and stripping those turned
+  // "Al Madina Store" into "Al Madina". The verb itself is already a single
+  // token by this point ("newshop", "naidukan"), so there is no loose "shop"
+  // left to remove anyway.
+  const areaWords = new Set(area ? tokenise(area.row.name) : []);
+  const nameWords = tokens.filter(
+    (t) =>
+      !NEW_SHOP_VERBS.includes(t) &&
+      !LOCALITY_WORDS.has(t) &&
+      !PHONE_WORDS.has(t) &&
+      !areaWords.has(t) &&
+      !/^\d+$/.test(t),
+  );
+
+  const name = nameWords
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ")
+    .trim();
+
+  if (name.length === 0) missing.push("shop name");
+  else warnings.push("The name was dictated - check the spelling before saving.");
+
+  // A name that already exists in the same area would be rejected by the
+  // database anyway, so it is caught here where the message can be useful.
+  if (area && name) {
+    const clash = catalog.shops.find(
+      (sh) => sh.areaId === area.row.id && sh.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (clash) warnings.push(`${area.row.name} already has a shop called "${clash.name}".`);
+  }
+
+  return {
+    kind: "shop",
+    name,
+    areaId: area?.row.id ?? null,
+    areaName: area?.row.name ?? null,
+    phone,
+    missing,
+    warnings,
+    confidence: "low",
   };
 }
 

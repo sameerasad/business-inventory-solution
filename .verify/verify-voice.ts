@@ -10,8 +10,14 @@
  * ready-to-run. A booking or a payment always comes back as a proposal, and an
  * incomplete or misheard one says so.
  */
-import { parseCommand, type VoiceCatalog, type VoiceCommand } from "@/lib/voice/parse";
+import {
+  parseCommand,
+  parseConfirmation,
+  type VoiceCatalog,
+  type VoiceCommand,
+} from "@/lib/voice/parse";
 import { allNumbers, nameScore, readNumber, tokenise } from "@/lib/voice/normalise";
+import { readSpokenDate } from "@/lib/voice/dates";
 
 let checks = 0;
 let failures = 0;
@@ -92,18 +98,24 @@ const CATALOG: VoiceCatalog = {
     },
   ],
   areas: [
-    { id: 11, name: "Downtown" },
-    { id: 12, name: "North Zone" },
-    { id: 13, name: "Yaro Goth" },
+    { id: 11, name: "Downtown", voiceAlias: null },
+    { id: 12, name: "North Zone", voiceAlias: null },
+    { id: 13, name: "Yaro Goth", voiceAlias: null },
+    // A real area name from the live data, with the nickname it would be given.
+    { id: 14, name: "Khwaja ajmer nagri", voiceAlias: "khwaja" },
   ],
   shops: [
-    { id: 21, name: "Central Mart", areaId: 11 },
-    { id: 22, name: "Corner Store", areaId: 11 },
-    { id: 23, name: "Hillview Kiosk", areaId: 12 },
+    { id: 21, name: "Central Mart", areaId: 11, voiceAlias: null },
+    { id: 22, name: "Corner Store", areaId: 11, voiceAlias: null },
+    { id: 23, name: "Hillview Kiosk", areaId: 12, voiceAlias: null },
+    // Two real ones: the first has an alias, the second deliberately does not,
+    // so the tests can show what the alias is actually buying.
+    { id: 24, name: "Rakshani bazar", areaId: 14, voiceAlias: "rakshani" },
+    { id: 25, name: "Nazr e Ataar", areaId: 14, voiceAlias: null },
   ],
   bookers: [
-    { id: 31, name: "Saifullah Khan" },
-    { id: 32, name: "Imran Ali" },
+    { id: 31, name: "Saifullah Khan", voiceAlias: "saifi" },
+    { id: 32, name: "Imran Ali", voiceAlias: null },
   ],
   invoices: [
     { id: 41, invoiceNo: "INV-2026-0012", customerName: "Corner Store", balance: 5000 },
@@ -523,6 +535,258 @@ async function main() {
     "both come back as proposals with their own warnings",
     writesToo.every((c) => (c.kind === "batch" || c.kind === "sale") && Array.isArray(c.warnings)),
     writesToo.map((c) => c.kind),
+  );
+
+  /* ------------------------------------------------ spoken confirmation */
+  section("confirming by voice: yes has to be unmistakable");
+  for (const yes of [
+    "haan",
+    "han",
+    "ji haan",
+    "yes",
+    "ok",
+    "save",
+    "save karo",
+    "bilkul",
+    "ٹھیک",
+  ]) {
+    ok(`"${yes}" saves`, parseConfirmation(yes) === "confirm", parseConfirmation(yes));
+  }
+  for (const no of [
+    "nahi",
+    "nahin",
+    "no",
+    "cancel",
+    "ruko",
+    "galat",
+    "نہیں",
+    // Not a no, but not a yes either - and anything unclear must not save.
+    "hmm",
+    "kya",
+    "",
+    "   ",
+    "mango bottle 250",
+  ]) {
+    ok(`"${no}" does not save`, parseConfirmation(no) === "cancel", parseConfirmation(no));
+  }
+  ok(
+    "a no anywhere in the sentence wins over a yes",
+    parseConfirmation("haan nahi ruko") === "cancel",
+  );
+  ok(
+    "somebody still talking is not a confirmation",
+    parseConfirmation("ji woh corner store ka order tha jo kal aaya tha") === "cancel",
+  );
+
+  /* ------------------------------------------------------- dictated phone */
+  section("dictated phone numbers");
+  const ph1 = parse("sell bees mango bottle 250 to Corner Store phone 03001234567");
+  ok("booking still parsed", ph1.kind === "booking", ph1);
+  if (ph1.kind === "booking") {
+    ok("phone captured", ph1.customerPhone === "03001234567", ph1.customerPhone);
+    ok("quantity is still 20, not the phone", ph1.lines[0]?.quantity === 20, ph1.lines[0]);
+    ok("price is still the catalog price", ph1.lines[0]?.unitPrice === 450, ph1.lines[0]);
+  }
+
+  const ph2 = parse("sell 10 mango bottle 250 to Corner Store 0300 1234567");
+  ok(
+    "digits split by the recogniser are stitched back together",
+    ph2.kind === "booking" && ph2.customerPhone === "03001234567",
+    ph2.kind === "booking" ? ph2.customerPhone : ph2,
+  );
+  ok("and the quantity survives", ph2.kind === "booking" && ph2.lines[0]?.quantity === 10, ph2);
+
+  const ph3 = parse("book 30 apple bottle 250 for Central Mart at 500");
+  ok(
+    "an ordinary price is never mistaken for a phone",
+    ph3.kind === "booking" && ph3.customerPhone === null && ph3.lines[0]?.unitPrice === 500,
+    ph3,
+  );
+
+  /* ---------------------------------------------------------- new shop */
+  section("adding a shop by voice");
+  const sh1 = parse("new shop Al Madina Store in Downtown");
+  ok("recognised as a new shop", sh1.kind === "shop", sh1);
+  if (sh1.kind === "shop") {
+    ok("name title-cased", sh1.name === "Al Madina Store", sh1.name);
+    ok("area found", sh1.areaId === 11, sh1.areaName);
+    ok("nothing missing", sh1.missing.length === 0, sh1.missing);
+    ok(
+      "always flagged, because a dictated name cannot be checked",
+      sh1.confidence === "low" && sh1.warnings.some((w) => w.includes("dictated")),
+      sh1.warnings,
+    );
+  }
+
+  const sh2 = parse("nai dukan Bismillah Kiryana North Zone mein phone 03211234567");
+  ok("Urdu phrasing works", sh2.kind === "shop", sh2);
+  if (sh2.kind === "shop") {
+    ok("name", sh2.name === "Bismillah Kiryana", sh2.name);
+    ok("area", sh2.areaId === 12, sh2.areaName);
+    ok("phone captured too", sh2.phone === "03211234567", sh2.phone);
+  }
+
+  const sh3 = parse("new shop Al Madina Store");
+  ok("a shop with no area is blocked", sh3.kind === "shop" && sh3.missing.includes("area"), sh3);
+
+  const sh4 = parse("new shop in Downtown");
+  ok(
+    "a shop with no name is blocked",
+    sh4.kind === "shop" && sh4.missing.includes("shop name"),
+    sh4,
+  );
+
+  const sh5 = parse("new shop Corner Store in Downtown");
+  ok(
+    "a name that already exists in that area is warned about",
+    sh5.kind === "shop" && sh5.warnings.some((w) => w.includes("Corner Store")),
+    sh5.kind === "shop" ? sh5.warnings : null,
+  );
+
+  const sh6 = parse("sell 20 mango bottle 250 to Corner Store");
+  ok("an ordinary order is not read as a new shop", sh6.kind === "booking", sh6);
+
+  /* ------------------------------------------------------ spoken nicknames */
+  section("aliases: a word the engine can actually hear");
+  const al1 = parse("bees mango bottle 250 rakshani ko bech do");
+  ok("the alias finds the shop", al1.kind === "booking" && al1.shopId === 24, al1);
+  ok(
+    "and the area comes with it",
+    al1.kind === "booking" && al1.areaId === 14,
+    al1.kind === "booking" ? al1.areaName : null,
+  );
+
+  const al2 = parse("bees mango bottle 250 Rakshani bazar ko bech do");
+  ok("the real name still works", al2.kind === "booking" && al2.shopId === 24, al2);
+
+  const al3 = parse("das mango bottle 250 khwaja mein bech do");
+  ok("an area alias works too", al3.kind === "booking" && al3.areaId === 14, al3);
+
+  const al4 = parse("bees mango bottle 250 Corner Store ko saifi ne bech diya");
+  ok("a booker alias works", al4.kind === "booking" && al4.bookerId === 31, al4);
+
+  ok(
+    "an alias is not needed when the real name is heard cleanly",
+    parse("bees mango bottle 250 Nazr e Ataar ko bech do").kind === "booking",
+  );
+
+  section("aliases: what they are for");
+  // This is the case fuzzy matching cannot reach: a transcription that shares
+  // almost nothing with the target. Without an alias it is a miss; with one it
+  // is exact.
+  const mangled = parse("bees mango bottle 250 rock shanty bazaar ko bech do");
+  ok(
+    "a badly mangled name does NOT resolve to the wrong shop",
+    mangled.kind !== "booking" || mangled.shopId !== 25,
+    mangled,
+  );
+
+  const q = parse("rakshani ka balance kitna hai");
+  ok("aliases work in questions as well", q.kind === "query" && q.shopId === 24, q);
+
+  /* ----------------------------------- Urdu script navigation */
+  section("navigation in Urdu script, including loanwords");
+  // This is what the browser actually returns in Urdu mode: the English word
+  // written phonetically in Urdu. Missing these was why "bookings kholo"
+  // worked only sometimes - the engine alternates between scripts.
+  for (const [text, href] of [
+    ["بکنگ کھولو", "/bookings"],
+    ["بکنگز کھولو", "/bookings"],
+    ["بکنگ دکھاؤ", "/bookings"],
+    ["نئی بکنگ کھولو", "/bookings/new"],
+    ["ادھار دکھاؤ", "/receivables"],
+    ["وصولی کھولو", "/receivables"],
+    ["اسٹاک کھولو", "/batches"],
+    ["مال دکھاؤ", "/batches"],
+    ["سیلز کھولو", "/sales"],
+    ["پروڈکٹس دکھاؤ", "/products"],
+    ["بکرز کھولو", "/bookers"],
+    ["علاقے دکھاؤ", "/areas"],
+    ["ڈیش بورڈ کھولیں", "/dashboard"],
+    ["وائس کھولو", "/voice"],
+  ] as const) {
+    const c = parse(text);
+    ok(`"${text}" -> ${href}`, c.kind === "navigate" && c.href === href, c);
+  }
+
+  section("the same pages, spoken Roman");
+  for (const [text, href] of [
+    ["bookings kholo", "/bookings"],
+    ["booking kholoo", "/bookings"],
+    ["bookings dikhaein", "/bookings"],
+    ["nayi booking kholo", "/bookings/new"],
+    ["wasooli dikhao", "/receivables"],
+    ["voice kholo", "/voice"],
+    ["dukanain dikhao", "/areas"],
+  ] as const) {
+    const c = parse(text);
+    ok(`"${text}" -> ${href}`, c.kind === "navigate" && c.href === href, c);
+  }
+
+  const vague = parse("کھولو");
+  ok(
+    "a verb with no page says which half was not understood",
+    vague.kind === "unknown" && vague.reason.includes("which page"),
+    vague,
+  );
+
+  /* ----------------------------------------- dates people actually say */
+  section("dates in a spoken command");
+  const dateCases: [string, string][] = [
+    ["aaj", TODAY_ISO],
+    ["today", TODAY_ISO],
+    ["kal", YESTERDAY],
+    ["parson", "2026-09-01"],
+    // A month by name cannot be mistaken for anything else.
+    ["3 September", "2026-09-03"],
+    ["September 3", "2026-09-03"],
+    ["15 august 2026", "2026-08-15"],
+    ["1 ستمبر", "2026-09-01"],
+    // Digits with a separator - no quantity is ever written that way.
+    ["15/08/2026", "2026-08-15"],
+    ["15-8-26", "2026-08-15"],
+    ["2026-08-15", "2026-08-15"],
+  ];
+  for (const [said, expected] of dateCases) {
+    const found = readSpokenDate(said, TODAY);
+    ok(`"${said}" -> ${expected}`, found?.date === expected, found);
+  }
+
+  section("a bare number is never a date");
+  // This is the rule that keeps dates safe in an open sentence: every bare
+  // number in an order is a quantity, a price or a pack size. Reading one as
+  // a day would date the booking wrongly and never say so.
+  for (const notADate of ["3", "teen", "bees", "450", "250", "", "corner store"]) {
+    ok(
+      `"${notADate}" is not read as a date`,
+      readSpokenDate(notADate, TODAY) === null,
+      readSpokenDate(notADate, TODAY),
+    );
+  }
+  ok("and an impossible date is refused", readSpokenDate("31 February", TODAY) === null);
+
+  section("a spoken order carries its date through");
+  const dated = parse("kal bees mango bottle 250 Corner Store ko bech do");
+  ok("kal means yesterday", dated.kind === "booking" && dated.date === YESTERDAY, dated);
+  const datedByMonth = parse("sell 20 mango bottle 250 to Corner Store on 15 august");
+  ok(
+    "a month name works in a full sentence too",
+    datedByMonth.kind === "booking" && datedByMonth.date === "2026-08-15",
+    datedByMonth,
+  );
+  const undated = parse("sell 20 mango bottle 250 to Corner Store");
+  ok(
+    "no date said means today, and it says so",
+    undated.kind === "booking" &&
+      undated.date === TODAY_ISO &&
+      undated.warnings.some((w) => w.includes("today is assumed")),
+    undated,
+  );
+  const quantityNotDate = parse("sell 3 chocolate to Corner Store");
+  ok(
+    "a quantity of 3 does not become the 3rd of the month",
+    quantityNotDate.kind === "booking" && quantityNotDate.date === TODAY_ISO,
+    quantityNotDate,
   );
 
   console.log(`\n${checks - failures}/${checks} voice checks passed`);

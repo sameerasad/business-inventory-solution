@@ -8,15 +8,17 @@ import { Button } from "@/components/ui/button";
 import { getBookableProducts } from "@/lib/bookings";
 import { getAreasWithShops } from "@/lib/queries";
 import { getActiveBookers } from "@/lib/bookers";
+import { voiceEnginesAvailable } from "@/actions/voice";
 
 export const metadata: Metadata = { title: "New Booking" };
 export const dynamic = "force-dynamic";
 
 export default async function NewBookingPage() {
-  const [products, areas, bookers] = await Promise.all([
+  const [products, areas, bookers, engines] = await Promise.all([
     getBookableProducts(),
     getAreasWithShops(),
     getActiveBookers(),
+    voiceEnginesAvailable(),
   ]);
 
   const inStock = products.filter((p) => p.available > 0);
@@ -61,7 +63,12 @@ export default async function NewBookingPage() {
               first.
             </Alert>
           ) : null}
-          <BookingForm products={products} areas={areas} bookers={bookers} />
+          <BookingForm
+          products={products}
+          areas={areas}
+          bookers={bookers}
+          whisperAvailable={engines.groq}
+        />
         </>
       )}
     </div>
