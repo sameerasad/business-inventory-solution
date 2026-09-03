@@ -125,6 +125,7 @@ const NAV_LINKS = [
   "/batches",
   "/products",
   "/bookers",
+  "/voice",
   "/areas",
 ].map((href) => `href="${href}"`);
 
@@ -146,6 +147,22 @@ const pages = [
       "Booker",
       ">All bookers</span>",
       "Edit",
+    ],
+  ],
+  [
+    "/voice",
+    [
+      "Voice",
+      "What you can say",
+      // The page must render server-side even though the mic is client-only.
+      "Open a page",
+      "Record a payment",
+      "Receive stock",
+      "Cash sale at the counter",
+      // The typed fallback must render even where speech is unsupported.
+      "Or type it",
+      // The safety promise is part of the page, not just the code.
+      "you still press Save",
     ],
   ],
   [

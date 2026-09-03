@@ -11,6 +11,7 @@ import {
   MapPin,
   PackagePlus,
   Receipt,
+  Mic,
   ShoppingCart,
   Users,
   Wallet,
@@ -29,7 +30,7 @@ type NavLink = {
 };
 
 /**
- * Two groups, on two tiers, because eleven flat links read as noise.
+ * Two groups, on two tiers, because a dozen flat links read as noise.
  *
  * "Record" is what a booker touches all day, so it sits top-right as buttons -
  * the shape people already read as "do something". "Browse" is everything you
@@ -50,6 +51,7 @@ const BROWSE: NavLink[] = [
   { href: "/batches", label: "Batches", icon: Layers },
   { href: "/products", label: "Products", icon: Boxes },
   { href: "/bookers", label: "Bookers", icon: Users },
+  { href: "/voice", label: "Voice", icon: Mic },
   { href: "/areas", label: "Areas & Shops", short: "Areas", icon: MapPin },
 ];
 
@@ -100,7 +102,7 @@ export function NavActions() {
 }
 
 /**
- * The eight list pages, as tabs sitting on the header's bottom border.
+ * The list pages, as tabs sitting on the header's bottom border.
  *
  * flex-wrap, never overflow-x-auto: with this many tabs a scrolling row silently
  * hides the last few, which is indistinguishable from those pages not existing.
