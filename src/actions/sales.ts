@@ -12,6 +12,7 @@ import {
   failure,
   softDeleteSchema,
   success,
+  updateSaleSchema,
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
@@ -286,5 +287,218 @@ export async function softDeleteSaleAction(
     }
     console.error("softDeleteSaleAction failed", error);
     return failure("Could not remove the sale. Please try again.");
+  }
+}
+
+/**
+ * Edit a recorded sale: quantity, price, date, area, shop and batch.
+ *
+ * Stock is reconciled by returning the old quantity and taking the new one, so
+ * the batch totals stay exact whether the quantity went up, went down, or moved
+ * to a different batch entirely. The take is the same atomic guarded UPDATE the
+ * create path uses, so two people editing at once cannot oversell between them.
+ *
+ * The product is fixed. A different product is a different sale, and re-pointing
+ * one would move stock between catalog entries.
+ *
+ * A line belonging to an invoice with payments against it is refused when the
+ * change would shrink the invoice below what has been paid - the same rule that
+ * stops a sale being deleted out from under its payments.
+ */
+export async function updateSaleAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = updateSaleSchema.safeParse({
+    id: formData.get("id") ?? "",
+    batchId: formData.get("batchId") ?? "",
+    areaId: formData.get("areaId") ?? "",
+    shopId: formData.get("shopId") ?? undefined,
+    quantity: formData.get("quantity") ?? "",
+    salePrice: formData.get("salePrice") ?? "",
+    saleDate: formData.get("saleDate") ?? "",
+    notes: formData.get("notes") ?? undefined,
+  });
+  if (!parsed.success) {
+    return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
+  }
+  const input = parsed.data;
+
+  const sale = await prisma.sale.findUnique({
+    where: { id: input.id },
+    select: {
+      id: true,
+      isDeleted: true,
+      productId: true,
+      batchId: true,
+      quantity: true,
+      salePrice: true,
+      areaId: true,
+      shopId: true,
+      saleDate: true,
+      bookingId: true,
+      booking: { select: { invoiceNo: true } },
+    },
+  });
+  if (!sale) return failure("Sale not found.");
+  if (sale.isDeleted) return failure("That sale has been removed and cannot be edited.");
+
+  const [batch, area, shop] = await Promise.all([
+    prisma.batch.findUnique({
+      where: { id: input.batchId },
+      select: { id: true, productId: true, quantity: true, remainingQty: true, isDeleted: true, unitCost: true },
+    }),
+    prisma.area.findUnique({ where: { id: input.areaId }, select: { isDeleted: true } }),
+    input.shopId
+      ? prisma.shop.findUnique({
+          where: { id: input.shopId },
+          select: { areaId: true, isDeleted: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!batch || batch.isDeleted) {
+    return failure("That batch is no longer available.", { batchId: "Pick another batch" });
+  }
+  if (batch.productId !== sale.productId) {
+    return failure("That batch belongs to a different product.", {
+      batchId: "Pick a batch for this product",
+    });
+  }
+  if (!area || area.isDeleted) {
+    return failure("That area is no longer available.", { areaId: "Pick another area" });
+  }
+  if (input.shopId) {
+    if (!shop || shop.isDeleted) {
+      return failure("That shop is no longer available.", { shopId: "Pick another shop" });
+    }
+    if (shop.areaId !== input.areaId) {
+      return failure("That shop is not in the selected area.", {
+        shopId: "Pick a shop inside the selected area",
+      });
+    }
+  }
+
+  const sameBatch = batch.id === sale.batchId;
+  // Available to this edit: what is free in the batch, plus what this very sale
+  // is currently holding in it. Without the second half, raising a sale from 10
+  // to 11 in a batch with nothing spare would be refused even though 10 of the
+  // 11 are already its own.
+  const headroom = sameBatch ? batch.remainingQty + sale.quantity : batch.remainingQty;
+  if (input.quantity > headroom) {
+    return failure(
+      `Batch #${batch.id} can only cover ${headroom} unit(s) for this sale.`,
+      { quantity: `Maximum available is ${headroom}` },
+    );
+  }
+
+  // An invoice must never end up worth less than has been paid against it.
+  if (sale.bookingId) {
+    const [paidAgg, otherLines] = await Promise.all([
+      prisma.payment.aggregate({
+        where: { bookingId: sale.bookingId, isDeleted: false },
+        _sum: { amount: true },
+      }),
+      prisma.$queryRaw<{ total: number }[]>(Prisma.sql`
+        SELECT COALESCE(SUM(s.sale_price * s.quantity), 0)::float8 AS total
+        FROM sales s
+        JOIN batches b ON b.id = s.batch_id
+        WHERE s.booking_id = ${sale.bookingId}
+          AND s.is_deleted = false
+          AND b.is_deleted = false
+          AND s.id <> ${sale.id}
+      `),
+    ]);
+    const paid = Number(paidAgg._sum.amount ?? 0);
+    const newTotal = (otherLines[0]?.total ?? 0) + input.quantity * input.salePrice;
+    if (paid > newTotal + 0.005) {
+      return failure(
+        `${sale.booking?.invoiceNo} has ${paid.toFixed(2)} paid against it. This change would drop the ` +
+          `invoice to ${newTotal.toFixed(2)}, less than has been received. Reverse or reduce the payment first.`,
+        { quantity: "Would undercut the payments" },
+      );
+    }
+  }
+
+  try {
+    const remainingAfter = await prisma.$transaction(async (tx) => {
+      // 1. Put the old quantity back. Capped by the CHECK constraint on
+      //    remaining_qty <= quantity, which is why the old batch is read back.
+      await tx.batch.update({
+        where: { id: sale.batchId },
+        data: { remainingQty: { increment: sale.quantity } },
+      });
+
+      // 2. Take the new quantity, guarded, so a concurrent sale cannot oversell.
+      const taken = await tx.batch.updateMany({
+        where: { id: batch.id, isDeleted: false, remainingQty: { gte: input.quantity } },
+        data: { remainingQty: { decrement: input.quantity } },
+      });
+      if (taken.count !== 1) throw new InsufficientStockError(batch.id);
+
+      await tx.sale.update({
+        where: { id: input.id },
+        data: {
+          batchId: batch.id,
+          areaId: input.areaId,
+          shopId: input.shopId,
+          quantity: input.quantity,
+          salePrice: new Prisma.Decimal(input.salePrice.toFixed(2)),
+          saleDate: parseDateOnly(input.saleDate),
+          notes: input.notes,
+        },
+      });
+
+      const after = await tx.batch.findUniqueOrThrow({
+        where: { id: batch.id },
+        select: { remainingQty: true },
+      });
+
+      await writeAudit(tx, {
+        entityType: "sale",
+        entityId: input.id,
+        action: "sale.updated",
+        payload: {
+          before: {
+            batchId: sale.batchId,
+            quantity: sale.quantity,
+            salePrice: Number(sale.salePrice),
+            areaId: sale.areaId,
+            shopId: sale.shopId,
+            saleDate: sale.saleDate.toISOString().slice(0, 10),
+          },
+          after: {
+            batchId: batch.id,
+            quantity: input.quantity,
+            salePrice: input.salePrice,
+            areaId: input.areaId,
+            shopId: input.shopId,
+            saleDate: input.saleDate,
+          },
+          unitCost: Number(batch.unitCost),
+          batchRemainingAfter: after.remainingQty,
+        },
+      });
+
+      return after.remainingQty;
+    });
+
+    revalidateSales();
+    revalidatePath("/bookings");
+    revalidatePath("/receivables");
+
+    const profit = (input.salePrice - Number(batch.unitCost)) * input.quantity;
+    return success(
+      `Sale #${input.id} updated. Profit ${profit.toFixed(2)}. Batch #${batch.id} has ${remainingAfter} left.`,
+    );
+  } catch (error) {
+    if (error instanceof InsufficientStockError) {
+      return failure(
+        `Batch #${error.batchId} no longer has enough stock - someone else may have just sold from it. Reload and try again.`,
+        { batchId: "Reload the batch list" },
+      );
+    }
+    console.error("updateSaleAction failed", error);
+    return failure("Could not save the sale. Please try again.");
   }
 }

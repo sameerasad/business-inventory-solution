@@ -13,6 +13,7 @@ export function currentActor(): string {
 
 export type AuditableEntity =
   | "batch"
+  | "category"
   | "sale"
   | "product"
   | "area"

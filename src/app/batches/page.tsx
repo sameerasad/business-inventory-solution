@@ -8,6 +8,7 @@ import { ListFilters, type FilterSpec } from "@/components/list-filters";
 import { Pagination } from "@/components/pagination";
 import { SoftDeleteButton } from "@/components/forms/soft-delete-button";
 import { softDeleteBatchAction } from "@/actions/batches";
+import { EditBatchDialog } from "@/components/batches/edit-batch-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -163,16 +164,30 @@ export default async function BatchesPage({
                       {row.createdBy}
                     </TableCell>
                     <TableCell className="text-right">
-                      <SoftDeleteButton
-                        action={softDeleteBatchAction}
-                        id={row.id}
-                        title={`Remove batch #${row.id}`}
-                        description={
-                          row.salesCount > 0
-                            ? `This batch has ${row.salesCount} sale(s) against it, so it cannot be removed. Delete those sales first.`
-                            : `${row.sku}, ${qty(row.quantity)} received at ${money(row.unitCost)} each. The row is kept and flagged as deleted, not erased.`
-                        }
-                      />
+                      <div className="flex items-center justify-end gap-0.5">
+                        <EditBatchDialog
+                          batch={{
+                            id: row.id,
+                            sku: row.sku,
+                            quantity: row.quantity,
+                            remainingQty: row.remainingQty,
+                            unitCost: row.unitCost,
+                            receivedDate: dateOnly(row.receivedDate),
+                            notes: row.notes,
+                            saleCount: row.salesCount,
+                          }}
+                        />
+                        <SoftDeleteButton
+                          action={softDeleteBatchAction}
+                          id={row.id}
+                          title={`Remove batch #${row.id}`}
+                          description={
+                            row.salesCount > 0
+                              ? `This batch has ${row.salesCount} sale(s) against it, so it cannot be removed. Delete those sales first.`
+                              : `${row.sku}, ${qty(row.quantity)} received at ${money(row.unitCost)} each. The row is kept and flagged as deleted, not erased.`
+                          }
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

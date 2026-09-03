@@ -8,6 +8,7 @@ import { ListFilters, type FilterSpec } from "@/components/list-filters";
 import { Pagination } from "@/components/pagination";
 import { SoftDeleteButton } from "@/components/forms/soft-delete-button";
 import { softDeleteSaleAction } from "@/actions/sales";
+import { EditSaleDialog } from "@/components/sales/edit-sale-dialog";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ import {
 import { dateOnly, money, qty } from "@/lib/format";
 import { isDateOnly } from "@/lib/dates";
 import { getSaleList, PAGE_SIZE } from "@/lib/lists";
-import { getProductOptions } from "@/lib/queries";
+import { getAreasWithShops, getProductOptions } from "@/lib/queries";
 import { prisma } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Sales" };
@@ -56,13 +57,14 @@ export default async function SalesPage({
   const to = toParam && isDateOnly(toParam) ? toParam : null;
   const invalidRange = from != null && to != null && from > to;
 
-  const [products, areas, list] = await Promise.all([
+  const [products, areas, areasWithShops, list] = await Promise.all([
     getProductOptions(),
     prisma.area.findMany({
       where: { isDeleted: false },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
+    getAreasWithShops(),
     getSaleList({
       from: invalidRange ? null : from,
       to: invalidRange ? null : to,
@@ -71,6 +73,37 @@ export default async function SalesPage({
       page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1,
     }),
   ]);
+
+  // Batch options for the edit dialogs: every live batch of every product on
+  // this page, in one query rather than one per row. Depleted batches are
+  // included because a sale may legitimately already point at one.
+  const batchRows = await prisma.batch.findMany({
+    where: {
+      isDeleted: false,
+      productId: { in: [...new Set(list.rows.map((r) => r.productId))] },
+    },
+    orderBy: [{ receivedDate: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      productId: true,
+      unitCost: true,
+      remainingQty: true,
+      receivedDate: true,
+    },
+  });
+  const batchOptions = batchRows.map((b) => ({
+    id: b.id,
+    productId: b.productId,
+    unitCost: Number(b.unitCost),
+    remainingQty: b.remainingQty,
+    receivedDate: dateOnly(b.receivedDate),
+  }));
+  const batchesByProduct = new Map<number, typeof batchOptions>();
+  for (const b of batchOptions) {
+    const forProduct = batchesByProduct.get(b.productId) ?? [];
+    forProduct.push(b);
+    batchesByProduct.set(b.productId, forProduct);
+  }
 
   const filters: FilterSpec[] = [
     { kind: "date", key: "from", label: "From", value: from ?? "", width: "w-[160px]" },
@@ -200,12 +233,32 @@ export default async function SalesPage({
                     {row.shopName ?? "Direct sale"}
                   </TableCell>
                   <TableCell className="text-right">
-                    <SoftDeleteButton
-                      action={softDeleteSaleAction}
-                      id={row.id}
-                      title={`Remove sale #${row.id}`}
-                      description={`${qty(row.quantity)} x ${row.sku} at ${money(row.salePrice)}. The ${qty(row.quantity)} unit(s) go back to batch #${row.batchId} and the sale is flagged as deleted, not erased.`}
-                    />
+                    <div className="flex items-center justify-end gap-0.5">
+                      <EditSaleDialog
+                        sale={{
+                          id: row.id,
+                          productId: row.productId,
+                          sku: row.sku,
+                          batchId: row.batchId,
+                          quantity: row.quantity,
+                          salePrice: row.salePrice,
+                          saleDate: dateOnly(row.saleDate),
+                          areaId: row.areaId,
+                          shopId: row.shopId,
+                          notes: row.notes,
+                          invoiceNo: row.invoiceNo,
+                          paid: row.invoicePaid,
+                        }}
+                        batches={batchesByProduct.get(row.productId) ?? []}
+                        areas={areasWithShops}
+                      />
+                      <SoftDeleteButton
+                        action={softDeleteSaleAction}
+                        id={row.id}
+                        title={`Remove sale #${row.id}`}
+                        description={`${qty(row.quantity)} x ${row.sku} at ${money(row.salePrice)}. The ${qty(row.quantity)} unit(s) go back to batch #${row.batchId} and the sale is flagged as deleted, not erased.`}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

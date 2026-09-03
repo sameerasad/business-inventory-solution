@@ -403,3 +403,127 @@ export const setBookerAreasSchema = z.object({
       return [...new Set(ids)];
     }),
 });
+
+/* ---------------------------------------------------------------- categories */
+
+export const categorySchema = z.object({
+  name: shortName("Category name"),
+});
+
+export const updateCategorySchema = z.object({
+  id: dbId("Category"),
+  name: shortName("Category name"),
+});
+
+/* ------------------------------------------------------- editing the catalog */
+
+/**
+ * A full product edit, not just its price.
+ *
+ * The SKU is editable but never blank here: the "leave it empty and I will
+ * derive one" shortcut belongs to creation only. Silently re-deriving a SKU on
+ * edit would rename a code that is already printed on paperwork.
+ */
+export const updateProductSchema = z.object({
+  id: dbId("Product"),
+  categoryId: dbId("Category"),
+  name: shortName("Product name"),
+  packagingType: shortName("Packaging type", 60),
+  variantValue: shortName("Variant / volume", 60),
+  sku: shortName("SKU", 40)
+    .transform((v) => v.toUpperCase())
+    .refine(
+      (v) => /^[A-Z0-9][A-Z0-9-]*$/.test(v),
+      "SKU may only contain letters, digits and dashes",
+    ),
+  unit: shortName("Unit", 40),
+  defaultSalePrice: nonNegativeMoney("Default sale price"),
+});
+
+/* -------------------------------------------------------------- editing stock */
+
+/**
+ * Editing a received batch.
+ *
+ * Quantity can be corrected, but the action refuses to take it below what has
+ * already been sold out of the batch - that would mean stock leaving twice.
+ * Changing the unit cost rewrites the margin on every past sale from this
+ * batch, which is exactly what you want after a supplier invoice correction and
+ * exactly what you do not want by accident, so the action records both values.
+ */
+export const updateBatchSchema = z.object({
+  id: dbId("Batch"),
+  quantity: positiveInt("Quantity"),
+  unitCost: nonNegativeMoney("Unit cost"),
+  receivedDate: dateOnlyString,
+  notes: optionalNotes,
+});
+
+/**
+ * Editing a recorded sale.
+ *
+ * The batch is editable too: a sale entered against the wrong batch is a common
+ * slip and the only honest fix is to put the stock back and take it from the
+ * right one. Product is not editable - a different product is a different sale,
+ * and pretending otherwise would silently move stock between catalog entries.
+ */
+export const updateSaleSchema = z.object({
+  id: dbId("Sale"),
+  batchId: dbId("Batch"),
+  areaId: dbId("Area"),
+  shopId: optionalDbId,
+  quantity: positiveInt("Quantity"),
+  salePrice: nonNegativeMoney("Sale price"),
+  saleDate: dateOnlyString,
+  notes: optionalNotes,
+});
+
+/* ----------------------------------------------------------- editing invoices */
+
+/**
+ * Editing a booking's own details - who it is for, when, where, and who took it.
+ *
+ * The order lines are not here. A line IS a sale row, with its own batch and its
+ * own stock movement, so lines are edited as sales; that keeps one rule for
+ * inventory instead of two.
+ */
+export const updateBookingSchema = z.object({
+  id: dbId("Booking"),
+  bookerId: optionalDbId,
+  customerName: z
+    .string()
+    .trim()
+    .max(160, "Customer name cannot exceed 160 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
+  customerPhone: z
+    .string()
+    .trim()
+    .max(40, "Phone cannot exceed 40 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
+  areaId: dbId("Area"),
+  shopId: optionalDbId,
+  bookingDate: dateOnlyString,
+  notes: optionalNotes,
+});
+
+/**
+ * Editing a payment.
+ *
+ * Amount, date and method are all correctable. The booking it belongs to is not:
+ * moving a payment between invoices is two acts - unpaying one and paying the
+ * other - and doing it as a silent edit hides half of that.
+ */
+export const updatePaymentSchema = z.object({
+  id: dbId("Payment"),
+  amount: nonNegativeMoney("Amount").refine((n) => n > 0, "Amount must be greater than 0"),
+  paidOn: dateOnlyString,
+  method: z
+    .string()
+    .trim()
+    .max(60, "Method cannot exceed 60 characters")
+    .optional()
+    .transform((v) => (v ? v : null)),
+  notes: optionalNotes,
+});

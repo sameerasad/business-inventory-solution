@@ -11,6 +11,7 @@ import { SoftDeleteButton } from "@/components/forms/soft-delete-button";
 import { WhatsAppShareDialog } from "@/components/bookings/whatsapp-share-dialog";
 import { PaymentDialog, PaymentStatusBadge } from "@/components/bookings/payment-dialog";
 import { softDeleteBookingAction } from "@/actions/bookings";
+import { EditBookingDialog } from "@/components/bookings/edit-booking-dialog";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import { dateOnly, money, qty } from "@/lib/format";
 import { isDateOnly } from "@/lib/dates";
 import { BOOKINGS_PAGE_SIZE, getBookingList } from "@/lib/bookings";
 import { prisma } from "@/lib/db";
+import { getAreasWithShops } from "@/lib/queries";
 
 export const metadata: Metadata = { title: "Bookings" };
 export const dynamic = "force-dynamic";
@@ -58,7 +60,7 @@ export default async function BookingsPage({
   const to = toParam && isDateOnly(toParam) ? toParam : null;
   const invalidRange = from != null && to != null && from > to;
 
-  const [areas, bookers, list] = await Promise.all([
+  const [areas, bookers, areasWithShops, list] = await Promise.all([
     prisma.area.findMany({
       where: { isDeleted: false },
       orderBy: { name: "asc" },
@@ -69,6 +71,7 @@ export default async function BookingsPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
+    getAreasWithShops(),
     getBookingList({
       from: invalidRange ? null : from,
       to: invalidRange ? null : to,
@@ -242,6 +245,22 @@ export default async function BookingsPage({
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-0.5">
+                    <EditBookingDialog
+                      booking={{
+                        id: row.id,
+                        invoiceNo: row.invoiceNo,
+                        customerName: row.customerName,
+                        customerPhone: row.customerPhone,
+                        areaId: row.areaId,
+                        shopId: row.shopId,
+                        bookerId: row.bookerId,
+                        bookingDate: dateOnly(row.bookingDate),
+                        notes: row.notes,
+                      }}
+                      areas={areasWithShops}
+                      bookers={bookers}
+                    />
                     <SoftDeleteButton
                       action={softDeleteBookingAction}
                       id={row.id}
@@ -249,6 +268,7 @@ export default async function BookingsPage({
                       description={`${row.customerName ?? "Walk-in customer"}, ${qty(row.units)} unit(s), ${money(row.total)}. All ${row.units} unit(s) go back to the batches they came from and the sales stop counting. The booking is kept so the invoice number is never reused.`}
                       confirmLabel="Cancel booking"
                     />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

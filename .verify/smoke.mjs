@@ -137,7 +137,17 @@ const pages = [
   ["/dashboard", ["Inventory &amp; profit", 'href="/dashboard"']],
   ["/receivables", ["Receivables", "Outstanding", "Collected", "Invoiced"]],
   ["/areas", NAV_LINKS],
-  ["/bookings", ["Bookings", "Invoice", "Booked value", "Booker", ">All bookers</span>"]],
+  [
+    "/bookings",
+    [
+      "Bookings",
+      "Invoice",
+      "Booked value",
+      "Booker",
+      ">All bookers</span>",
+      "Edit",
+    ],
+  ],
   [
     "/bookers",
     [
@@ -147,9 +157,11 @@ const pages = [
       "Territory",
       "Manage bookers",
       "Add booker",
-      "No bookers yet",
-      // With no bookers, every area is unassigned and the page must say so.
+      "Sample Booker",
+      // Two of the areas are assigned to the sample booker; the rest are not,
+      // and the page must call that out rather than leave a silent gap.
       "Nobody is assigned to",
+      "Territory",
     ],
   ],
   [
@@ -160,8 +172,8 @@ const pages = [
       "Customer name",
       "Add line",
       "Order total",
-      // With no bookers seeded the picker must say so rather than look broken.
-      "No bookers added",
+      // The booker picker must offer the seeded booker, not an empty state.
+      "Sample Booker",
     ],
   ],
   [
@@ -205,7 +217,22 @@ const pages = [
       "Select an area",
     ],
   ],
-  ["/products", ["Products", "MNG-BTL-250", "Current stock", "CHO-BAR-10", "Stock value at cost"]],
+  [
+    "/products",
+    [
+      "Products",
+      "MNG-BTL-250",
+      "Current stock",
+      "CHO-BAR-10",
+      "Stock value at cost",
+      // Categories are managed here, and every row is editable.
+      "Categories",
+      "New category",
+      "Juice &amp; Beverage",
+      "Rename",
+      "Edit",
+    ],
+  ],
   [
     "/areas",
     [
@@ -218,9 +245,21 @@ const pages = [
       'href="/bookers"',
     ],
   ],
-  ["/batches", ["Batches", "Remaining", "Unit cost", "MNG-BTL-250", ">All products</span>"]],
+  ["/batches", ["Batches", "Remaining", "Unit cost", "MNG-BTL-250", ">All products</span>", "Edit"]],
   ["/batches?status=active", ["Batches", ">Active (stock left)</span>"]],
-  ["/sales", ["Sales", "Profit", "Margin", "Direct sale", ">All areas</span>", "Source", "Counter sale"]],
+  [
+    "/sales",
+    [
+      "Sales",
+      "Profit",
+      "Margin",
+      "Direct sale",
+      ">All areas</span>",
+      "Source",
+      "Counter sale",
+      "Edit",
+    ],
+  ],
   ["/sales?from=2020-01-01&to=2020-12-31", ["No sales match these filters"]],
   ["/sales?from=2030-01-01&to=2020-12-31", ["date filter was ignored"]],
 ];

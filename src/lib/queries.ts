@@ -277,6 +277,7 @@ export type StockRow = {
   packagingType: string;
   variantValue: string;
   unit: string;
+  categoryId: number;
   categoryName: string;
   defaultSalePrice: number;
   currentStock: number;
@@ -284,6 +285,13 @@ export type StockRow = {
   /** Weighted average cost of the stock still on hand. */
   avgUnitCost: number | null;
   isActive: boolean;
+  /**
+   * Every batch and live sale ever attached to this product, not just the ones
+   * with stock left. Deleting a product is only allowed when both are zero, so
+   * batchCount - which counts batches that still have stock - cannot answer it.
+   */
+  totalBatches: number;
+  totalSales: number;
 };
 
 export async function getStockLevels(): Promise<StockRow[]> {
@@ -295,14 +303,24 @@ export async function getStockLevels(): Promise<StockRow[]> {
       p.packaging_type                 AS "packagingType",
       p.variant_value                  AS "variantValue",
       p.unit                           AS "unit",
+      p.category_id                    AS "categoryId",
       c.name                           AS "categoryName",
       p.default_sale_price::float8     AS "defaultSalePrice",
       COALESCE(st.remaining, 0)::int   AS "currentStock",
       COALESCE(st.batch_count, 0)::int AS "batchCount",
       st.avg_cost::float8              AS "avgUnitCost",
-      p.is_active                      AS "isActive"
+      p.is_active                      AS "isActive",
+      COALESCE(hist.batches, 0)::int   AS "totalBatches",
+      COALESCE(hist.sales, 0)::int     AS "totalSales"
     FROM products p
     JOIN categories c ON c.id = p.category_id
+    LEFT JOIN (
+      SELECT
+        p2.id AS product_id,
+        (SELECT COUNT(*) FROM batches b2 WHERE b2.product_id = p2.id)                          AS batches,
+        (SELECT COUNT(*) FROM sales s2 WHERE s2.product_id = p2.id AND s2.is_deleted = false)  AS sales
+      FROM products p2
+    ) hist ON hist.product_id = p.id
     LEFT JOIN (
       SELECT
         b.product_id,

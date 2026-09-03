@@ -26,6 +26,11 @@ export type BookingRow = {
   shopPhone: string | null;
   shareToken: string | null;
   bookerName: string | null;
+  /** Ids and notes the edit form needs, as opposed to the names the table shows. */
+  areaId: number;
+  shopId: number | null;
+  bookerId: number | null;
+  notes: string | null;
   lineCount: number;
   units: number;
   total: number;
@@ -82,6 +87,10 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
         sh.name                                    AS "shopName",
         sh.phone                                   AS "shopPhone",
         bo.name                                    AS "bookerName",
+        b.area_id                                  AS "areaId",
+        b.shop_id                                  AS "shopId",
+        b.booker_id                                AS "bookerId",
+        b.notes                                    AS "notes",
         COALESCE(agg.line_count, 0)::int           AS "lineCount",
         COALESCE(agg.units, 0)::int                AS "units",
         COALESCE(agg.total, 0)::float8             AS "total",

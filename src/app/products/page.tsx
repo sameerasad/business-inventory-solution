@@ -4,6 +4,10 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { ProductRowActions } from "@/components/products/product-row-actions";
+import { EditProductDialog } from "@/components/products/edit-product-dialog";
+import { CategoryManager } from "@/components/products/category-manager";
+import { HardDeleteButton } from "@/components/forms/edit-dialog";
+import { deleteProductAction } from "@/actions/products";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
@@ -17,12 +21,20 @@ import {
 } from "@/components/ui/table";
 import { money, qty } from "@/lib/format";
 import { getCategories, getStockLevels } from "@/lib/queries";
+import { prisma } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Products" };
 export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
-  const [rows, categories] = await Promise.all([getStockLevels(), getCategories()]);
+  const [rows, categories, categoryCounts] = await Promise.all([
+    getStockLevels(),
+    getCategories(),
+    prisma.category.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, _count: { select: { products: true } } },
+    }),
+  ]);
 
   // Existing values feed the "add product" suggestions so the catalog stays tidy.
   const packagingTypes = [...new Set(rows.map((r) => r.packagingType))].sort();
@@ -47,6 +59,17 @@ export default async function ProductsPage() {
           />
         }
       />
+
+      <div className="mb-5">
+        <h2 className="mb-2 text-sm font-semibold">Categories</h2>
+        <CategoryManager
+          categories={categoryCounts.map((c) => ({
+            id: c.id,
+            name: c.name,
+            products: c._count.products,
+          }))}
+        />
+      </div>
 
       <div className="mb-5 grid gap-4 sm:grid-cols-3">
         <SummaryTile label="Units in stock" value={qty(totalStock)} />
@@ -112,13 +135,39 @@ export default async function ProductsPage() {
                     ) : null}
                   </TableCell>
                   <TableCell className="text-right">
-                    <ProductRowActions
-                      productId={row.productId}
-                      sku={row.sku}
-                      defaultSalePrice={row.defaultSalePrice}
-                      isActive={row.isActive}
-                      hasHistory={row.batchCount > 0}
-                    />
+                    <div className="flex items-center justify-end gap-0.5">
+                      <EditProductDialog
+                        product={{
+                          id: row.productId,
+                          sku: row.sku,
+                          name: row.name,
+                          categoryId: row.categoryId,
+                          packagingType: row.packagingType,
+                          variantValue: row.variantValue,
+                          unit: row.unit,
+                          defaultSalePrice: row.defaultSalePrice,
+                        }}
+                        categories={categories}
+                        packagingTypes={packagingTypes}
+                        variantValues={variantValues}
+                        units={units}
+                      />
+                      <ProductRowActions
+                        productId={row.productId}
+                        sku={row.sku}
+                        defaultSalePrice={row.defaultSalePrice}
+                        isActive={row.isActive}
+                        hasHistory={row.batchCount > 0}
+                      />
+                      <HardDeleteButton
+                        action={deleteProductAction}
+                        id={row.productId}
+                        title={`Delete ${row.sku}?`}
+                        description="Removed for good. Only possible because nothing points at it - no batch, no sale."
+                        disabled={row.totalBatches > 0 || row.totalSales > 0}
+                        disabledReason={`${row.totalBatches} batch(es) and ${row.totalSales} sale(s) reference this product. Retire it instead.`}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

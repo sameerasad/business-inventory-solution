@@ -13,6 +13,7 @@ import {
   success,
   zodFieldErrors,
   type ActionState,
+  updateBatchSchema,
 } from "@/lib/validations";
 
 function revalidateInventory() {
@@ -153,4 +154,110 @@ export async function softDeleteBatchAction(
 
   revalidateInventory();
   return success(`Batch #${id} removed from inventory.`);
+}
+
+/**
+ * Correct a received batch: quantity, unit cost, received date, notes.
+ *
+ * Two rules make this safe.
+ *
+ * 1. Quantity cannot go below what has already left the batch. remaining_qty is
+ *    recomputed as (new quantity - already sold), never edited directly, so the
+ *    two can never drift apart. Sold is derived from the batch itself
+ *    (quantity - remaining_qty) rather than by summing sales, because that is
+ *    the figure the CHECK constraints are written against.
+ *
+ * 2. Unit cost is the cost side of every sale from this batch, so changing it
+ *    rewrites the margin on all of them. That is the correct behaviour after a
+ *    supplier invoice correction - profit is derived, never stored - and the
+ *    audit entry records both values so the change is never a mystery.
+ *
+ * The product is not editable. A batch of a different product is a different
+ * batch; re-pointing it would move stock between catalog entries and silently
+ * re-cost every sale that came out of it.
+ */
+export async function updateBatchAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = updateBatchSchema.safeParse({
+    id: formData.get("id") ?? "",
+    quantity: formData.get("quantity") ?? "",
+    unitCost: formData.get("unitCost") ?? "",
+    receivedDate: formData.get("receivedDate") ?? "",
+    notes: formData.get("notes") ?? undefined,
+  });
+  if (!parsed.success) {
+    return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
+  }
+  const input = parsed.data;
+
+  const batch = await prisma.batch.findUnique({
+    where: { id: input.id },
+    select: {
+      id: true,
+      isDeleted: true,
+      quantity: true,
+      remainingQty: true,
+      unitCost: true,
+      receivedDate: true,
+      product: { select: { sku: true } },
+      _count: { select: { sales: { where: { isDeleted: false } } } },
+    },
+  });
+  if (!batch) return failure("Batch not found.");
+  if (batch.isDeleted) return failure("That batch has been removed and cannot be edited.");
+
+  const sold = batch.quantity - batch.remainingQty;
+  if (input.quantity < sold) {
+    return failure(
+      `${sold} unit(s) have already been sold out of batch #${batch.id}, so its quantity cannot be set below ${sold}.`,
+      { quantity: `Minimum is ${sold}` },
+    );
+  }
+
+  const newRemaining = input.quantity - sold;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.batch.update({
+      where: { id: input.id },
+      data: {
+        quantity: input.quantity,
+        remainingQty: newRemaining,
+        unitCost: new Prisma.Decimal(input.unitCost.toFixed(2)),
+        receivedDate: parseDateOnly(input.receivedDate),
+        notes: input.notes,
+      },
+    });
+    await writeAudit(tx, {
+      entityType: "batch",
+      entityId: input.id,
+      action: "batch.updated",
+      payload: {
+        before: {
+          quantity: batch.quantity,
+          remainingQty: batch.remainingQty,
+          unitCost: Number(batch.unitCost),
+          receivedDate: batch.receivedDate.toISOString().slice(0, 10),
+        },
+        after: {
+          quantity: input.quantity,
+          remainingQty: newRemaining,
+          unitCost: input.unitCost,
+          receivedDate: input.receivedDate,
+        },
+        sold,
+      },
+    });
+  });
+
+  revalidateInventory();
+
+  const costChanged = Math.abs(Number(batch.unitCost) - input.unitCost) > 0.005;
+  return success(
+    `Batch #${batch.id} (${batch.product.sku}) updated. ${newRemaining} of ${input.quantity} left.` +
+      (costChanged && batch._count.sales > 0
+        ? ` The margin on ${batch._count.sales} sale(s) from it changed with the cost.`
+        : ""),
+  );
 }

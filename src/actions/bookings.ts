@@ -18,6 +18,7 @@ import {
   zodFieldErrors,
   type ActionState,
   type BookingLineInput,
+  updateBookingSchema,
 } from "@/lib/validations";
 
 /**
@@ -429,4 +430,136 @@ export async function softDeleteBookingAction(
     console.error("softDeleteBookingAction failed", error);
     return failure("Could not cancel the booking. Please try again.");
   }
+}
+
+/**
+ * Edit a booking's own details: customer, contact, date, area, shop, booker and
+ * notes.
+ *
+ * The order LINES are not edited here. A line is a sale row with its own batch
+ * and its own stock movement, so it is edited on the Sales page - one rule for
+ * inventory instead of two.
+ *
+ * Moving the booking date moves the sale dates with it, because a delivery
+ * cannot be dated differently from the order it belongs to. Payments keep their
+ * own dates: when the money arrived is a separate fact from when the goods went.
+ */
+export async function updateBookingAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = updateBookingSchema.safeParse({
+    id: formData.get("id") ?? "",
+    bookerId: formData.get("bookerId") ?? undefined,
+    customerName: formData.get("customerName") ?? undefined,
+    customerPhone: formData.get("customerPhone") ?? undefined,
+    areaId: formData.get("areaId") ?? "",
+    shopId: formData.get("shopId") ?? undefined,
+    bookingDate: formData.get("bookingDate") ?? "",
+    notes: formData.get("notes") ?? undefined,
+  });
+  if (!parsed.success) {
+    return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
+  }
+  const input = parsed.data;
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: input.id },
+    select: {
+      id: true,
+      invoiceNo: true,
+      isDeleted: true,
+      areaId: true,
+      shopId: true,
+      bookerId: true,
+      bookingDate: true,
+      customerName: true,
+    },
+  });
+  if (!booking) return failure("Booking not found.");
+  if (booking.isDeleted) return failure("That booking is cancelled and cannot be edited.");
+
+  const [area, shop, booker] = await Promise.all([
+    prisma.area.findUnique({ where: { id: input.areaId }, select: { isDeleted: true } }),
+    input.shopId
+      ? prisma.shop.findUnique({
+          where: { id: input.shopId },
+          select: { areaId: true, isDeleted: true },
+        })
+      : Promise.resolve(null),
+    input.bookerId
+      ? prisma.booker.findUnique({
+          where: { id: input.bookerId },
+          select: { isDeleted: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!area || area.isDeleted) {
+    return failure("That area is no longer available.", { areaId: "Pick another area" });
+  }
+  if (input.shopId) {
+    if (!shop || shop.isDeleted) {
+      return failure("That shop is no longer available.", { shopId: "Pick another shop" });
+    }
+    if (shop.areaId !== input.areaId) {
+      return failure("That shop is not in the selected area.", {
+        shopId: "Pick a shop inside the selected area",
+      });
+    }
+  }
+  if (input.bookerId && (!booker || booker.isDeleted)) {
+    return failure("That booker is no longer available.", { bookerId: "Pick another booker" });
+  }
+
+  const newDate = parseDateOnly(input.bookingDate);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.booking.update({
+      where: { id: input.id },
+      data: {
+        bookerId: input.bookerId,
+        customerName: input.customerName,
+        customerPhone: input.customerPhone,
+        areaId: input.areaId,
+        shopId: input.shopId,
+        bookingDate: newDate,
+        notes: input.notes,
+      },
+    });
+
+    // The sale rows carry their own area, shop and date for query speed, so
+    // they have to follow the booking or the two would disagree.
+    await tx.sale.updateMany({
+      where: { bookingId: input.id, isDeleted: false },
+      data: { areaId: input.areaId, shopId: input.shopId, saleDate: newDate },
+    });
+
+    await writeAudit(tx, {
+      entityType: "booking",
+      entityId: input.id,
+      action: "booking.updated",
+      payload: {
+        invoiceNo: booking.invoiceNo,
+        before: {
+          areaId: booking.areaId,
+          shopId: booking.shopId,
+          bookerId: booking.bookerId,
+          bookingDate: booking.bookingDate.toISOString().slice(0, 10),
+          customerName: booking.customerName,
+        },
+        after: {
+          areaId: input.areaId,
+          shopId: input.shopId,
+          bookerId: input.bookerId,
+          bookingDate: input.bookingDate,
+          customerName: input.customerName,
+        },
+      },
+    });
+  });
+
+  revalidateBookings();
+  revalidatePath("/sales");
+  return success(`${booking.invoiceNo} updated.`);
 }

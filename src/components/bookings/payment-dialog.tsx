@@ -1,9 +1,14 @@
 "use client";
 
 import { useActionState, useEffect, useState, useTransition } from "react";
-import { Trash2, Wallet } from "lucide-react";
+import { Pencil, Trash2, Wallet } from "lucide-react";
 
-import { deletePaymentAction, getPaymentDetails, recordPaymentAction } from "@/actions/payments";
+import {
+  deletePaymentAction,
+  getPaymentDetails,
+  recordPaymentAction,
+  updatePaymentAction,
+} from "@/actions/payments";
 import { emptyActionState } from "@/lib/validations";
 import { dateOnly, money, todayInputValue } from "@/lib/format";
 import { Alert } from "@/components/ui/alert";
@@ -158,7 +163,23 @@ export function PaymentDialog({
                       {p.notes ? ` · ${p.notes}` : ""}
                     </span>
                   </span>
-                  <ReversePaymentButton paymentId={p.id} onDone={load} />
+                  <span className="flex shrink-0 items-center gap-0.5">
+                    <EditPaymentButton
+                      payment={{
+                        id: p.id,
+                        amount: p.amount,
+                        paidOn: dateOnly(p.paidOn),
+                        method: p.method,
+                        notes: p.notes,
+                      }}
+                      // Room for this payment is the invoice value less the
+                      // OTHER payments, which is the balance plus its own
+                      // amount - not the balance, or it could never be raised.
+                      maxAmount={balance + p.amount}
+                      onDone={load}
+                    />
+                    <ReversePaymentButton paymentId={p.id} onDone={load} />
+                  </span>
                 </li>
               ))}
             </ul>
@@ -291,6 +312,127 @@ function ReversePaymentButton({
       >
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
+    </form>
+  );
+}
+
+/**
+ * Correct a recorded payment: amount, date, method, note.
+ *
+ * The date is as important as the amount. Revenue is recognised when the money
+ * arrives, dated by the payment, so fixing a date moves that revenue between
+ * months on the dashboard - which is the point.
+ *
+ * Reversing and re-recording would also work, but it leaves two entries for one
+ * event and makes a mistyped amount look like a refund.
+ */
+function EditPaymentButton({
+  payment,
+  maxAmount,
+  onDone,
+}: {
+  payment: {
+    id: number;
+    amount: number;
+    paidOn: string;
+    method: string | null;
+    notes: string | null;
+  };
+  maxAmount: number;
+  onDone: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [state, formAction, isPending] = useActionState(updatePaymentAction, emptyActionState);
+
+  useEffect(() => {
+    if (state.ok) {
+      setOpen(false);
+      onDone();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen(true)}
+        aria-label="Edit this payment"
+        title="Edit this payment (wrong amount or wrong date)"
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </Button>
+    );
+  }
+
+  return (
+    <form action={formAction} className="w-full space-y-2 py-1">
+      <input type="hidden" name="id" value={payment.id} />
+
+      {state.message && !state.ok ? <Alert tone="error">{state.message}</Alert> : null}
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Field
+          label="Amount"
+          htmlFor={`pe-amt-${payment.id}`}
+          required
+          error={state.fieldErrors.amount}
+          hint={`Up to ${money(maxAmount)}`}
+        >
+          <Input
+            id={`pe-amt-${payment.id}`}
+            name="amount"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue={payment.amount.toFixed(2)}
+            disabled={isPending}
+            required
+          />
+        </Field>
+        <Field
+          label="Received on"
+          htmlFor={`pe-date-${payment.id}`}
+          required
+          error={state.fieldErrors.paidOn}
+        >
+          <Input
+            id={`pe-date-${payment.id}`}
+            name="paidOn"
+            type="date"
+            defaultValue={payment.paidOn}
+            disabled={isPending}
+            required
+          />
+        </Field>
+        <Field label="Method" htmlFor={`pe-method-${payment.id}`} error={state.fieldErrors.method}>
+          <Input
+            id={`pe-method-${payment.id}`}
+            name="method"
+            defaultValue={payment.method ?? ""}
+            placeholder="Cash"
+            disabled={isPending}
+          />
+        </Field>
+      </div>
+
+      <Field label="Note" htmlFor={`pe-notes-${payment.id}`} error={state.fieldErrors.notes}>
+        <Input
+          id={`pe-notes-${payment.id}`}
+          name="notes"
+          defaultValue={payment.notes ?? ""}
+          disabled={isPending}
+        />
+      </Field>
+
+      <div className="flex items-center gap-2">
+        <SubmitButton pending={isPending}>Save payment</SubmitButton>
+        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
     </form>
   );
 }

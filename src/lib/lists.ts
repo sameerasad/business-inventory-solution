@@ -111,6 +111,10 @@ export type SaleListFilters = {
 export type SaleRow = {
   id: number;
   saleDate: Date;
+  /** Ids the edit form needs, as opposed to the names the table shows. */
+  productId: number;
+  areaId: number;
+  shopId: number | null;
   sku: string;
   productName: string;
   packagingType: string;
@@ -126,6 +130,12 @@ export type SaleRow = {
   shopName: string | null;
   /** The booking this line came from, if any. Null means a counter sale. */
   invoiceNo: string | null;
+  /**
+   * Cash received against that booking. An edit may not shrink the line so far
+   * that its invoice drops below this, so the form needs it to say so before
+   * the submit rather than after.
+   */
+  invoicePaid: number;
   notes: string | null;
   createdBy: string;
   createdAt: Date;
@@ -166,6 +176,9 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
       SELECT
         s.id                                          AS "id",
         s.sale_date                                   AS "saleDate",
+        s.product_id                                  AS "productId",
+        s.area_id                                     AS "areaId",
+        s.shop_id                                     AS "shopId",
         p.sku                                         AS "sku",
         p.name                                        AS "productName",
         p.packaging_type                              AS "packagingType",
@@ -181,6 +194,7 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
              END                                      AS "marginPct",
         a.name                                        AS "areaName",
         bk.invoice_no                                 AS "invoiceNo",
+        COALESCE(pay.paid, 0)::float8                 AS "invoicePaid",
         sh.name                                       AS "shopName",
         s.notes                                       AS "notes",
         s.created_by                                  AS "createdBy",
@@ -191,6 +205,11 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
       JOIN areas a     ON a.id = s.area_id
       LEFT JOIN shops sh ON sh.id = s.shop_id
       LEFT JOIN bookings bk ON bk.id = s.booking_id
+      LEFT JOIN (
+        SELECT p2.booking_id, SUM(p2.amount) AS paid
+        FROM payments p2 WHERE p2.is_deleted = false
+        GROUP BY p2.booking_id
+      ) pay ON pay.booking_id = s.booking_id
       ${clause}
       ORDER BY s.sale_date DESC, s.id DESC
       LIMIT ${PAGE_SIZE} OFFSET ${offset}

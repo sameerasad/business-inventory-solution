@@ -12,6 +12,7 @@ import {
   failure,
   softDeleteSchema,
   success,
+  updatePaymentSchema,
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
@@ -182,4 +183,106 @@ export async function getPaymentDetails(bookingId: number): Promise<{
   const balance = await getBookingBalance(bookingId);
   if (!balance) return null;
   return { payments: await getPayments(bookingId), ...balance };
+}
+
+/**
+ * Correct a payment: its amount, the date it arrived, how it arrived, and any
+ * note.
+ *
+ * The date matters as much as the amount. Revenue is recognised on the CASH
+ * basis, dated by the payment, so moving a payment from March to April moves
+ * that revenue between months on the dashboard. It is meant to.
+ *
+ * The invoice it belongs to is deliberately not editable here. Moving money
+ * between invoices is two separate acts - unpaying one and paying the other -
+ * and hiding that inside an edit would leave both invoices looking wrong.
+ */
+export async function updatePaymentAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = updatePaymentSchema.safeParse({
+    id: formData.get("id") ?? "",
+    amount: formData.get("amount") ?? "",
+    paidOn: formData.get("paidOn") ?? "",
+    method: formData.get("method") ?? undefined,
+    notes: formData.get("notes") ?? undefined,
+  });
+  if (!parsed.success) {
+    return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
+  }
+  const { id, amount, paidOn, method, notes } = parsed.data;
+
+  const payment = await prisma.payment.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      isDeleted: true,
+      bookingId: true,
+      amount: true,
+      paidOn: true,
+      booking: { select: { invoiceNo: true } },
+    },
+  });
+  if (!payment) return failure("Payment not found.");
+  if (payment.isDeleted) return failure("That payment has been reversed and cannot be edited.");
+
+  // What the invoice is worth, and what its OTHER payments already cover. An
+  // amount above the remainder is almost always a typo, so it is refused with
+  // the actual figure rather than quietly creating an overpaid invoice.
+  const [total, otherPaid] = await Promise.all([
+    getBookingInvoiceTotal(payment.bookingId),
+    prisma.payment.aggregate({
+      where: { bookingId: payment.bookingId, isDeleted: false, id: { not: id } },
+      _sum: { amount: true },
+    }),
+  ]);
+  const already = Number(otherPaid._sum.amount ?? 0);
+  const room = total - already;
+  if (amount > room + 0.005) {
+    return failure(
+      `${payment.booking.invoiceNo} is worth ${total.toFixed(2)} and ${already.toFixed(2)} is already ` +
+        `recorded against it, so this payment cannot exceed ${room.toFixed(2)}.`,
+      { amount: `Maximum is ${room.toFixed(2)}` },
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.payment.update({
+      where: { id },
+      data: {
+        amount: new Prisma.Decimal(amount.toFixed(2)),
+        paidOn: parseDateOnly(paidOn),
+        method,
+        notes,
+      },
+    });
+    await writeAudit(tx, {
+      entityType: "payment",
+      entityId: id,
+      action: "payment.updated",
+      payload: {
+        bookingId: payment.bookingId,
+        before: {
+          amount: Number(payment.amount),
+          paidOn: payment.paidOn.toISOString().slice(0, 10),
+        },
+        after: { amount, paidOn },
+      },
+    });
+  });
+
+  revalidateMoney();
+  return success(`Payment on ${payment.booking.invoiceNo} updated.`);
+}
+
+/** Invoice value of a booking: the sum of its live sale lines. */
+async function getBookingInvoiceTotal(bookingId: number): Promise<number> {
+  const rows = await prisma.$queryRaw<{ total: number }[]>(Prisma.sql`
+    SELECT COALESCE(SUM(s.sale_price * s.quantity), 0)::float8 AS total
+    FROM sales s
+    JOIN batches b ON b.id = s.batch_id
+    WHERE s.booking_id = ${bookingId} AND s.is_deleted = false AND b.is_deleted = false
+  `);
+  return rows[0]?.total ?? 0;
 }

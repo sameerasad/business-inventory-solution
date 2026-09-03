@@ -19,7 +19,7 @@
     "verify": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify.ts\"",
     "verify:migrations": "node .verify/migrate-check.mjs && node .verify/drift-check.mjs",
     "verify:pages": "node .verify/smoke.mjs",
-    "verify:all": "npm run typecheck && npm run verify:whatsapp && npm run verify && npm run verify:bookings && npm run verify:bookers && npm run verify:payments && npm run verify:recognition && npm run verify:repair && npm run verify:migrations && npm run verify:pages",
+    "verify:all": "npm run typecheck && npm run verify:whatsapp && npm run verify && npm run verify:bookings && npm run verify:bookers && npm run verify:edits && npm run verify:payments && npm run verify:recognition && npm run verify:repair && npm run verify:migrations && npm run verify:pages",
     "db:repair": "prisma db push --skip-generate && prisma db execute --schema prisma/schema.prisma --file prisma/repair/restore-constraints.sql && prisma db seed",
     "verify:bookings": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-bookings.ts\"",
     "verify:repair": "node .verify/repair-rehearsal.mjs",
@@ -30,7 +30,8 @@
     "db:check-payments": "tsx scripts/check-payments.ts",
     "verify:recognition": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-recognition.ts\"",
     "verify:bookers": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-bookers.ts\"",
-    "db:backfill-booker": "tsx scripts/backfill-booker.ts"
+    "db:backfill-booker": "tsx scripts/backfill-booker.ts",
+    "verify:edits": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-edits.ts\""
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
