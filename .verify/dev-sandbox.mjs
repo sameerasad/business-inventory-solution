@@ -104,10 +104,19 @@ try {
   await run("npx prisma migrate deploy", "prisma migrate deploy");
 
   const { rows } = await db.query(`SELECT COUNT(*)::int AS n FROM products`);
-  if (rows[0].n === 0) {
+  const dumpFile = path.join(process.cwd(), ".verify", "data-dump.json");
+
+  if (rows[0].n === 0 && fs.existsSync(dumpFile)) {
+    // A dump of the real database beats the seeded catalog for working on
+    // anything: real shop names, real Urdu place names, real stock levels and
+    // real invoice history. The loader refuses to write anywhere but a local
+    // database, so this cannot touch production.
+    await run("npx tsx scripts/load-dump.ts", "load the data dump");
+  } else if (rows[0].n === 0) {
     await run("npx tsx prisma/seed.ts", "seed the catalog");
+    console.log("\n> tip: run 'npm run db:dump' to work with a copy of the real data instead");
   } else {
-    console.log(`\n> catalog already present (${rows[0].n} products), skipping seed`);
+    console.log(`\n> data already present (${rows[0].n} products), leaving it alone`);
   }
 
   console.log(`\nStarting the app on http://localhost:${APP_PORT} - Ctrl+C to stop.\n`);

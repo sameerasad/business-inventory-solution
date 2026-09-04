@@ -8,6 +8,11 @@ build
 *.tsbuildinfo
 next-env.d.ts
 
+# A dump of the live database: real customer names and phone numbers.
+# Treat it like a backup - it must never be committed.
+.verify/data-dump.json
+*data-dump.json
+
 # scratch data from the verification suite
 .verify/pgdata
 sample-invoice.pdf
