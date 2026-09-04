@@ -2,7 +2,7 @@
 
 import { answerQuery, getVoiceCatalog, type VoiceAnswer } from "@/lib/voice/answer";
 import { parseCommand, type VoiceCommand } from "@/lib/voice/parse";
-import { interpretWithLlm, llmConfigured } from "@/lib/voice/llm";
+import { interpretWithLlm, llmConfigured, llmProvider } from "@/lib/voice/llm";
 import { buildPrompt, groqConfigured, transcribeWithGroq } from "@/lib/voice/transcribe";
 
 /**
@@ -105,8 +105,12 @@ function describe(command: VoiceCommand): string {
 }
 
 /** Whether the better engine is available, so the UI can offer it or not. */
-export async function voiceEnginesAvailable(): Promise<{ groq: boolean; llm: boolean }> {
-  return { groq: groqConfigured(), llm: llmConfigured() };
+export async function voiceEnginesAvailable(): Promise<{
+  groq: boolean;
+  llm: boolean;
+  llmProvider: "anthropic" | "openai-compatible" | "none";
+}> {
+  return { groq: groqConfigured(), llm: llmConfigured(), llmProvider: llmProvider() };
 }
 
 export type TranscribeAndInterpret =

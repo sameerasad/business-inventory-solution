@@ -1,5 +1,5 @@
 /**
- * Understanding a spoken command with Claude, instead of hand-written rules.
+ * Understanding a spoken command with a language model, instead of hand-written rules.
  *
  * The rule-based parser in parse.ts works well on the phrasings it was written
  * for and not at all on the rest. Every failure in this project came from that
@@ -24,13 +24,52 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
+import {
+  askOpenAiCompatible,
+  groqLlmConfig,
+  groqLlmConfigured,
+  type TransportResult,
+} from "@/lib/voice/llm-groq";
+
 import type { QueryMetric, QueryPeriod } from "@/lib/voice/lexicon";
 import type { VoiceCatalog, VoiceCommand } from "@/lib/voice/parse";
 import { DESTINATIONS } from "@/lib/voice/lexicon";
 
-export function llmConfigured(): boolean {
+function anthropicConfigured(): boolean {
   return (process.env.ANTHROPIC_API_KEY ?? "").trim().length > 0;
 }
+
+export function llmConfigured(): boolean {
+  return llmProvider() !== "none";
+}
+
+/**
+ * Which engine answers, and why the order is this way.
+ *
+ * Anthropic first when its key exists, because it is the stronger model and
+ * someone who has gone to the trouble of adding a paid key wants it used. The
+ * free OpenAI-compatible endpoint otherwise - which, on the measurements taken
+ * against this catalog, is good enough to be the default rather than a
+ * consolation: it resolved Urdu-script names correctly and abstained on every
+ * ambiguous sentence instead of guessing.
+ *
+ * LLM_PROVIDER pins one of them. Worth knowing about if a paid key is added for
+ * something else later and the voice feature should stay on the free tier: set
+ * LLM_PROVIDER="groq" and it will not quietly start spending money.
+ */
+export function llmProvider(): "anthropic" | "openai-compatible" | "none" {
+  const forced = (process.env.LLM_PROVIDER ?? "auto").trim().toLowerCase();
+  if (forced === "anthropic") return anthropicConfigured() ? "anthropic" : "none";
+  if (forced === "groq" || forced === "openai" || forced === "openai-compatible") {
+    return groqLlmConfigured() ? "openai-compatible" : "none";
+  }
+  if (anthropicConfigured()) return "anthropic";
+  if (groqLlmConfigured()) return "openai-compatible";
+  return "none";
+}
+
+/** The one tool both providers are asked to call. */
+const TOOL_NAME = "record_command";
 
 /**
  * One flat shape for every kind of command.
@@ -65,11 +104,22 @@ const Extracted = z.object({
   quantity: z.number().nullable(),
   unitPrice: z.number().nullable(),
   unitCost: z.number().nullable(),
+  /**
+   * Nullable inside a line, on purpose.
+   *
+   * A flavour here comes in five packagings, so "aam ki bottle" names a
+   * product line without identifying a product. Requiring an integer forbids
+   * the model from saying so: a live call abstained correctly and the request
+   * was rejected outright with "expected integer, but got null", turning the
+   * safest possible answer into a hard failure. Null means "mentioned, not
+   * identified", and the mapping below turns that into a question rather than
+   * a guess.
+   */
   lines: z
     .array(
       z.object({
-        productId: z.number(),
-        quantity: z.number(),
+        productId: z.number().nullable(),
+        quantity: z.number().nullable(),
         unitPrice: z.number().nullable(),
       }),
     )
@@ -133,8 +183,10 @@ const COMMAND_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          productId: { type: "integer" },
-          quantity: { type: "integer" },
+          // Nullable: null means the product was mentioned but not pinned
+          // down, which is the correct answer when a size was not said.
+          productId: { type: ["integer", "null"] },
+          quantity: { type: ["integer", "null"] },
           unitPrice: { type: ["number", "null"] },
         },
         required: ["productId", "quantity", "unitPrice"],
@@ -172,6 +224,59 @@ const COMMAND_SCHEMA = {
   additionalProperties: false,
 };
 
+/**
+ * The same schema with almost nothing required.
+ *
+ * The two providers disagree about this, and the disagreement is not
+ * cosmetic. Anthropic's strict mode requires every property to appear in
+ * required, or it rejects the tool declaration. Groq validates the model's
+ * arguments against the schema and rejects the call when a required property
+ * is absent - and a model naturally omits the fifteen fields that have nothing
+ * to do with the sentence it just heard. The first live call against Groq
+ * failed exactly that way: 400, "missing properties: 'shopName'".
+ *
+ * So one schema cannot serve both. This variant is derived from the strict one
+ * rather than written out a second time, because a hand-copied schema is a
+ * schema that quietly stops matching.
+ */
+const RELAXED_COMMAND_SCHEMA = {
+  ...COMMAND_SCHEMA,
+  // kind alone. Everything else is optional, and a field left out is read as
+  // "not said" - which is what it means.
+  required: ["kind"],
+  properties: {
+    ...COMMAND_SCHEMA.properties,
+    lines: {
+      ...COMMAND_SCHEMA.properties.lines,
+      items: {
+        ...COMMAND_SCHEMA.properties.lines.items,
+        required: ["productId", "quantity"],
+      },
+    },
+  },
+};
+
+/**
+ * An absent field and an explicit null mean the same thing here.
+ *
+ * Anthropic's strict mode guarantees every key is present; the relaxed schema
+ * deliberately does not, so the Zod shape below would reject a perfectly good
+ * answer for the crime of leaving out a field it had no reason to send.
+ */
+function fillNulls(input: unknown): unknown {
+  if (typeof input !== "object" || input === null) return input;
+  const filled: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+  for (const key of Object.keys(COMMAND_SCHEMA.properties)) {
+    if (filled[key] === undefined) filled[key] = null;
+  }
+  if (Array.isArray(filled.lines)) {
+    filled.lines = filled.lines.map((line) =>
+      typeof line === "object" && line !== null ? { unitPrice: null, ...line } : line,
+    );
+  }
+  return filled;
+}
+
 function catalogForPrompt(catalog: VoiceCatalog): string {
   const line = (id: number, name: string, extra = "") => `  ${id}: ${name}${extra}`;
   return [
@@ -205,8 +310,14 @@ function catalogForPrompt(catalog: VoiceCatalog): string {
       line(i.id, i.invoiceNo, ` - ${i.customerName ?? "walk-in"}, ${i.balance} outstanding`),
     ),
     "",
-    "PAGES (href - what it is)",
-    ...DESTINATIONS.map((d) => `  ${d.href} - ${d.label}`),
+    // The words, not just the labels. This list is the vocabulary the rule
+    // parser accumulated one mistake at a time, and it is knowledge no model
+    // can infer: "udhaar" means receivables in this business, and a live call
+    // proved the point by reading "udhar dikhao" as "show over there" and
+    // giving up. Capped per page to keep the prompt inside the free tier's
+    // per-minute budget.
+    "PAGES (href - what it is; words people say for it)",
+    ...DESTINATIONS.map((d) => `  ${d.href} - ${d.label}: ${d.words.slice(0, 8).join(", ")}`),
   ].join("\n");
 }
 
@@ -218,21 +329,41 @@ Choose exactly one kind:
 - navigate: they want to open a page. Set href.
 - query: they are asking for a figure. Set metric and period.
 - booking: an order for a shop, on credit. Set lines, and areaId or shopId.
-- sale: a cash sale over the counter. Only when they say cash / nagad / counter.
+- sale: a cash sale over the counter. ONLY when cash is explicit - cash, nagad, naqd,
+  counter, walk-in. "Sell", "bech do", "de do" on their own are NOT cash sales: selling to
+  a shop or an area on credit is a booking, which is how nearly every order here works. If
+  a shop or an area is named, it is a booking unless cash was actually said.
 - batch: stock arriving. Set productId, quantity and unitCost.
 - payment: money received against an invoice. Set bookingId and amount.
 - shop: adding a new shop. Set shopName and areaId.
 - unknown: none of the above. Set reason, in plain language, saying what was unclear.
 
+The verb decides between navigate and query, and only the verb. "dikhao", "kholo",
+"le chalo", "show", "open", "go to" mean open the page - navigate. "kitna", "kitne",
+"how much", "how many", "batao", "total" mean answer with a figure - query. The subject
+does not decide this: "udhaar dikhao" is navigate to the receivables page, while
+"kitna udhaar hai" is a query for outstanding. Both were spoken about the same subject.
+
 Rules that matter:
 - ONLY use ids from the catalog. Never invent one. If nothing matches, leave the id null.
 - Speech recognition mangles names. "Rajpur Daily" is very likely "Rajput Dairy"; resolve
   to the catalog entry that was plainly meant, and add a warning saying which you chose.
-- If two catalog entries are equally likely, pick neither: leave the id null and say so in
-  a warning. Guessing between two shops is worse than asking.
+- Names may be spoken in Urdu script while the catalog is written in Latin letters.
+  Transliterate what you hear and match by sound, not by characters: "انعم بیکری" is
+  "Anum bakery", "راجپوت ڈیری" is "Rajput Dairy", "المدینہ اسٹور" is "Al Madina Store".
+- CRITICAL: if the sentence does not identify exactly one catalog row, leave that id null
+  and name the candidates in a warning. Several shops here are called "general store", and
+  every flavour comes in five packagings, so "general store" on its own or "aam ki bottle"
+  without a size identifies nothing. Never pick one to be helpful. A wrong id is the only
+  mistake that cannot be caught later, because a real id belonging to the wrong shop passes
+  every check and then saves.
 - Numbers are never inferred. If a quantity or an amount was not said, leave it null.
 - Setting a shop implies its area; set both.
-- Urdu numbers: bees=20, pachas=50, ek sau bees=120, paanch hazar=5000, das hazar=10000.
+- Urdu numbers: bees=20, pachees=25, tees=30, chalees=40, pachas=50, sau=100, dhai sau=250,
+  ek sau bees=120, paanch hazar=5000, das hazar=10000.
+- Pack sizes are spoken as words: chota=the smallest, bara=the largest, ek litre=1000ml,
+  paanch sau=500ml, dhai sau=250ml, tetra pack / peti as the packaging. A number like 250
+  next to a flavour is far more likely to be the size than the quantity or the price.
 - Urdu products: aam=mango, seb=apple, aaru=peach, lichi=lychee, anaar=pomegranate.
 - Dates: aaj=today, kal=yesterday, parson=day before yesterday. Never read a bare number
   as a date - in this business every bare number is a quantity, a price or a pack size.
@@ -253,13 +384,11 @@ function modelConfig(): { model: string; effort: "low" | "medium" | "high" } {
 export type LlmOutcome =
   { ok: true; command: VoiceCommand; model: string } | { ok: false; reason: string };
 
-export async function interpretWithLlm(
-  transcript: string,
-  catalog: VoiceCatalog,
-  today = new Date(),
-): Promise<LlmOutcome> {
-  if (!llmConfigured()) return { ok: false, reason: "No Anthropic API key is configured." };
-
+/**
+ * Ask Claude for one tool call. Same contract as the OpenAI-compatible
+ * transport, so the caller below does not care which one ran.
+ */
+async function askAnthropic(transcript: string, context: string): Promise<TransportResult> {
   const { model, effort } = modelConfig();
   const client = new Anthropic();
 
@@ -274,11 +403,7 @@ export async function interpretWithLlm(
         { type: "text", text: SYSTEM },
         // The catalog is the same on nearly every request and is much larger
         // than the sentence that follows it, so it is worth caching.
-        {
-          type: "text",
-          text: `Today is ${today.toISOString().slice(0, 10)}.\n\n${catalogForPrompt(catalog)}`,
-          cache_control: { type: "ephemeral" },
-        },
+        { type: "text", text: context, cache_control: { type: "ephemeral" } },
       ],
       // A strict tool rather than the Zod output helper: that helper is typed
       // for Zod 4 and this app is on Zod 3 throughout its validation layer.
@@ -287,7 +412,7 @@ export async function interpretWithLlm(
       // feature. The result is still re-validated with Zod below.
       tools: [
         {
-          name: "record_command",
+          name: TOOL_NAME,
           description: "Record what the speaker asked for.",
           strict: true,
           input_schema: COMMAND_SCHEMA,
@@ -299,7 +424,7 @@ export async function interpretWithLlm(
       messages: [
         {
           role: "user",
-          content: `Transcript: ${transcript}\n\nCall record_command exactly once.`,
+          content: `Transcript: ${transcript}\n\nCall ${TOOL_NAME} exactly once.`,
         },
       ],
     });
@@ -308,16 +433,7 @@ export async function interpretWithLlm(
     if (!call || call.type !== "tool_use") {
       return { ok: false, reason: "The model did not return a command." };
     }
-
-    // Never trust the arguments blindly, even with strict on: this is the
-    // boundary between a language model and a database.
-    const validated = Extracted.safeParse(call.input);
-    if (!validated.success) {
-      console.error("llm interpret: schema mismatch", validated.error.issues.slice(0, 3));
-      return { ok: false, reason: "The model returned a command in an unexpected shape." };
-    }
-
-    return { ok: true, command: toCommand(validated.data, catalog, today), model };
+    return { ok: true, input: call.input };
   } catch (error) {
     if (error instanceof Anthropic.RateLimitError) {
       return { ok: false, reason: "Rate limited - try again in a moment." };
@@ -332,6 +448,52 @@ export async function interpretWithLlm(
     console.error("llm interpret failed", error);
     return { ok: false, reason: "Could not reach the language model." };
   }
+}
+
+/**
+ * Understand one sentence.
+ *
+ * The transport is chosen here and then forgotten: the schema, the prompt, and
+ * every id check below are shared, so the guarantees this file makes do not
+ * depend on which model answered. That is the point of the split - swapping the
+ * engine cannot loosen what reaches the database.
+ */
+export async function interpretWithLlm(
+  transcript: string,
+  catalog: VoiceCatalog,
+  today = new Date(),
+): Promise<LlmOutcome> {
+  const provider = llmProvider();
+  if (provider === "none") return { ok: false, reason: "No language model is configured." };
+
+  const context = `Today is ${today.toISOString().slice(0, 10)}.\n\n${catalogForPrompt(catalog)}`;
+  const model = provider === "anthropic" ? modelConfig().model : groqLlmConfig().model;
+
+  const answer =
+    provider === "anthropic"
+      ? await askAnthropic(transcript, context)
+      : await askOpenAiCompatible({
+          system: SYSTEM,
+          context,
+          transcript,
+          toolName: TOOL_NAME,
+          schema: RELAXED_COMMAND_SCHEMA,
+          // Someone is standing there waiting to say the next order. Better to
+          // fall back to the rule parser than to hold the microphone hostage.
+          signal: AbortSignal.timeout(25_000),
+        });
+
+  if (!answer.ok) return answer;
+
+  // Never trust the arguments blindly, even where the schema was declared
+  // strict: this is the boundary between a language model and a database.
+  const validated = Extracted.safeParse(fillNulls(answer.input));
+  if (!validated.success) {
+    console.error("llm interpret: schema mismatch", validated.error.issues.slice(0, 3));
+    return { ok: false, reason: "The model returned a command in an unexpected shape." };
+  }
+
+  return { ok: true, command: toCommand(validated.data, catalog, today), model };
 }
 
 /* ----------------------------------------------------------- validating ids */
@@ -404,12 +566,23 @@ export function toCommand(
     case "booking": {
       const raw = extracted.lines ?? [];
       const lines = raw.flatMap((line) => {
+        // Abstaining and inventing look the same here - no usable product -
+        // but they are opposite behaviours and deserve different words. One is
+        // the model doing the right thing with an ambiguous sentence; the other
+        // is the model being wrong.
+        if (line.productId == null) {
+          warnings.push("A product was mentioned but no size was said, so it was left blank.");
+          return [];
+        }
         const product = catalog.products.find((p) => p.id === line.productId);
         if (!product) {
           warnings.push("A product it chose is not in the catalog, so that line was dropped.");
           return [];
         }
-        if (line.quantity > product.available) {
+        if (line.quantity == null) {
+          warnings.push(`No quantity was said for ${product.sku}.`);
+        }
+        if (line.quantity != null && line.quantity > product.available) {
           warnings.push(
             `Only ${product.available} of ${product.sku} are in stock; ${line.quantity} was heard.`,
           );
@@ -426,16 +599,20 @@ export function toCommand(
             productId: product.id,
             sku: product.sku,
             label: `${product.name} ${product.packagingType} ${product.variantValue}`,
-            quantity: line.quantity,
+            // Zero rather than a guess: it lands in missing below, so the form
+            // opens with the field empty and waiting.
+            quantity: line.quantity ?? 0,
             unitPrice,
           },
         ];
       });
 
       if (lines.length === 0) {
+        const explained = (extracted.warnings ?? []).find((w) => w.trim().length > 0);
         return {
           kind: "unknown",
-          reason: "No product in the catalog matched that. Try the flavour with its size.",
+          reason:
+            explained ?? "No product in the catalog matched that. Try the flavour with its size.",
         };
       }
       if (lines.some((l) => l.quantity <= 0)) missing.push("quantity");
