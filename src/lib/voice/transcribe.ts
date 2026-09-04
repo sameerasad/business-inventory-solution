@@ -118,8 +118,37 @@ export function isHallucination(text: string): boolean {
 export type TranscribeResult =
   { ok: true; text: string; model: string } | { ok: false; reason: string; retryable: boolean };
 
+/**
+ * Where transcription happens.
+ *
+ * Groq by default, but any endpoint that speaks the OpenAI transcription API
+ * will do - including one running on this machine. That is the whole reason
+ * this is configuration rather than a hard-coded URL: a fine-tuned Urdu model
+ * from Hugging Face cannot be used through Groq, which serves only its own
+ * list, so trying one means running it yourself and pointing here at it.
+ *
+ * STT_BASE_URL   e.g. http://127.0.0.1:8123/v1  for a local server
+ * STT_MODEL      the model that endpoint expects
+ * STT_API_KEY    optional; a local server usually needs none
+ */
+export function sttConfig(): { baseUrl: string; model: string; key: string } {
+  const baseUrl = (process.env.STT_BASE_URL ?? "https://api.groq.com/openai/v1").trim();
+  const model = (process.env.STT_MODEL ?? process.env.GROQ_STT_MODEL ?? "whisper-large-v3").trim();
+  // GROQ_API_KEY stays supported so nothing already deployed has to change.
+  const key = (process.env.STT_API_KEY ?? process.env.GROQ_API_KEY ?? "").trim();
+  return { baseUrl: baseUrl.replace(/\/+$/, ""), model, key };
+}
+
+/**
+ * Whether transcription is available at all.
+ *
+ * A local endpoint needs no key, so having one configured counts as being set
+ * up even with no key present.
+ */
 export function groqConfigured(): boolean {
-  return (process.env.GROQ_API_KEY ?? "").trim().length > 0;
+  const { baseUrl, key } = sttConfig();
+  const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/.test(baseUrl);
+  return key.length > 0 || isLocal;
 }
 
 /**
@@ -197,15 +226,15 @@ export async function transcribeWithGroq(
     return { ok: false, reason: `Unsupported audio format (${audio.type}).`, retryable: false };
   }
 
-  const key = (process.env.GROQ_API_KEY ?? "").trim();
-  if (key.length === 0) {
-    return { ok: false, reason: "Groq is not configured on the server.", retryable: false };
+  const { baseUrl, model, key } = sttConfig();
+  if (!groqConfigured()) {
+    return {
+      ok: false,
+      reason: "No transcription service is configured on the server.",
+      retryable: false,
+    };
   }
 
-  // large-v3, not large-v3-turbo: turbo is quicker but measurably weaker
-  // outside English, and Urdu is the entire reason this engine is here. A
-  // second of latency is a fair trade for a transcript that is not invented.
-  const model = (process.env.GROQ_STT_MODEL ?? "whisper-large-v3").trim();
   const form = new FormData();
   // The extension matters: Groq infers the container from the filename.
   const extension = audio.type.includes("ogg")
@@ -224,9 +253,11 @@ export async function transcribeWithGroq(
 
   let response: Response;
   try {
-    response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+    response = await fetch(`${baseUrl}/audio/transcriptions`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}` },
+      // A local server needs no credentials, and sending an empty bearer token
+      // makes some of them reject the request outright.
+      headers: key.length > 0 ? { Authorization: `Bearer ${key}` } : undefined,
       body: form,
       signal: options.signal,
     });
