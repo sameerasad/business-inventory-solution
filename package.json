@@ -37,7 +37,8 @@
     "db:dump": "tsx scripts/dump-db.ts",
     "db:load-dump": "tsx scripts/load-dump.ts",
     "verify:dump": "node .verify/dump-roundtrip.mjs",
-    "verify:llm": "tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-llm.ts"
+    "verify:llm": "tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-llm.ts",
+    "voice:try": "tsx scripts/try-voice.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
