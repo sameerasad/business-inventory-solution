@@ -183,7 +183,9 @@ const COMMAND_SCHEMA = {
     unitCost: { type: ["number", "null"], description: "Only for batch. Never guess it." },
     lines: {
       type: ["array", "null"],
-      description: "Only for booking. One entry per product ordered.",
+      description:
+        "Only for booking, and REQUIRED for a booking: one entry per product ordered. " +
+        "A product ordered for a shop belongs here, never in the flat productId field.",
       items: {
         type: "object",
         properties: {
@@ -332,7 +334,10 @@ and the sentence has been through speech recognition, so words may be misheard.
 Choose exactly one kind:
 - navigate: they want to open a page. Set href.
 - query: they are asking for a figure. Set metric and period.
-- booking: an order for a shop, on credit. Set lines, and areaId or shopId.
+- booking: an order for a shop, on credit. Set areaId or shopId, and set lines with at
+  least one entry. NEVER return a booking with lines null: if you worked out which product
+  was meant, its id goes in lines[].productId with the quantity beside it. Explaining the
+  product in a warning while leaving lines empty is the one thing that loses the order.
 - sale: a cash sale over the counter. ONLY when cash is explicit - cash, nagad, naqd,
   counter, walk-in. "Sell", "bech do", "de do" on their own are NOT cash sales: selling to
   a shop or an area on credit is a booking, which is how nearly every order here works. If
@@ -437,7 +442,7 @@ async function askAnthropic(transcript: string, context: string): Promise<Transp
     if (!call || call.type !== "tool_use") {
       return { ok: false, reason: "The model did not return a command." };
     }
-    return { ok: true, input: call.input };
+    return { ok: true, input: call.input, model };
   } catch (error) {
     if (error instanceof Anthropic.RateLimitError) {
       return { ok: false, reason: "Rate limited - try again in a moment." };
@@ -471,7 +476,6 @@ export async function interpretWithLlm(
   if (provider === "none") return { ok: false, reason: "No language model is configured." };
 
   const context = `Today is ${today.toISOString().slice(0, 10)}.\n\n${catalogForPrompt(catalog)}`;
-  const model = provider === "anthropic" ? modelConfig().model : groqLlmConfig().model;
 
   const answer =
     provider === "anthropic"
@@ -497,7 +501,18 @@ export async function interpretWithLlm(
     return { ok: false, reason: "The model returned a command in an unexpected shape." };
   }
 
-  return { ok: true, command: toCommand(validated.data, catalog, today), model };
+  // answer.model, not the configured one: a rate limit can move the request
+  // to the fallback model, and reporting the one that was asked for rather
+  // than the one that replied would make that invisible.
+  // Set VOICE_DEBUG=1 to see exactly what the model returned. Worth having:
+  // the mapped command tells you the outcome, but only the raw extraction
+  // tells you whether a disappointing answer was the model abstaining, the
+  // model misreading, or this file dropping something it was handed.
+  if (process.env.VOICE_DEBUG === "1") {
+    console.error("voice: raw extraction from", answer.model, JSON.stringify(validated.data));
+  }
+
+  return { ok: true, command: toCommand(validated.data, catalog, today), model: answer.model };
 }
 
 /* ----------------------------------------------------------- validating ids */
@@ -568,7 +583,24 @@ export function toCommand(
     }
 
     case "booking": {
-      const raw = extracted.lines ?? [];
+      // A single-product order can arrive either way, and which one you get
+      // depends on the model rather than on what was said. Measured: qwen put
+      // the product in the flat productId field and left lines null, and this
+      // mapper - reading only lines - threw away a correct answer and reported
+      // that nothing matched. Nothing is invented by accepting both shapes:
+      // the id still has to exist in the catalog to survive the loop below.
+      const raw =
+        extracted.lines && extracted.lines.length > 0
+          ? extracted.lines
+          : extracted.productId != null
+            ? [
+                {
+                  productId: extracted.productId,
+                  quantity: extracted.quantity,
+                  unitPrice: extracted.unitPrice,
+                },
+              ]
+            : [];
       const lines = raw.flatMap((line) => {
         // Abstaining and inventing look the same here - no usable product -
         // but they are opposite behaviours and deserve different words. One is
