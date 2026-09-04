@@ -2,6 +2,7 @@
 
 import { answerQuery, getVoiceCatalog, type VoiceAnswer } from "@/lib/voice/answer";
 import { parseCommand, type VoiceCommand } from "@/lib/voice/parse";
+import { interpretWithLlm, llmConfigured } from "@/lib/voice/llm";
 import { buildPrompt, groqConfigured, transcribeWithGroq } from "@/lib/voice/transcribe";
 
 /**
@@ -25,6 +26,30 @@ export type VoiceResult = {
   summary: string;
 };
 
+/**
+ * Turn a sentence into a command: the model when it is available, the rules
+ * when it is not.
+ *
+ * The model goes first because every failure this feature has had came from the
+ * rules' blind spots - an Urdu spelling nobody listed, a word order nobody
+ * anticipated, a shop name the transcriber mangled. The rules stay as the
+ * fallback rather than being deleted: they are free, instant, work with no
+ * network, and have hundreds of tests behind them, so an expired key or a rate
+ * limit degrades the feature instead of breaking it.
+ */
+async function understand(
+  transcript: string,
+  catalog: Awaited<ReturnType<typeof getVoiceCatalog>>,
+): Promise<VoiceCommand> {
+  if (llmConfigured()) {
+    const outcome = await interpretWithLlm(transcript, catalog);
+    if (outcome.ok) return outcome.command;
+    // Worth a log: silently falling back hides an expired key for weeks.
+    console.error("voice: falling back to the rule parser -", outcome.reason);
+  }
+  return parseCommand(transcript, catalog);
+}
+
 export async function interpretVoiceAction(transcript: string): Promise<VoiceResult> {
   const said = transcript.trim().slice(0, 400);
   if (said.length === 0) {
@@ -37,7 +62,7 @@ export async function interpretVoiceAction(transcript: string): Promise<VoiceRes
   }
 
   const catalog = await getVoiceCatalog();
-  const command = parseCommand(said, catalog);
+  const command = await understand(said, catalog);
 
   if (command.kind === "query") {
     const answer = await answerQuery(command);
@@ -80,8 +105,8 @@ function describe(command: VoiceCommand): string {
 }
 
 /** Whether the better engine is available, so the UI can offer it or not. */
-export async function voiceEnginesAvailable(): Promise<{ groq: boolean }> {
-  return { groq: groqConfigured() };
+export async function voiceEnginesAvailable(): Promise<{ groq: boolean; llm: boolean }> {
+  return { groq: groqConfigured(), llm: llmConfigured() };
 }
 
 export type TranscribeAndInterpret =
@@ -136,13 +161,13 @@ export async function transcribeAndInterpretAction(
   const other: "ur" | "en" = language === "ur" ? "en" : "ur";
   let transcribed = await transcribeWithGroq(audio, { language, prompt });
   let said = transcribed.ok ? transcribed.text.slice(0, 400) : "";
-  let command = transcribed.ok ? parseCommand(said, catalog) : null;
+  let command = transcribed.ok ? await understand(said, catalog) : null;
 
   if (!transcribed.ok || command?.kind === "unknown") {
     const retry = await transcribeWithGroq(audio, { language: other, prompt });
     if (retry.ok) {
       const retrySaid = retry.text.slice(0, 400);
-      const retryCommand = parseCommand(retrySaid, catalog);
+      const retryCommand = await understand(retrySaid, catalog);
       // Only prefer the retry if it actually understood something - otherwise
       // the first transcript is the more honest thing to show.
       if (retryCommand.kind !== "unknown" || !transcribed.ok) {
