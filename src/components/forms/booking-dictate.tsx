@@ -148,6 +148,12 @@ export function BookingDictate({
     else start();
   };
 
+  const fillFromTyped = () => {
+    const said = typed.trim();
+    if (said.length === 0) return;
+    void handleText(said);
+  };
+
   return (
     <div className="w-full space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -180,26 +186,38 @@ export function BookingDictate({
 
         {/* Typing the same sentence takes the identical path, which is both the
             fallback when the microphone is unavailable and the quickest way past
-            a word it keeps mishearing. */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const said = typed.trim();
-            if (said.length === 0) return;
-            void handleText(said);
-          }}
-          className="flex min-w-[240px] flex-1 items-center gap-2"
-        >
+            a word it keeps mishearing.
+
+            Deliberately NOT a <form>. This component renders inside the
+            booking form, and a nested form is invalid HTML - the browser
+            discards the inner one, so a type="submit" button here submitted the
+            BOOKING instead of filling it, and pressing Enter did the same. The
+            Add-shop dialog nearby gets away with its own form only because
+            Radix renders it in a portal, outside the form entirely. */}
+        <div className="flex min-w-[240px] flex-1 items-center gap-2">
           <Input
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              // Enter must fill, and must not reach the booking form.
+              e.preventDefault();
+              e.stopPropagation();
+              fillFromTyped();
+            }}
             placeholder="or type the whole order"
             disabled={thinking}
           />
-          <Button type="submit" variant="ghost" size="sm" disabled={typed.trim().length === 0}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={fillFromTyped}
+            disabled={thinking || typed.trim().length === 0}
+          >
             Fill
           </Button>
-        </form>
+        </div>
       </div>
 
       {listening ? (
