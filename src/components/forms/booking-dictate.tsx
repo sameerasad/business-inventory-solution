@@ -49,7 +49,6 @@ export function BookingDictate({
   const [lang, setLang] = useState<SpeechLang>("en-PK");
   const [useWhisper, setUseWhisper] = useState(false);
   const [thinking, setThinking] = useState(false);
-  const [heard, setHeard] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<{ ok: boolean; message: string } | null>(null);
   const [typed, setTyped] = useState("");
 
@@ -67,7 +66,14 @@ export function BookingDictate({
   /** Apply an understood result, whichever engine produced it. */
   const apply = useCallback(
     (result: VoiceResult) => {
-      setHeard(result.transcript);
+      // The transcript goes INTO the editable box, not into a read-only line
+      // beside it.
+      //
+      // This is the whole correction loop. "Rajput Dairy" comes back as
+      // "Rajpur Daily" and the shop cannot be matched - but with the sentence
+      // sitting in a text field, that is one word to fix and Fill again,
+      // instead of saying the entire order over and hoping for better luck.
+      setTyped(result.transcript);
       if (result.command.kind !== "booking") {
         setOutcome({
           ok: false,
@@ -143,7 +149,6 @@ export function BookingDictate({
 
   const begin = () => {
     setOutcome(null);
-    setHeard(null);
     if (useWhisper) void recorder.start();
     else start();
   };
@@ -206,6 +211,7 @@ export function BookingDictate({
               fillFromTyped();
             }}
             placeholder="or type the whole order"
+            aria-label="The order, as heard - editable"
             disabled={thinking}
           />
           <Button
@@ -228,13 +234,6 @@ export function BookingDictate({
         </p>
       ) : null}
 
-      {heard ? (
-        <p className="text-xs">
-          <span className="text-muted-foreground">Heard{useWhisper ? " (Whisper)" : ""}: </span>
-          &ldquo;{heard}&rdquo;
-        </p>
-      ) : null}
-
       {liveError ? <Alert tone="error">{liveError}</Alert> : null}
       {outcome ? (
         <p className={cn("text-xs", outcome.ok ? "text-muted-foreground" : "text-destructive")}>
@@ -243,7 +242,8 @@ export function BookingDictate({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        One sentence: quantity, product, and the shop. Nothing is saved until you press Save.
+        One sentence: quantity, product, and the shop. What was heard appears in the box above -
+        correct any word it got wrong and press Fill again. Nothing is saved until you press Save.
       </p>
     </div>
   );
