@@ -19,7 +19,7 @@
     "verify": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify.ts\"",
     "verify:migrations": "node .verify/migrate-check.mjs && node .verify/drift-check.mjs",
     "verify:pages": "node .verify/smoke.mjs",
-    "verify:all": "npm run typecheck && npm run verify:whatsapp && npm run verify:voice && npm run verify:transcribe && npm run verify:llm && npm run verify && npm run verify:bookings && npm run verify:bookers && npm run verify:edits && npm run verify:payments && npm run verify:recognition && npm run verify:dump && npm run verify:repair && npm run verify:migrations && npm run verify:pages",
+    "verify:all": "npm run typecheck && npm run verify:whatsapp && npm run verify:voice && npm run verify:transcribe && npm run verify:llm && npm run verify:dictate && npm run verify && npm run verify:bookings && npm run verify:bookers && npm run verify:edits && npm run verify:payments && npm run verify:recognition && npm run verify:dump && npm run verify:repair && npm run verify:migrations && npm run verify:pages",
     "db:repair": "prisma db push --skip-generate && prisma db execute --schema prisma/schema.prisma --file prisma/repair/restore-constraints.sql && prisma db seed",
     "verify:bookings": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-bookings.ts\"",
     "verify:repair": "node .verify/repair-rehearsal.mjs",
@@ -38,7 +38,8 @@
     "db:load-dump": "tsx scripts/load-dump.ts",
     "verify:dump": "node .verify/dump-roundtrip.mjs",
     "verify:llm": "tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-llm.ts",
-    "voice:try": "tsx scripts/try-voice.ts"
+    "voice:try": "tsx scripts/try-voice.ts",
+    "verify:dictate": "tsx --tsconfig .verify/tsconfig.dom.json .verify/verify-dictate.tsx"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -65,10 +66,13 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@electric-sql/pglite-socket": "^0.2.11",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^22.10.7",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.1",
     "prisma": "^6.3.0",
     "tailwindcss": "^3.4.17",

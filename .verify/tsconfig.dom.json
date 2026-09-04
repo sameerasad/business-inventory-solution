@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.verify.json",
+  "compilerOptions": {
+    "jsx": "react-jsx"
+  },
+  "include": ["../src/**/*.ts", "../src/**/*.tsx", "./*.ts", "./*.tsx"]
+}

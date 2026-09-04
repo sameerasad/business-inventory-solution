@@ -73,7 +73,14 @@ export function BookingDictate({
       // "Rajpur Daily" and the shop cannot be matched - but with the sentence
       // sitting in a text field, that is one word to fix and Fill again,
       // instead of saying the entire order over and hoping for better luck.
-      setTyped(result.transcript);
+      // Guarded, not assigned blindly. A controlled input handed undefined
+      // silently becomes uncontrolled and shows its placeholder, which looks
+      // exactly like "the transcript never arrived" while hiding the real
+      // fault. And an empty transcript must never wipe a sentence someone
+      // typed by hand - that text is the only copy of what they meant.
+      if (typeof result.transcript === "string" && result.transcript.trim().length > 0) {
+        setTyped(result.transcript);
+      }
       if (result.command.kind !== "booking") {
         setOutcome({
           ok: false,
@@ -212,6 +219,11 @@ export function BookingDictate({
             }}
             placeholder="or type the whole order"
             aria-label="The order, as heard - editable"
+            // Urdu is written right to left and the transcript is usually
+            // Urdu, so the direction has to follow the text rather than the
+            // page. "auto" reads the first strong character and lays the line
+            // out the way the person speaking would write it.
+            dir="auto"
             disabled={thinking}
           />
           <Button
