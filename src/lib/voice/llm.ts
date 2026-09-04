@@ -59,6 +59,10 @@ export function llmConfigured(): boolean {
  */
 export function llmProvider(): "anthropic" | "openai-compatible" | "none" {
   const forced = (process.env.LLM_PROVIDER ?? "auto").trim().toLowerCase();
+  // A kill switch, and a necessary one. The free path needs no key of its own -
+  // it falls back to the Groq key already present for speech recognition - so
+  // deploying this turns it on by itself, with nothing to remove to stop it.
+  if (forced === "off" || forced === "none" || forced === "parser") return "none";
   if (forced === "anthropic") return anthropicConfigured() ? "anthropic" : "none";
   if (forced === "groq" || forced === "openai" || forced === "openai-compatible") {
     return groqLlmConfigured() ? "openai-compatible" : "none";
