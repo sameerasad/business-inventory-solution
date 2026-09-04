@@ -100,7 +100,11 @@ export function BookingForm({
         : command.lines.map((line, index) => ({
             key: `dictated-${index}-${line.productId}`,
             productId: String(line.productId),
-            quantity: String(line.quantity),
+            // Empty, not "0", when no quantity was said. A zero looks like an
+            // answer and has to be deleted before it can be corrected; an
+            // empty required field asks the question by itself, and the
+            // browser will not let the form save until it is answered.
+            quantity: line.quantity > 0 ? String(line.quantity) : "",
             unitPrice: String(line.unitPrice),
           })),
     );
