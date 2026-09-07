@@ -16,6 +16,8 @@ import { Alert } from "@/components/ui/alert";
 import { money, MONTH_LABELS } from "@/lib/format";
 import { currentMonthIndex0, currentYear, monthRange, yearRange } from "@/lib/dates";
 import { getCategories } from "@/lib/queries";
+import { isDateOnly } from "@/lib/dates";
+import { dateOnly } from "@/lib/format";
 import type { CashScope } from "@/lib/recognition";
 import { getActiveBookers } from "@/lib/bookers";
 import {
@@ -27,6 +29,7 @@ import {
   getCashByShop,
   getCashByVariant,
   getCashKpis,
+  getCashRangeTotals,
   getCashMonthlyTrend,
   getCashYears,
 } from "@/lib/recognition";
@@ -38,6 +41,10 @@ export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 
 const JUICE_CATEGORY_NAME = "Juice & Beverage";
+
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 function parseId(value: string | string[] | undefined): number | null {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -77,9 +84,35 @@ export default async function DashboardPage({
   const bookerId = parseId(sp.booker);
   const period: "year" | "month" = sp.period === "month" ? "month" : "year";
 
+  // A chosen date range. Either end alone is allowed: "from 1 September" with
+  // no end means everything since, which is how people actually ask.
+  const fromParam = first(sp.from);
+  const toParam = first(sp.to);
+  const from = fromParam && isDateOnly(fromParam) ? fromParam : null;
+  const to = toParam && isDateOnly(toParam) ? toParam : null;
+  const invalidRange = from != null && to != null && from > to;
+
+  /**
+   * The range as the queries want it: start inclusive, end EXCLUSIVE.
+   *
+   * Every cash query compares on_date >= start AND on_date < end, so a "to" of
+   * the 15th has to become the 16th or the 15th's own sales vanish - the kind
+   * of off-by-one that quietly under-reports a day and looks like a bad day of
+   * trade rather than a bug.
+   */
+  const range =
+    !invalidRange && (from || to)
+      ? {
+          start: from ? new Date(`${from}T00:00:00.000Z`) : yearRange(year).start,
+          end: to
+            ? new Date(new Date(`${to}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000)
+            : yearRange(year).end,
+        }
+      : null;
+
   const filters = { year, categoryId, areaId, bookerId };
   const yearScope: CashScope = {
-    ...yearRange(year),
+    ...(range ?? yearRange(year)),
     categoryId,
     areaId,
     bookerId,
@@ -89,10 +122,12 @@ export default async function DashboardPage({
   // "this month" is meaningless, so that toggle uses December of that year.
   const monthIndex0 = year === currentYear() ? currentMonthIndex0() : 11;
   const geoScope: CashScope =
-    period === "month"
+    range == null && period === "month"
       ? { ...monthRange(year, monthIndex0), categoryId, areaId, bookerId }
       : yearScope;
-  const geoLabel = period === "month" ? `${MONTH_LABELS[monthIndex0]} ${year}` : String(year);
+  const rangeLabel = range ? `${from ?? dateOnly(range.start)} to ${to ?? "now"}` : String(year);
+  const geoLabel =
+    range == null && period === "month" ? `${MONTH_LABELS[monthIndex0]} ${year}` : rangeLabel;
 
   // The flavor chart is about the juice line. With no explicit category filter we
   // scope it to Juice & Beverage so chocolate does not crowd the five flavors;
@@ -103,20 +138,33 @@ export default async function DashboardPage({
   const flavorCategoryName =
     categories.find((c) => c.id === flavorCategoryId)?.name ?? "all categories";
 
-  const [kpis, trend, packaging, variants, flavors, byArea, byShop, byCategory, byBooker] =
-    await Promise.all([
-      getCashKpis(filters),
-      getCashMonthlyTrend(filters),
-      getCashByPackaging(yearScope),
-      getCashByVariant(yearScope),
-      getCashByProductName(flavorScope),
-      getCashByArea(geoScope),
-      getCashByShop(geoScope, 10),
-      getCashByCategory(yearScope),
-      // Unfiltered by booker on purpose: a chart comparing bookers is useless
-      // when narrowed to one, so it always shows the whole field.
-      getCashByBooker({ ...yearScope, bookerId: null }),
-    ]);
+  const [
+    kpis,
+    trend,
+    packaging,
+    variants,
+    flavors,
+    byArea,
+    byShop,
+    byCategory,
+    byBooker,
+    rangeTotals,
+  ] = await Promise.all([
+    getCashKpis(filters),
+    getCashMonthlyTrend({ ...filters, range }),
+    getCashByPackaging(yearScope),
+    getCashByVariant(yearScope),
+    getCashByProductName(flavorScope),
+    getCashByArea(geoScope),
+    getCashByShop(geoScope, 10),
+    getCashByCategory(yearScope),
+    // Unfiltered by booker on purpose: a chart comparing bookers is useless
+    // when narrowed to one, so it always shows the whole field.
+    getCashByBooker({ ...yearScope, bookerId: null }),
+    // Only asked for when a range is set; the year total already comes back
+    // from getCashKpis.
+    range ? getCashRangeTotals(yearScope) : Promise.resolve(null),
+  ]);
 
   const hasAnyData = kpis.year.revenue > 0 || trend.some((m) => m.revenue > 0);
   const isFiltered = categoryId != null || areaId != null || bookerId != null;
@@ -142,7 +190,7 @@ export default async function DashboardPage({
           categories={categories}
           areas={areaRows}
           bookers={bookerRows}
-          selected={{ year, categoryId, areaId, bookerId }}
+          selected={{ year, categoryId, areaId, bookerId, from, to }}
         />
       </Suspense>
 
@@ -184,7 +232,14 @@ export default async function DashboardPage({
           muted={!kpis.isCurrentYear}
         />
         <KpiCard label="This Month" sublabel={kpis.monthLabel} data={kpis.month} />
-        <KpiCard label="This Year" sublabel={String(year)} data={kpis.year} />
+        {/* Today and This Month are facts about now and stay as they are. The
+            third card is the window being asked about, which is the year until
+            a range narrows it. */}
+        {rangeTotals ? (
+          <KpiCard label="Selected range" sublabel={rangeLabel} data={rangeTotals} />
+        ) : (
+          <KpiCard label="This Year" sublabel={String(year)} data={kpis.year} />
+        )}
       </section>
 
       {/* ------------------------------------------------------------- charts */}
@@ -243,7 +298,9 @@ export default async function DashboardPage({
             description={geoLabel}
             action={
               <div className="flex flex-col items-end gap-2">
-                <Suspense fallback={<FilterBarSkeleton className="h-7 w-[104px] rounded-md border" />}>
+                <Suspense
+                  fallback={<FilterBarSkeleton className="h-7 w-[104px] rounded-md border" />}
+                >
                   <PeriodToggle value={period} />
                 </Suspense>
                 <ChartLegend items={trendLegend} />

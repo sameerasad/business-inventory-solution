@@ -228,6 +228,12 @@ const pages = [
   // A year that is not in the dropdown (no data, not the current year) falls back
   // to a selectable year rather than rendering a mismatched Select value.
   ["/dashboard?year=2020", ["Dashboard", `>${YEAR}</span>`]],
+  ["/dashboard?from=2020-01-01&to=2099-12-31", ["Dashboard", "Selected range"]],
+  ["/dashboard?from=2020-01-01", ["Dashboard", "Selected range"]],
+  ["/dashboard?to=2099-12-31", ["Dashboard", "Selected range"]],
+  // Backwards, which must narrow nothing rather than 500 the page.
+  ["/dashboard?from=2099-01-01&to=2020-12-31", ["Dashboard", "This Year"]],
+  ["/dashboard?from=not-a-date", ["Dashboard", "This Year"]],
   ["/dashboard?year=notanumber", ["Dashboard", `>${YEAR}</span>`]],
   ["/dashboard?category=999999", ["Dashboard", ">All categories</span>"]],
   ["/dashboard?booker=999999", ["Dashboard", ">All bookers</span>"]],

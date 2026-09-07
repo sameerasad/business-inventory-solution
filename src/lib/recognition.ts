@@ -271,6 +271,19 @@ export async function getAwaitingPayment(filters: {
 
 /* ---------------------------------------------------------------- month trend */
 
+/**
+ * Revenue, profit and units for any window.
+ *
+ * The KPI cards answer three fixed questions - today, this month, this year -
+ * and a chosen date range is a fourth that cannot be one of them. Rather than
+ * bending getCashKpis into taking an arbitrary period, this exposes the same
+ * two queries it already uses so the page can ask about a range directly.
+ */
+export async function getCashRangeTotals(scope: CashScope): Promise<Money> {
+  const [money, units] = await Promise.all([totals(scope), deliveredUnits(scope)]);
+  return { ...money, units };
+}
+
 export type CashMonthPoint = { month: number; label: string; revenue: number; profit: number };
 
 export async function getCashMonthlyTrend(filters: {
@@ -278,9 +291,16 @@ export async function getCashMonthlyTrend(filters: {
   categoryId: number | null;
   areaId: number | null;
   bookerId: number | null;
+  /**
+   * A chosen date range, when there is one. Without it the chart is the twelve
+   * months of the year, padded so an empty month still occupies its slot. With
+   * it the chart covers only the months the range touches - showing ten empty
+   * months beside two real ones would misread as a collapse in trade.
+   */
+  range?: { start: Date; end: Date } | null;
 }): Promise<CashMonthPoint[]> {
   const scope: CashScope = {
-    ...yearRange(filters.year),
+    ...(filters.range ?? yearRange(filters.year)),
     categoryId: filters.categoryId,
     areaId: filters.areaId,
     bookerId: filters.bookerId,
@@ -300,10 +320,37 @@ export async function getCashMonthlyTrend(filters: {
   );
 
   const byMonth = new Map(rows.map((r) => [r.month, r]));
-  return MONTH_LABELS.map((label, i) => {
-    const row = byMonth.get(i + 1);
-    return { month: i + 1, label, revenue: row?.revenue ?? 0, profit: row?.profit ?? 0 };
-  });
+
+  if (!filters.range) {
+    return MONTH_LABELS.map((label, i) => {
+      const row = byMonth.get(i + 1);
+      return { month: i + 1, label, revenue: row?.revenue ?? 0, profit: row?.profit ?? 0 };
+    });
+  }
+
+  // One point per month the range touches. The grouping above is by month
+  // NUMBER, which is all this needs while a range stays inside one year; a
+  // range spanning a year boundary would fold January onto January, so the
+  // label carries the year and the walk below stops at the range's own end.
+  const points: CashMonthPoint[] = [];
+  const cursor = new Date(
+    Date.UTC(filters.range.start.getUTCFullYear(), filters.range.start.getUTCMonth(), 1),
+  );
+  const spansYears = filters.range.start.getUTCFullYear() !== filters.range.end.getUTCFullYear();
+  while (cursor < filters.range.end) {
+    const monthNo = cursor.getUTCMonth() + 1;
+    const row = byMonth.get(monthNo);
+    points.push({
+      month: monthNo,
+      label: spansYears
+        ? `${MONTH_LABELS[cursor.getUTCMonth()]} ${String(cursor.getUTCFullYear()).slice(2)}`
+        : (MONTH_LABELS[cursor.getUTCMonth()] ?? String(monthNo)),
+      revenue: row?.revenue ?? 0,
+      profit: row?.profit ?? 0,
+    });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return points;
 }
 
 /* ----------------------------------------------------------------- breakdowns */

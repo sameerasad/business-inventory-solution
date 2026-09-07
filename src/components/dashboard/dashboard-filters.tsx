@@ -2,16 +2,12 @@
 
 import { useCallback, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValueLabel,
-} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 const ALL = "all";
 
@@ -37,6 +33,8 @@ export function DashboardFilters({
     categoryId: number | null;
     areaId: number | null;
     bookerId: number | null;
+    from: string | null;
+    to: string | null;
   };
 }) {
   const router = useRouter();
@@ -56,95 +54,94 @@ export function DashboardFilters({
     [pathname, router, searchParams],
   );
 
-  const categoryLabel =
-    selected.categoryId == null
-      ? "All categories"
-      : (categories.find((c) => c.id === selected.categoryId)?.name ?? "All categories");
-  const areaLabel =
-    selected.areaId == null
-      ? "All areas"
-      : (areas.find((a) => a.id === selected.areaId)?.name ?? "All areas");
-  const bookerLabel =
-    selected.bookerId == null
-      ? "All bookers"
-      : (bookers.find((b) => b.id === selected.bookerId)?.name ?? "All bookers");
+  const clearRange = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("from");
+    params.delete("to");
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    });
+  };
+
+  const hasRange = Boolean(selected.from || selected.to);
 
   return (
     <div className="mb-5 flex flex-wrap items-end gap-3 rounded-lg border bg-card p-3">
       <div className="w-[110px] space-y-1.5">
         <Label htmlFor="filter-year">Year</Label>
-        <Select value={String(selected.year)} onValueChange={(v) => setParam("year", v)}>
-          <SelectTrigger id="filter-year" aria-label="Year">
-            <SelectValueLabel label={selected.year} />
-          </SelectTrigger>
-          <SelectContent>
-            {years.map((y) => (
-              <SelectItem key={y} value={String(y)}>
-                {y}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SearchableSelect
+          id="filter-year"
+          value={String(selected.year)}
+          // No "all years" here: every figure on this page is for one period,
+          // and the year is what defines it when no range is given.
+          allLabel={String(selected.year)}
+          options={years.map((y) => ({ value: String(y), label: String(y) }))}
+          onChange={(v) => setParam("year", v)}
+          disabled={hasRange}
+        />
       </div>
+
+      {/* A range beats the year, so the two are shown together and the year is
+          disabled while a range is set - rather than leaving a year selector
+          that silently does nothing. */}
+      <div className="w-[160px] space-y-1.5">
+        <Label htmlFor="filter-from">From</Label>
+        <Input
+          id="filter-from"
+          type="date"
+          defaultValue={selected.from ?? ""}
+          onChange={(e) => setParam("from", e.target.value || null)}
+        />
+      </div>
+
+      <div className="w-[160px] space-y-1.5">
+        <Label htmlFor="filter-to">To</Label>
+        <Input
+          id="filter-to"
+          type="date"
+          defaultValue={selected.to ?? ""}
+          onChange={(e) => setParam("to", e.target.value || null)}
+        />
+      </div>
+
+      {hasRange ? (
+        <Button type="button" variant="ghost" onClick={clearRange}>
+          <X className="h-4 w-4" />
+          Back to the year
+        </Button>
+      ) : null}
 
       <div className="w-[190px] space-y-1.5">
         <Label htmlFor="filter-category">Category</Label>
-        <Select
+        <SearchableSelect
+          id="filter-category"
           value={selected.categoryId == null ? ALL : String(selected.categoryId)}
-          onValueChange={(v) => setParam("category", v)}
-        >
-          <SelectTrigger id="filter-category" aria-label="Category">
-            <SelectValueLabel label={categoryLabel} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>All categories</SelectItem>
-            {categories.map((c) => (
-              <SelectItem key={c.id} value={String(c.id)}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          allLabel="All categories"
+          options={categories.map((c) => ({ value: String(c.id), label: c.name }))}
+          onChange={(v) => setParam("category", v)}
+        />
       </div>
 
       <div className="w-[190px] space-y-1.5">
         <Label htmlFor="filter-area">Area</Label>
-        <Select
+        <SearchableSelect
+          id="filter-area"
           value={selected.areaId == null ? ALL : String(selected.areaId)}
-          onValueChange={(v) => setParam("area", v)}
-        >
-          <SelectTrigger id="filter-area" aria-label="Area">
-            <SelectValueLabel label={areaLabel} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>All areas</SelectItem>
-            {areas.map((a) => (
-              <SelectItem key={a.id} value={String(a.id)}>
-                {a.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          allLabel="All areas"
+          options={areas.map((a) => ({ value: String(a.id), label: a.name }))}
+          onChange={(v) => setParam("area", v)}
+        />
       </div>
 
       <div className="w-[190px] space-y-1.5">
         <Label htmlFor="filter-booker">Booker</Label>
-        <Select
+        <SearchableSelect
+          id="filter-booker"
           value={selected.bookerId == null ? ALL : String(selected.bookerId)}
-          onValueChange={(v) => setParam("booker", v)}
-        >
-          <SelectTrigger id="filter-booker" aria-label="Booker">
-            <SelectValueLabel label={bookerLabel} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>All bookers</SelectItem>
-            {bookers.map((b) => (
-              <SelectItem key={b.id} value={String(b.id)}>
-                {b.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          allLabel="All bookers"
+          options={bookers.map((b) => ({ value: String(b.id), label: b.name }))}
+          onChange={(v) => setParam("booker", v)}
+        />
       </div>
 
       <div

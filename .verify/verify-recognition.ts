@@ -13,6 +13,7 @@ import { createSaleAction } from "@/actions/sales";
 import { deletePaymentAction, recordPaymentAction } from "@/actions/payments";
 import { createBookerAction } from "@/actions/bookers";
 import {
+  getCashRangeTotals,
   getAwaitingPayment,
   getCashByArea,
   getCashByBooker,
@@ -404,6 +405,118 @@ async function main() {
 
   section("awaiting payment never goes negative");
   ok("still zero, not negative", (await getAwaitingPayment({ areaId: null })) >= 0);
+
+  /* ------------------------------------------------------- date ranges */
+  section("a chosen date range adds up");
+
+  // The dashboard turns a "to" date into the day AFTER it, because every cash
+  // query is on_date >= start AND on_date < end. Get that wrong by one day and
+  // the last day of every range silently disappears - which reads as a quiet
+  // day of trade, not as a bug. This is the arithmetic that proves it: the days
+  // of a period, summed one at a time, must equal the period asked for in one
+  // go. A gap fails it and so does a double count.
+  const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+  const nextDay = (iso: string) => new Date(day(iso).getTime() + 86400000);
+  const asIso = (dt: Date) => dt.toISOString().slice(0, 10);
+
+  const bounds = await prisma.$queryRaw<{ first: Date | null; last: Date | null }[]>`
+    SELECT MIN(paid_on) AS first, MAX(paid_on) AS last
+      FROM payments WHERE is_deleted = false`;
+  const firstPaid = bounds[0]?.first ?? null;
+  const lastPaid = bounds[0]?.last ?? null;
+
+  if (firstPaid && lastPaid) {
+    const startIso = asIso(firstPaid);
+    const endIso = asIso(lastPaid);
+    const scope = { categoryId: null, areaId: null, bookerId: null };
+
+    const whole = await getCashRangeTotals({
+      ...scope,
+      start: day(startIso),
+      end: nextDay(endIso),
+    });
+
+    let summed = { revenue: 0, profit: 0, units: 0 };
+    for (
+      let cursor = day(startIso);
+      cursor <= lastPaid;
+      cursor = new Date(cursor.getTime() + 86400000)
+    ) {
+      const oneDay = await getCashRangeTotals({
+        ...scope,
+        start: cursor,
+        end: new Date(cursor.getTime() + 86400000),
+      });
+      summed = {
+        revenue: summed.revenue + oneDay.revenue,
+        profit: summed.profit + oneDay.profit,
+        units: summed.units + oneDay.units,
+      };
+    }
+
+    ok(
+      "the days of a range, summed one by one, equal the range in one query",
+      Math.abs(whole.revenue - summed.revenue) < 0.01,
+      { range: whole.revenue, daily: summed.revenue },
+    );
+    ok("and so does the profit", Math.abs(whole.profit - summed.profit) < 0.01, {
+      range: whole.profit,
+      daily: summed.profit,
+    });
+    ok("and the units", whole.units === summed.units, { range: whole.units, daily: summed.units });
+    ok("the range is not empty, so the check above means something", whole.revenue > 0, whole);
+
+    // The inclusive end, stated directly: the last day's money is inside.
+    const withoutLast = await getCashRangeTotals({
+      ...scope,
+      start: day(startIso),
+      end: day(endIso),
+    });
+    const lastDay = await getCashRangeTotals({
+      ...scope,
+      start: day(endIso),
+      end: nextDay(endIso),
+    });
+    ok(
+      "a range ending on a day includes that day",
+      Math.abs(whole.revenue - (withoutLast.revenue + lastDay.revenue)) < 0.01,
+      { whole: whole.revenue, withoutLast: withoutLast.revenue, lastDay: lastDay.revenue },
+    );
+
+    /* --------------------------------------------------------- the trend */
+    const spanned = await getCashMonthlyTrend({
+      year: firstPaid.getUTCFullYear(),
+      categoryId: null,
+      areaId: null,
+      bookerId: null,
+      range: { start: day(startIso), end: nextDay(endIso) },
+    });
+    ok(
+      "a ranged trend covers only the months the range touches",
+      spanned.length > 0 && spanned.length <= 12,
+      spanned.map((p) => p.label),
+    );
+    const trendRevenue = spanned.reduce((sum, p) => sum + p.revenue, 0);
+    ok(
+      "and its months add up to the same range total",
+      Math.abs(trendRevenue - whole.revenue) < 0.01,
+      { trend: trendRevenue, range: whole.revenue },
+    );
+
+    const fullYear = await getCashMonthlyTrend({
+      year: firstPaid.getUTCFullYear(),
+      categoryId: null,
+      areaId: null,
+      bookerId: null,
+    });
+    ok(
+      "with no range it is still the twelve months of the year",
+      fullYear.length === 12,
+      fullYear.length,
+    );
+  } else {
+    console.log("  SKIP  date ranges (no payments in this database)");
+  }
 
   console.log(`\n${checks - failures}/${checks} recognition checks passed`);
   if (failures > 0) process.exitCode = 1;
