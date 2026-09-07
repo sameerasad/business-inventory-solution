@@ -92,6 +92,34 @@ function show(command: Awaited<ReturnType<typeof parseCommand>>): void {
     case "shop":
       console.log(`    new shop "${k.name}" in ${k.areaName ?? "?"}`);
       break;
+    case "category":
+      console.log(`    new category "${k.name}"`);
+      break;
+    case "booker":
+      console.log(`    new booker "${k.name}"${k.phone ? ` phone ${k.phone}` : ""}`);
+      break;
+    case "product":
+      console.log(`    new product "${k.name}"`);
+      console.log(`    category: ${k.categoryName ?? "missing"}`);
+      console.log(`    packing:  ${k.packagingType ?? "missing"} ${k.variantValue ?? ""}`);
+      console.log(`    price:    ${k.salePrice ?? "missing"}`);
+      break;
+    case "price":
+      console.log(`    ${k.label}: ${k.oldPrice} -> ${k.newPrice ?? "missing"}`);
+      break;
+    case "rename":
+      console.log(`    ${k.target} "${k.oldName}" -> "${k.newName}"`);
+      break;
+    case "toggle":
+      console.log(`    ${k.label} -> ${k.wanted ? "active" : "inactive"}`);
+      break;
+    case "assign":
+      console.log(`    ${k.bookerName} gets: ${k.addedNames.join(", ") || "nothing new"}`);
+      if (k.keptNames.length > 0) console.log(`    keeps: ${k.keptNames.join(", ")}`);
+      break;
+    case "open":
+      console.log(`    open ${k.label} -> ${k.href}`);
+      break;
     case "unknown":
       console.log(`    ${YELLOW}${k.reason}${OFF}`);
       break;

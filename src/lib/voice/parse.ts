@@ -69,6 +69,8 @@ export type VoiceCatalog = {
   bookers: { id: number; name: string; voiceAlias: string | null }[];
   /** Open invoices, so "invoice 12" and "Corner Store ka payment" both resolve. */
   invoices: { id: number; invoiceNo: string; customerName: string | null; balance: number }[];
+  /** Needed to place a new product, and to name the one being renamed. */
+  categories: { id: number; name: string }[];
 };
 
 export type Confidence = "high" | "low";
@@ -166,6 +168,88 @@ export type VoiceCommand =
       name: string;
       missing: string[];
       warnings: string[];
+      confidence: Confidence;
+    }
+  /* -------------------------------------------------- administration
+     Understood by the model only. See the note on VoiceCommand above. */
+  | {
+      kind: "category";
+      name: string;
+      missing: string[];
+      warnings: string[];
+      confidence: Confidence;
+    }
+  | {
+      kind: "booker";
+      name: string;
+      phone: string | null;
+      missing: string[];
+      warnings: string[];
+      confidence: Confidence;
+    }
+  | {
+      kind: "product";
+      name: string;
+      categoryId: number | null;
+      categoryName: string | null;
+      packagingType: string | null;
+      variantValue: string | null;
+      unit: string | null;
+      salePrice: number | null;
+      missing: string[];
+      warnings: string[];
+      confidence: Confidence;
+    }
+  | {
+      kind: "price";
+      productId: number;
+      label: string;
+      oldPrice: number;
+      newPrice: number | null;
+      missing: string[];
+      warnings: string[];
+      confidence: Confidence;
+    }
+  | {
+      kind: "rename";
+      target: "area" | "shop" | "category";
+      id: number;
+      oldName: string;
+      newName: string;
+      /** Current values, resent so a rename cannot blank them. */
+      keep: { address: string | null; phone: string | null; voiceAlias: string | null };
+      missing: string[];
+      warnings: string[];
+      confidence: Confidence;
+    }
+  | {
+      kind: "toggle";
+      target: "product" | "booker";
+      id: number;
+      label: string;
+      /** What was asked for, and what is already true. */
+      wanted: boolean;
+      current: boolean;
+      missing: string[];
+      warnings: string[];
+      confidence: Confidence;
+    }
+  | {
+      kind: "assign";
+      bookerId: number;
+      bookerName: string;
+      /** The full set to save: what they already cover plus what was said. */
+      areaIds: number[];
+      addedNames: string[];
+      keptNames: string[];
+      missing: string[];
+      warnings: string[];
+      confidence: Confidence;
+    }
+  | {
+      kind: "open";
+      href: string;
+      label: string;
       confidence: Confidence;
     }
   | { kind: "unknown"; reason: string };

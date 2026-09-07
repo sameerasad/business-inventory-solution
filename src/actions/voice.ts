@@ -4,6 +4,7 @@ import { answerQuery, getVoiceCatalog, type VoiceAnswer } from "@/lib/voice/answ
 import { parseCommand, type VoiceCommand } from "@/lib/voice/parse";
 import { interpretWithLlm, llmConfigured, llmProvider } from "@/lib/voice/llm";
 import { buildPrompt, groqConfigured, transcribeWithGroq } from "@/lib/voice/transcribe";
+import { enrich } from "@/lib/voice/enrich";
 
 /**
  * Interpret a spoken command.
@@ -43,11 +44,11 @@ async function understand(
 ): Promise<VoiceCommand> {
   if (llmConfigured()) {
     const outcome = await interpretWithLlm(transcript, catalog);
-    if (outcome.ok) return outcome.command;
+    if (outcome.ok) return enrich(outcome.command);
     // Worth a log: silently falling back hides an expired key for weeks.
     console.error("voice: falling back to the rule parser -", outcome.reason);
   }
-  return parseCommand(transcript, catalog);
+  return enrich(parseCommand(transcript, catalog));
 }
 
 export async function interpretVoiceAction(transcript: string): Promise<VoiceResult> {
@@ -101,6 +102,26 @@ function describe(command: VoiceCommand): string {
       return command.name
         ? `Add the area "${command.name}".`
         : "A new area, but the name is missing.";
+    case "category":
+      return `Add the category "${command.name}".`;
+    case "booker":
+      return `Add the booker "${command.name}".`;
+    case "product":
+      return command.missing.length === 0
+        ? `Add the product "${command.name}" ${command.packagingType} ${command.variantValue} at ${command.salePrice}.`
+        : `A new product, but ${command.missing.join(" and ")} is missing.`;
+    case "price":
+      return command.newPrice == null
+        ? `Change the price of ${command.label}, but to what?`
+        : `Change ${command.label} from ${command.oldPrice} to ${command.newPrice}.`;
+    case "rename":
+      return `Rename the ${command.target} "${command.oldName}" to "${command.newName}".`;
+    case "toggle":
+      return `${command.wanted ? "Activate" : "Deactivate"} ${command.label}.`;
+    case "assign":
+      return `Give ${command.bookerName} ${command.addedNames.join(" and ")} to cover.`;
+    case "open":
+      return `Open ${command.label}.`;
     case "query":
       return "A question.";
     case "unknown":

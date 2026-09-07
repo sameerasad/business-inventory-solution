@@ -121,6 +121,10 @@ const CATALOG: VoiceCatalog = {
     { id: 41, invoiceNo: "INV-2026-0012", customerName: "Corner Store", balance: 5000 },
     { id: 42, invoiceNo: "INV-2026-0013", customerName: "Central Mart", balance: 1200 },
   ],
+  categories: [
+    { id: 1, name: "Juices" },
+    { id: 2, name: "Chocolates" },
+  ],
 };
 
 const TODAY = new Date(Date.UTC(2026, 8, 3)); // 2026-09-03

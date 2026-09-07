@@ -243,7 +243,7 @@ async function answerBalance(question: Question): Promise<VoiceAnswer> {
  * and every phrasing can be tested against a fixed catalog.
  */
 export async function getVoiceCatalog() {
-  const [products, areas, shops, bookers, invoices] = await Promise.all([
+  const [products, areas, shops, bookers, invoices, categories] = await Promise.all([
     prisma.$queryRaw<
       {
         id: number;
@@ -322,7 +322,11 @@ export async function getVoiceCatalog() {
       ORDER BY b.booking_date DESC
       LIMIT 200
     `,
+    prisma.category.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
   ]);
 
-  return { products, areas, shops, bookers, invoices };
+  return { products, areas, shops, bookers, invoices, categories };
 }

@@ -35,6 +35,9 @@ function ok(label: string, cond: boolean, detail?: unknown) {
     console.error(`  FAIL  ${label}`, detail ?? "");
   }
 }
+function skip(label: string, why: string) {
+  console.log(`  SKIP  ${label} (${why})`);
+}
 function section(n: string) {
   console.log(`\n=== ${n} ===`);
 }
@@ -654,6 +657,148 @@ async function main() {
     threw = true;
   }
   ok("an unknown booker is refused rather than silently doing nothing", threw);
+  /* ------------------------------------------------- the voice enricher */
+  section("what only the database knows");
+
+  // These three behaviours are the whole reason enrich() exists. Each one
+  // guards an action that is a blunt instrument: rename posts the address back
+  // alongside the name, toggle only flips, and setting a territory replaces it.
+  // A command that reached those actions with the model's view of the world
+  // would quietly destroy data, and nothing downstream would report a problem.
+  const { enrich } = await import("@/lib/voice/enrich");
+
+  const someArea = await prisma.area.findFirstOrThrow({ where: { isDeleted: false } });
+  const shopWithDetails = await prisma.shop.create({
+    data: {
+      name: "Enrich Test Store",
+      areaId: someArea.id,
+      address: "12 Market Road",
+      phone: "03009998877",
+    },
+  });
+
+  const renameShop = await enrich({
+    kind: "rename",
+    target: "shop",
+    id: shopWithDetails.id,
+    oldName: shopWithDetails.name,
+    newName: "Enrich Test Kiryana",
+    keep: { address: null, phone: null, voiceAlias: null },
+    missing: [],
+    warnings: [],
+    confidence: "low",
+  });
+  ok(
+    "a shop rename carries the current address forward, so saving cannot erase it",
+    renameShop.kind === "rename" && renameShop.keep.address === "12 Market Road",
+    renameShop,
+  );
+  ok(
+    "and the phone with it",
+    renameShop.kind === "rename" && renameShop.keep.phone === "03009998877",
+    renameShop,
+  );
+
+  /* --------------------------------------------------------------- toggles */
+  const liveProduct = await prisma.product.findFirstOrThrow({ where: { isActive: true } });
+  const turnOff = await enrich({
+    kind: "toggle",
+    target: "product",
+    id: liveProduct.id,
+    label: liveProduct.sku,
+    wanted: false,
+    current: false,
+    missing: [],
+    warnings: [],
+    confidence: "low",
+  });
+  ok(
+    "switching an active product off reads its real state",
+    turnOff.kind === "toggle" && turnOff.current === true,
+    turnOff,
+  );
+
+  const alreadyOn = await enrich({
+    kind: "toggle",
+    target: "product",
+    id: liveProduct.id,
+    label: liveProduct.sku,
+    wanted: true,
+    current: true,
+    missing: [],
+    warnings: [],
+    confidence: "low",
+  });
+  ok(
+    "asking to switch on something already on is REFUSED, because the action only flips",
+    alreadyOn.kind === "unknown" &&
+      alreadyOn.reason.includes("already") &&
+      alreadyOn.reason.includes("active"),
+    alreadyOn,
+  );
+
+  /* ------------------------------------------------------------- territory */
+  const territoryBooker = await prisma.booker.findFirstOrThrow({ where: { isDeleted: false } });
+  const held = await prisma.bookerArea.findMany({
+    where: { bookerId: territoryBooker.id },
+    select: { areaId: true },
+  });
+  const heldIds = held.map((h) => h.areaId);
+  const newArea = await prisma.area.findFirst({
+    where: { isDeleted: false, id: { notIn: heldIds.length > 0 ? heldIds : [0] } },
+  });
+
+  if (newArea && heldIds.length > 0) {
+    const assign = await enrich({
+      kind: "assign",
+      bookerId: territoryBooker.id,
+      bookerName: territoryBooker.name,
+      areaIds: [newArea.id],
+      addedNames: [newArea.name],
+      keptNames: [],
+      missing: [],
+      warnings: [],
+      confidence: "low",
+    });
+    ok(
+      "one area named in one sentence does not take the rest of the territory away",
+      assign.kind === "assign" && heldIds.every((id) => assign.areaIds.includes(id)),
+      assign,
+    );
+    ok(
+      "the new area is added to it",
+      assign.kind === "assign" && assign.areaIds.includes(newArea.id),
+      assign,
+    );
+    ok(
+      "and the card can say what is being kept",
+      assign.kind === "assign" && assign.keptNames.length === heldIds.length,
+      assign,
+    );
+
+    // Saying an area they already cover should not read as a change to it.
+    const redundant = await enrich({
+      kind: "assign",
+      bookerId: territoryBooker.id,
+      bookerName: territoryBooker.name,
+      areaIds: [heldIds[0]!],
+      addedNames: ["whatever it was called"],
+      keptNames: [],
+      missing: [],
+      warnings: [],
+      confidence: "low",
+    });
+    ok(
+      "an area they already cover is reported as already covered",
+      redundant.kind === "assign" && redundant.warnings.some((w) => w.includes("already covers")),
+      redundant,
+    );
+  } else {
+    skip("territory merge", "this database has no spare area to add");
+  }
+
+  await prisma.shop.delete({ where: { id: shopWithDetails.id } });
+
   console.log(`\n${checks - failures}/${checks} booker checks passed`);
   if (failures > 0) process.exitCode = 1;
 }

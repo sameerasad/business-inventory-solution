@@ -98,6 +98,10 @@ const CATALOG: VoiceCatalog = {
   ],
   bookers: [{ id: 31, name: "Saifullah Khan", voiceAlias: "saifi" }],
   invoices: [{ id: 41, invoiceNo: "INV-2026-0012", customerName: "Rajput Dairy", balance: 5000 }],
+  categories: [
+    { id: 1, name: "Juices" },
+    { id: 2, name: "Chocolates" },
+  ],
 };
 
 const TODAY = new Date(Date.UTC(2026, 8, 4));
@@ -120,6 +124,14 @@ function said(over: Partial<Parameters<typeof toCommand>[0]>): Parameters<typeof
     customerName: null,
     customerPhone: null,
     newName: null,
+    target: null,
+    active: null,
+    packaging: null,
+    variant: null,
+    unit: null,
+    categoryId: null,
+    areaIds: null,
+    term: null,
     amount: null,
     quantity: null,
     unitPrice: null,
@@ -354,6 +366,203 @@ async function main() {
       duplicateArea.warnings.some((w) => w.includes("already exists")),
     duplicateArea.kind === "area" ? duplicateArea.warnings : duplicateArea,
   );
+
+  /* ------------------------------------------------------ administration */
+  section("administration commands");
+
+  const cat = toCommand(said({ kind: "category", newName: "Snacks" }), CATALOG, TODAY);
+  ok("a category is only a name", cat.kind === "category" && cat.name === "Snacks", cat);
+  const dupCat = toCommand(said({ kind: "category", newName: "juices" }), CATALOG, TODAY);
+  ok(
+    "an existing category is warned about, whatever the casing",
+    dupCat.kind === "category" && dupCat.warnings.some((w) => w.includes("already exists")),
+    dupCat,
+  );
+
+  const bk = toCommand(
+    said({ kind: "booker", newName: "Imran", customerPhone: "03001234567" }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "a booker keeps the phone that was said",
+    bk.kind === "booker" && bk.name === "Imran" && bk.phone === "03001234567",
+    bk,
+  );
+
+  /* --------------------------------------------------------- new products */
+  const prod = toCommand(
+    said({
+      kind: "product",
+      newName: "Guava Juice",
+      packaging: "Bottle",
+      variant: "250ml",
+      unit: "piece",
+      unitPrice: 450,
+      categoryId: 1,
+    }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "a complete product is accepted and placed in its category",
+    prod.kind === "product" && prod.categoryId === 1 && prod.salePrice === 450,
+    prod,
+  );
+
+  const bareProduct = toCommand(said({ kind: "product", newName: "Guava Juice" }), CATALOG, TODAY);
+  ok(
+    "nothing about a product is defaulted - it would repeat forever",
+    bareProduct.kind === "product" &&
+      ["category", "packaging", "size", "price"].every((f) => bareProduct.missing.includes(f)),
+    bareProduct.kind === "product" ? bareProduct.missing : bareProduct,
+  );
+
+  const ghostCategory = toCommand(
+    said({ kind: "product", newName: "Guava Juice", categoryId: 999 }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "an invented category is dropped, not saved",
+    ghostCategory.kind === "product" && ghostCategory.categoryId === null,
+    ghostCategory,
+  );
+
+  /* --------------------------------------------------------- price changes */
+  const price = toCommand(said({ kind: "price", productId: 1, unitPrice: 480 }), CATALOG, TODAY);
+  ok(
+    "a price change carries the old price so the change is visible",
+    price.kind === "price" && price.oldPrice === 450 && price.newPrice === 480,
+    price,
+  );
+  const priceMissing = toCommand(said({ kind: "price", productId: 1 }), CATALOG, TODAY);
+  ok(
+    "a price change with no price is blocked",
+    priceMissing.kind === "price" && priceMissing.missing.includes("new price"),
+    priceMissing,
+  );
+  const ghostPriceProduct = toCommand(
+    said({ kind: "price", productId: 999, unitPrice: 480 }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "an invented product cannot be repriced",
+    ghostPriceProduct.kind === "unknown",
+    ghostPriceProduct,
+  );
+
+  /* -------------------------------------------------------------- renames */
+  const ren = toCommand(
+    said({ kind: "rename", target: "area", areaId: 11, newName: "Downtown East" }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "a rename knows both names",
+    ren.kind === "rename" && ren.oldName === "Downtown" && ren.newName === "Downtown East",
+    ren,
+  );
+  ok(
+    "and leaves the fields it must resend empty for the server to fill",
+    ren.kind === "rename" && ren.keep.address === null && ren.keep.phone === null,
+    ren,
+  );
+  const sameName = toCommand(
+    said({ kind: "rename", target: "area", areaId: 11, newName: "downtown" }),
+    CATALOG,
+    TODAY,
+  );
+  ok("renaming to the same name is refused", sameName.kind === "unknown", sameName);
+  const ghostRename = toCommand(
+    said({ kind: "rename", target: "shop", shopId: 999, newName: "Whatever" }),
+    CATALOG,
+    TODAY,
+  );
+  ok("an invented shop cannot be renamed", ghostRename.kind === "unknown", ghostRename);
+  const nolessRename = toCommand(
+    said({ kind: "rename", target: "area", areaId: 11 }),
+    CATALOG,
+    TODAY,
+  );
+  ok("a rename with no new name is refused", nolessRename.kind === "unknown", nolessRename);
+
+  /* -------------------------------------------------------------- toggles */
+  const tog = toCommand(
+    said({ kind: "toggle", target: "product", productId: 1, active: false }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "a toggle records what was asked for",
+    tog.kind === "toggle" && tog.wanted === false && tog.id === 1,
+    tog,
+  );
+  const vagueToggle = toCommand(
+    said({ kind: "toggle", target: "product", productId: 1 }),
+    CATALOG,
+    TODAY,
+  );
+  ok("on or off has to be said", vagueToggle.kind === "unknown", vagueToggle);
+  const ghostToggle = toCommand(
+    said({ kind: "toggle", target: "booker", bookerId: 999, active: true }),
+    CATALOG,
+    TODAY,
+  );
+  ok("an invented booker cannot be switched", ghostToggle.kind === "unknown", ghostToggle);
+
+  /* ------------------------------------------------------------ territory */
+  const asg = toCommand(said({ kind: "assign", bookerId: 31, areaIds: [11, 12] }), CATALOG, TODAY);
+  ok(
+    "an assignment names the areas it understood",
+    asg.kind === "assign" && asg.areaIds.length === 2 && asg.bookerName === "Saifullah Khan",
+    asg,
+  );
+  const partlyGhost = toCommand(
+    said({ kind: "assign", bookerId: 31, areaIds: [11, 999] }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "an invented area is left out and said so",
+    partlyGhost.kind === "assign" &&
+      partlyGhost.areaIds.length === 1 &&
+      partlyGhost.warnings.some((w) => w.includes("not in the catalog")),
+    partlyGhost,
+  );
+  const noAreas = toCommand(said({ kind: "assign", bookerId: 31 }), CATALOG, TODAY);
+  ok("an assignment with no areas is refused", noAreas.kind === "unknown", noAreas);
+
+  /* --------------------------------------------------------------- open
+     The safety valve for everything that edits or deletes: voice takes you to
+     the record, it never changes it. */
+  const openInv = toCommand(
+    said({ kind: "open", target: "invoice", bookingId: 41 }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "opening an invoice is a navigation, not a write",
+    openInv.kind === "open" && openInv.href.includes("INV-2026-0012"),
+    openInv,
+  );
+  const openShop = toCommand(said({ kind: "open", target: "shop", shopId: 21 }), CATALOG, TODAY);
+  ok("opening a shop filters the sales list to it", openShop.kind === "open", openShop);
+  const openGhost = toCommand(
+    said({ kind: "open", target: "invoice", bookingId: 999 }),
+    CATALOG,
+    TODAY,
+  );
+  ok("an invented record cannot be opened", openGhost.kind === "unknown", openGhost);
+
+  // The thing this whole design exists to prevent.
+  const deletion = toCommand(
+    said({ kind: "unknown", reason: "delete invoice 24" }),
+    CATALOG,
+    TODAY,
+  );
+  ok("there is no command that deletes anything", deletion.kind === "unknown", deletion);
 
   /* ----------------------------------------------------- nothing auto-saves */
   section("safety: every write is still only a proposal");

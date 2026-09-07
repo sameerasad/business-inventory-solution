@@ -93,6 +93,14 @@ const Extracted = z.object({
     "sale",
     "shop",
     "area",
+    "category",
+    "booker",
+    "product",
+    "price",
+    "rename",
+    "toggle",
+    "assign",
+    "open",
     "unknown",
   ]),
   /** Why nothing could be made of it. Only for kind "unknown". */
@@ -122,6 +130,35 @@ const Extracted = z.object({
    * question too, to serve one sentence in a hundred.
    */
   newName: z.string().nullable(),
+  /**
+   * The administration fields.
+   *
+   * Seven, and every one is paid for on every command whether it is used or
+   * not - the whole prompt is sent each time, and the daily token allowance is
+   * what caps how many commands a day the feature can serve. Roughly 120
+   * tokens, about 5% of a request. Worth that to cover the administration; not
+   * worth a field per kind, which is why rename, toggle and open all share
+   * "target" and identify their subject through the ids already listed above.
+   */
+  target: z.enum(["area", "shop", "category", "product", "booker", "invoice"]).nullable(),
+  /** For toggle: what was ASKED for. What is currently true is read from the database. */
+  active: z.boolean().nullable(),
+  packaging: z.string().nullable(),
+  variant: z.string().nullable(),
+  unit: z.string().nullable(),
+  categoryId: z.number().nullable(),
+  /** For assign: the areas a booker was told to cover. */
+  areaIds: z.array(z.number()).nullable(),
+  /**
+   * For open: what to look for, said as words.
+   *
+   * The catalog carries ids for what a command might need to WRITE against -
+   * live products, open invoices - not for the whole history. But opening a
+   * record is most useful for the ones not in that list: a settled invoice
+   * somebody wants to correct. So open can search by what was said instead,
+   * which the list pages already do.
+   */
+  term: z.string().nullable(),
   amount: z.number().nullable(),
   quantity: z.number().nullable(),
   unitPrice: z.number().nullable(),
@@ -166,7 +203,25 @@ const COMMAND_SCHEMA = {
   properties: {
     kind: {
       type: "string",
-      enum: ["navigate", "query", "booking", "payment", "batch", "sale", "shop", "area", "unknown"],
+      enum: [
+        "navigate",
+        "query",
+        "booking",
+        "payment",
+        "batch",
+        "sale",
+        "shop",
+        "area",
+        "category",
+        "booker",
+        "product",
+        "price",
+        "rename",
+        "toggle",
+        "assign",
+        "open",
+        "unknown",
+      ],
       description: "Which kind of command this is.",
     },
     reason: { type: ["string", "null"], description: "Only for unknown: what was unclear." },
@@ -197,6 +252,33 @@ const COMMAND_SCHEMA = {
     newName: {
       type: ["string", "null"],
       description: "Only for shop or area: the name of the new shop or area.",
+    },
+    target: {
+      type: ["string", "null"],
+      enum: ["area", "shop", "category", "product", "booker", "invoice", null],
+      description: "What a rename, toggle or open refers to.",
+    },
+    active: {
+      type: ["boolean", "null"],
+      description: "Only for toggle: true to activate, false to deactivate.",
+    },
+    packaging: {
+      type: ["string", "null"],
+      description: "Only for product: Bottle, Tetra Pack, Bar, Case.",
+    },
+    variant: { type: ["string", "null"], description: "Only for product: the size, e.g. 250ml." },
+    unit: { type: ["string", "null"], description: "Only for product: piece, carton, case." },
+    categoryId: { type: ["integer", "null"], description: "Only for product: from the catalog." },
+    areaIds: {
+      type: ["array", "null"],
+      description: "Only for assign: the area ids a booker should cover.",
+      items: { type: "integer" },
+    },
+    term: {
+      type: ["string", "null"],
+      description:
+        "Only for open: the invoice number or name to look for, exactly as it was said. " +
+        "Use this whenever the record is not in the lists above.",
     },
     amount: { type: ["number", "null"], description: "Only for payment." },
     quantity: { type: ["integer", "null"] },
@@ -233,6 +315,14 @@ const COMMAND_SCHEMA = {
     "metric",
     "period",
     "date",
+    "target",
+    "active",
+    "packaging",
+    "variant",
+    "unit",
+    "categoryId",
+    "areaIds",
+    "term",
     "areaId",
     "shopId",
     "bookerId",
@@ -327,6 +417,9 @@ function catalogForPrompt(catalog: VoiceCatalog): string {
       ),
     ),
     "",
+    "CATEGORIES (id: name)",
+    ...catalog.categories.map((c) => line(c.id, c.name)),
+    "",
     "BOOKERS (id: name)",
     ...catalog.bookers.map((b) =>
       line(b.id, b.name, b.voiceAlias ? ` [also "${b.voiceAlias}"]` : ""),
@@ -366,6 +459,25 @@ Choose exactly one kind:
 - batch: stock arriving. Set productId, quantity and unitCost.
 - payment: money received against an invoice. Set bookingId and amount.
 - shop: adding a new shop. Set newName and areaId.
+- category: a new product category. Set newName only.
+- booker: a new booker. Set newName, and customerPhone if a number was said.
+- product: a new product in the catalog. Set newName, packaging, variant, unit, unitPrice and
+  categoryId. Say what is missing in warnings rather than inventing a size or a price.
+- price: change a product's selling price. Set productId and unitPrice.
+- rename: change the name of something that exists. Set target, the matching id
+  (areaId / shopId / categoryId), and newName as the NEW name.
+- toggle: activate or deactivate. Set target ("product" or "booker"), the matching id, and
+  active - true to switch on, false to switch off.
+- assign: give a booker an area to cover. Set bookerId and areaIds. This ADDS to what they
+  already cover; it never takes an area away.
+- open: they want a particular RECORD on screen - an invoice, a shop, a product. Set target,
+  and either the matching id or, if it is not in the lists above, term with the invoice
+  number or name as it was said. Only open invoices are listed, so a settled one needs term.
+  Use this for anything that edits or deletes an existing record: it opens the record so a
+  person can do it by hand. Never propose a deletion yourself.
+  Prefer open over navigate whenever a shop, area, product or invoice is named alongside a
+  page: "Rajput Dairy ki sales dikhao" should arrive already filtered to that shop, not on
+  the whole sales list.
 - area: adding a new AREA - a locality, not a shop inside one. Set newName only. Choose this
   when they say new area / naya area / naya ilaqa / نیا علاقہ. An area is a place a booker
   covers; a shop is a business inside an area. "naya area Sikander goth" is an area, while
@@ -795,6 +907,261 @@ function buildCommand(
         warnings,
         confidence: missing.length === 0 && warnings.length === 0 ? "high" : "low",
       };
+    }
+
+    case "category": {
+      const name = (extracted.newName ?? "").trim();
+      if (!name) return { kind: "unknown", reason: "A category, but no name was heard." };
+      const clash = catalog.categories.find((c) => c.name.toLowerCase() === name.toLowerCase());
+      if (clash) warnings.push(`A category called "${clash.name}" already exists.`);
+      warnings.push("The name was dictated - check the spelling before saving.");
+      return { kind: "category", name, missing: [], warnings, confidence: "low" };
+    }
+
+    case "booker": {
+      const name = (extracted.newName ?? "").trim();
+      if (!name) return { kind: "unknown", reason: "A booker, but no name was heard." };
+      const clash = catalog.bookers.find((b) => b.name.toLowerCase() === name.toLowerCase());
+      if (clash) warnings.push(`A booker called "${clash.name}" already exists.`);
+      warnings.push("The name was dictated - check the spelling before saving.");
+      return {
+        kind: "booker",
+        name,
+        phone: extracted.customerPhone,
+        missing: [],
+        warnings,
+        confidence: "low",
+      };
+    }
+
+    case "product": {
+      const name = (extracted.newName ?? "").trim();
+      if (!name) return { kind: "unknown", reason: "A product, but no name was heard." };
+
+      const category = catalog.categories.find((c) => c.id === extracted.categoryId) ?? null;
+      if (extracted.categoryId != null && !category) {
+        warnings.push("The category it chose is not in the catalog, so it was left blank.");
+      }
+
+      // Nothing here is defaulted. A product carries its price into every
+      // future sale and its packaging into every future order, so a guess made
+      // once is repeated for as long as the product exists.
+      const productMissing: string[] = [];
+      if (!category) productMissing.push("category");
+      if (!extracted.packaging) productMissing.push("packaging");
+      if (!extracted.variant) productMissing.push("size");
+      if (extracted.unitPrice == null) productMissing.push("price");
+
+      warnings.push("A new product was dictated - check every field before saving.");
+      return {
+        kind: "product",
+        name,
+        categoryId: category?.id ?? null,
+        categoryName: category?.name ?? null,
+        packagingType: extracted.packaging,
+        variantValue: extracted.variant,
+        unit: extracted.unit,
+        salePrice: extracted.unitPrice,
+        missing: productMissing,
+        warnings,
+        confidence: "low",
+      };
+    }
+
+    case "price": {
+      const product = catalog.products.find((pr) => pr.id === extracted.productId) ?? null;
+      if (!product) {
+        return {
+          kind: "unknown",
+          reason: "A price change, but the product was not recognised. Say the flavour and size.",
+        };
+      }
+      const newPrice = extracted.unitPrice;
+      const priceMissing: string[] = [];
+      if (newPrice == null || newPrice <= 0) priceMissing.push("new price");
+      else if (newPrice === product.defaultSalePrice) {
+        warnings.push(`That is already the price of ${product.sku}.`);
+      }
+      return {
+        kind: "price",
+        productId: product.id,
+        label: `${product.name} ${product.packagingType} ${product.variantValue}`,
+        oldPrice: product.defaultSalePrice,
+        newPrice: newPrice != null && newPrice > 0 ? newPrice : null,
+        missing: priceMissing,
+        warnings,
+        confidence: "low",
+      };
+    }
+
+    case "rename": {
+      const newName = (extracted.newName ?? "").trim();
+      const target = extracted.target;
+
+      // Only these three can be renamed by voice. A product's identity is its
+      // SKU and its packaging, which is more than a name and not something to
+      // rewrite from one spoken sentence.
+      const subject =
+        target === "area"
+          ? (catalog.areas.find((x) => x.id === extracted.areaId) ?? null)
+          : target === "shop"
+            ? (catalog.shops.find((x) => x.id === extracted.shopId) ?? null)
+            : target === "category"
+              ? (catalog.categories.find((x) => x.id === extracted.categoryId) ?? null)
+              : null;
+
+      if (!subject || (target !== "area" && target !== "shop" && target !== "category")) {
+        return {
+          kind: "unknown",
+          reason: "A rename, but it was not clear which area, shop or category was meant.",
+        };
+      }
+      if (!newName) {
+        return { kind: "unknown", reason: `Rename "${subject.name}" to what?` };
+      }
+      if (newName.toLowerCase() === subject.name.toLowerCase()) {
+        return { kind: "unknown", reason: `"${subject.name}" is already called that.` };
+      }
+
+      warnings.push("The new name was dictated - check the spelling before saving.");
+      return {
+        kind: "rename",
+        target,
+        id: subject.id,
+        oldName: subject.name,
+        newName,
+        // Filled in server-side before this is shown. A shop rename posts the
+        // address and phone back too, so sending them empty would erase them.
+        keep: { address: null, phone: null, voiceAlias: null },
+        missing: [],
+        warnings,
+        confidence: "low",
+      };
+    }
+
+    case "toggle": {
+      const target = extracted.target;
+      const subject =
+        target === "product"
+          ? (catalog.products.find((x) => x.id === extracted.productId) ?? null)
+          : target === "booker"
+            ? (catalog.bookers.find((x) => x.id === extracted.bookerId) ?? null)
+            : null;
+
+      if (!subject || (target !== "product" && target !== "booker")) {
+        return {
+          kind: "unknown",
+          reason: "Switch what on or off? Say a product or a booker by name.",
+        };
+      }
+      if (extracted.active == null) {
+        return { kind: "unknown", reason: "On or off was not clear." };
+      }
+
+      const label =
+        target === "product"
+          ? `${(subject as VoiceCatalog["products"][number]).name} ${(subject as VoiceCatalog["products"][number]).packagingType} ${(subject as VoiceCatalog["products"][number]).variantValue}`
+          : subject.name;
+
+      return {
+        kind: "toggle",
+        target,
+        id: subject.id,
+        label,
+        wanted: extracted.active,
+        // Read from the database before this is shown. The action itself only
+        // flips, so acting without knowing the current state would turn
+        // something ON when the instruction was to turn it off.
+        current: extracted.active,
+        missing: [],
+        warnings,
+        confidence: "low",
+      };
+    }
+
+    case "assign": {
+      const target = catalog.bookers.find((b) => b.id === extracted.bookerId) ?? null;
+      if (!target) {
+        return { kind: "unknown", reason: "Assign areas to which booker? Say their name." };
+      }
+      const said = (extracted.areaIds ?? [])
+        .map((id) => catalog.areas.find((x) => x.id === id))
+        .filter((x): x is VoiceCatalog["areas"][number] => x != null);
+
+      if (said.length === 0) {
+        return { kind: "unknown", reason: `Which areas should ${target.name} cover?` };
+      }
+      if (said.length < (extracted.areaIds ?? []).length) {
+        warnings.push("An area it chose is not in the catalog, so it was left out.");
+      }
+
+      return {
+        kind: "assign",
+        bookerId: target.id,
+        bookerName: target.name,
+        // Merged with what they already cover, server-side. The action REPLACES
+        // a booker's whole territory, so saving only what was said in one
+        // sentence would quietly take every other area away from them.
+        areaIds: said.map((x) => x.id),
+        addedNames: said.map((x) => x.name),
+        keptNames: [],
+        missing: [],
+        warnings,
+        confidence: "low",
+      };
+    }
+
+    case "open": {
+      const target = extracted.target;
+      const term = (extracted.term ?? "").trim();
+
+      // An exact id where the catalog has one, a search where it does not.
+      // Both land on a filtered list rather than on a record being changed.
+      const searchPage =
+        target === "invoice"
+          ? "/bookings"
+          : target === "product"
+            ? "/products"
+            : target === "shop"
+              ? "/areas"
+              : target === "area"
+                ? "/areas"
+                : null;
+
+      const href =
+        target === "invoice" && invoice
+          ? `/bookings?q=${encodeURIComponent(invoice.invoiceNo)}`
+          : target === "shop" && shop
+            ? `/sales?shop=${shop.id}`
+            : target === "product" && extracted.productId != null
+              ? `/sales?product=${extracted.productId}`
+              : target === "area" && area
+                ? `/bookings?area=${area.id}`
+                : term && searchPage
+                  ? `${searchPage}?q=${encodeURIComponent(term)}`
+                  : null;
+
+      if (!href) {
+        return {
+          kind: "unknown",
+          reason: "Open what? Name an invoice, a shop, a product or an area.",
+        };
+      }
+
+      const label =
+        target === "invoice" && invoice
+          ? invoice.invoiceNo
+          : target === "shop" && shop
+            ? shop.name
+            : target === "area" && area
+              ? area.name
+              : term || "that record";
+
+      // Deliberately a navigation, not a write. Editing and deleting work on
+      // an existing row by id, and a misheard id belongs to a real other row -
+      // the command would succeed on the wrong record and report nothing
+      // wrong. So voice carries you to the record and the change stays a hand.
+      return { kind: "open", href, label, confidence: "high" };
     }
 
     case "area": {

@@ -14,7 +14,43 @@ import { createBookingAction } from "@/actions/bookings";
 import { recordPaymentAction } from "@/actions/payments";
 import { createBatchAction } from "@/actions/batches";
 import { createSaleAction } from "@/actions/sales";
-import { createAreaAction, createShopAction } from "@/actions/areas";
+import {
+  createAreaAction,
+  createShopAction,
+  renameAreaAction,
+  renameShopAction,
+} from "@/actions/areas";
+import { createCategoryAction, renameCategoryAction } from "@/actions/categories";
+import {
+  createProductAction,
+  toggleProductActiveAction,
+  updateProductPriceAction,
+} from "@/actions/products";
+import {
+  createBookerAction,
+  setBookerAreasAction,
+  toggleBookerActiveAction,
+} from "@/actions/bookers";
+
+/**
+ * Two commands cover more than one table, so the action depends on the target.
+ *
+ * A thin dispatcher rather than a kind per table: "rename" and "toggle" are one
+ * idea each to the person saying them, and splitting them into six kinds would
+ * put six more names in the model's schema for no gain.
+ */
+function renameActionFor(prev: ActionState, formData: FormData): Promise<ActionState> {
+  const target = formData.get("target");
+  if (target === "shop") return renameShopAction(prev, formData);
+  if (target === "category") return renameCategoryAction(prev, formData);
+  return renameAreaAction(prev, formData);
+}
+
+function toggleActionFor(prev: ActionState, formData: FormData): Promise<ActionState> {
+  return formData.get("target") === "booker"
+    ? toggleBookerActiveAction(prev, formData)
+    : toggleProductActiveAction(prev, formData);
+}
 import { parseConfirmation } from "@/lib/voice/parse";
 import { Input } from "@/components/ui/input";
 import { emptyActionState, type ActionState } from "@/lib/validations";
@@ -225,7 +261,12 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
     const command = interpreted.command;
 
     // Safe to act on at once: neither changes anything.
-    if (command.kind === "navigate") {
+    //
+    // "open" is here rather than among the writes on purpose. Editing and
+    // deleting act on a row by id, and a misheard id is a real other row - the
+    // write would succeed on the wrong record and report nothing wrong. So
+    // voice carries you to the record and the change itself stays a hand.
+    if (command.kind === "navigate" || command.kind === "open") {
       router.push(command.href);
       return;
     }
@@ -243,7 +284,14 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
       command.kind === "batch" ||
       command.kind === "sale" ||
       command.kind === "shop" ||
-      command.kind === "area";
+      command.kind === "area" ||
+      command.kind === "category" ||
+      command.kind === "booker" ||
+      command.kind === "product" ||
+      command.kind === "price" ||
+      command.kind === "rename" ||
+      command.kind === "toggle" ||
+      command.kind === "assign";
     if (handsFree && writable && command.missing.length === 0) {
       pendingRef.current = command;
       modeRef.current = "confirm";
@@ -497,7 +545,14 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
           command.kind === "batch" ||
           command.kind === "sale" ||
           command.kind === "shop" ||
-          command.kind === "area" ? (
+          command.kind === "area" ||
+          command.kind === "category" ||
+          command.kind === "booker" ||
+          command.kind === "product" ||
+          command.kind === "price" ||
+          command.kind === "rename" ||
+          command.kind === "toggle" ||
+          command.kind === "assign" ? (
             <ConfirmWrite
               command={command}
               saving={saving}
@@ -519,7 +574,22 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
  */
 type WriteCommand = Extract<
   VoiceResult["command"],
-  { kind: "booking" | "payment" | "batch" | "sale" | "shop" | "area" }
+  {
+    kind:
+      | "booking"
+      | "payment"
+      | "batch"
+      | "sale"
+      | "shop"
+      | "area"
+      | "category"
+      | "booker"
+      | "product"
+      | "price"
+      | "rename"
+      | "toggle"
+      | "assign";
+  }
 >;
 
 /**
@@ -578,6 +648,41 @@ function buildPayload(command: WriteCommand): FormData {
     form.set("areaId", String(command.areaId ?? ""));
     form.set("name", command.name);
     if (command.phone) form.set("phone", command.phone);
+  } else if (command.kind === "category") {
+    form.set("name", command.name);
+  } else if (command.kind === "booker") {
+    form.set("name", command.name);
+    if (command.phone) form.set("phone", command.phone);
+  } else if (command.kind === "product") {
+    form.set("name", command.name);
+    form.set("categoryId", String(command.categoryId ?? ""));
+    form.set("packagingType", command.packagingType ?? "");
+    form.set("variantValue", command.variantValue ?? "");
+    form.set("unit", command.unit ?? "piece");
+    form.set("defaultSalePrice", String(command.salePrice ?? ""));
+  } else if (command.kind === "price") {
+    form.set("productId", String(command.productId));
+    form.set("defaultSalePrice", String(command.newPrice ?? ""));
+  } else if (command.kind === "rename") {
+    form.set("target", command.target);
+    form.set("id", String(command.id));
+    form.set("name", command.newName);
+    // Resent, not omitted. renameShopAction takes these alongside the name, so
+    // leaving them out would blank the address and phone of the shop.
+    if (command.keep.address) form.set("address", command.keep.address);
+    if (command.keep.phone) form.set("phone", command.keep.phone);
+    if (command.keep.voiceAlias) form.set("voiceAlias", command.keep.voiceAlias);
+  } else if (command.kind === "toggle") {
+    form.set("target", command.target);
+    // The action flips whatever it finds. It is only reached when the current
+    // state is the opposite of what was asked for - enrich() refuses the
+    // command otherwise, so this can never turn something the wrong way.
+    form.set("id", String(command.id));
+  } else if (command.kind === "assign") {
+    form.set("bookerId", String(command.bookerId));
+    // The whole territory, existing areas included: this action replaces the
+    // set rather than adding to it.
+    form.set("areaIds", JSON.stringify(command.areaIds));
   } else if (command.kind === "area") {
     // An area is a name and nothing else. The action restores a previously
     // removed area of the same name rather than duplicating it, which is the
@@ -600,6 +705,13 @@ const ACTIONS = {
   sale: createSaleAction,
   shop: createShopAction,
   area: createAreaAction,
+  category: createCategoryAction,
+  booker: createBookerAction,
+  product: createProductAction,
+  price: updateProductPriceAction,
+  toggle: toggleActionFor,
+  rename: renameActionFor,
+  assign: setBookerAreasAction,
 } as const;
 
 /**
@@ -700,6 +812,73 @@ function ConfirmWrite({
               />
               {command.phone ? <Row label="Phone" value={command.phone} /> : null}
             </>
+          ) : command.kind === "category" ? (
+            <Row
+              label="Category name"
+              value={command.name || "missing"}
+              missing={command.name.length === 0}
+            />
+          ) : command.kind === "booker" ? (
+            <>
+              <Row label="Booker name" value={command.name || "missing"} />
+              {command.phone ? <Row label="Phone" value={command.phone} /> : null}
+            </>
+          ) : command.kind === "product" ? (
+            <>
+              <Row label="Product name" value={command.name} />
+              <Row
+                label="Category"
+                value={command.categoryName ?? "missing"}
+                missing={command.categoryId == null}
+              />
+              <Row
+                label="Packaging"
+                value={command.packagingType ?? "missing"}
+                missing={command.packagingType == null}
+              />
+              <Row
+                label="Size"
+                value={command.variantValue ?? "missing"}
+                missing={command.variantValue == null}
+              />
+              <Row label="Unit" value={command.unit ?? "piece"} />
+              <Row
+                label="Sale price"
+                value={command.salePrice == null ? "missing" : String(command.salePrice)}
+                missing={command.salePrice == null}
+              />
+            </>
+          ) : command.kind === "price" ? (
+            <>
+              <Row label="Product" value={command.label} />
+              <Row label="Price now" value={String(command.oldPrice)} />
+              <Row
+                label="New price"
+                value={command.newPrice == null ? "missing" : String(command.newPrice)}
+                missing={command.newPrice == null}
+              />
+            </>
+          ) : command.kind === "rename" ? (
+            <>
+              <Row label={`The ${command.target}`} value={command.oldName} />
+              <Row label="New name" value={command.newName} />
+            </>
+          ) : command.kind === "toggle" ? (
+            <>
+              <Row
+                label={command.target === "product" ? "Product" : "Booker"}
+                value={command.label}
+              />
+              <Row label="Change to" value={command.wanted ? "Active" : "Inactive"} />
+            </>
+          ) : command.kind === "assign" ? (
+            <>
+              <Row label="Booker" value={command.bookerName} />
+              <Row label="Adding" value={command.addedNames.join(", ") || "nothing new"} />
+              {command.keptNames.length > 0 ? (
+                <Row label="Keeps" value={command.keptNames.join(", ")} />
+              ) : null}
+            </>
           ) : command.kind === "area" ? (
             <>
               <Row
@@ -797,6 +976,13 @@ const KIND_LABEL = {
   sale: "Cash sale",
   shop: "New shop",
   area: "New area",
+  category: "New category",
+  booker: "New booker",
+  product: "New product",
+  price: "Price change",
+  rename: "Rename",
+  toggle: "On / off",
+  assign: "Territory",
 } as const;
 
 function Row({ label, value, missing }: { label: string; value: string; missing?: boolean }) {
