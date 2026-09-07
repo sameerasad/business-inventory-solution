@@ -494,6 +494,13 @@ Rules that matter:
 - ONLY use ids from the catalog. Never invent one. If nothing matches, leave the id null.
 - Speech recognition mangles names. "Rajpur Daily" is very likely "Rajput Dairy"; resolve
   to the catalog entry that was plainly meant, and add a warning saying which you chose.
+- A transcript may be mostly noise with a few real words in it. Do not give up on the whole
+  sentence for that. Use only the fragments that clearly match something in the catalog,
+  leave every other field null, and warn that the audio was unclear. A half-filled form
+  someone can finish beats nothing at all - the person can see the transcript beside it.
+  But a fragment that does not clearly match anything stays null: never fill a field by
+  picking the nearest catalog row to a noise word, because a real id on the wrong record is
+  the one mistake nothing later can catch.
 - Names may be spoken in Urdu script while the catalog is written in Latin letters.
   Transliterate what you hear and match by sound, not by characters: "انعم بیکری" is
   "Anum bakery", "راجپوت ڈیری" is "Rajput Dairy", "المدینہ اسٹور" is "Al Madina Store".
@@ -808,10 +815,40 @@ function buildCommand(
 
       if (lines.length === 0) {
         const explained = (extracted.warnings ?? []).find((w) => w.trim().length > 0);
+
+        // Nothing at all was understood, so there is nothing to propose.
+        if (!effectiveArea && !shop) {
+          return {
+            kind: "unknown",
+            reason:
+              explained ?? "No product in the catalog matched that. Try the flavour with its size.",
+          };
+        }
+
+        // But a shop or an area WAS understood, and throwing that away was
+        // wrong. "bees aam bottle khwaja mein bech do" identifies the area and
+        // the quantity perfectly and is only vague about which of three mango
+        // bottles was meant - and this fills a form, so the answer is to fill
+        // what is known and leave the product for a person. Returning unknown
+        // made the whole sentence look unheard when almost all of it was.
+        //
+        // missing carries "product", so nothing can be saved from here.
+        missing.push("product");
+        if (!effectiveArea) missing.push("area");
         return {
-          kind: "unknown",
-          reason:
-            explained ?? "No product in the catalog matched that. Try the flavour with its size.",
+          kind: "booking",
+          lines: [],
+          areaId: effectiveArea?.id ?? null,
+          areaName: effectiveArea?.name ?? null,
+          shopId: shop?.id ?? null,
+          shopName: shop?.name ?? null,
+          bookerId: booker?.id ?? null,
+          bookerName: booker?.name ?? null,
+          customerPhone: extracted.customerPhone,
+          date,
+          missing,
+          warnings,
+          confidence: "low",
         };
       }
       if (lines.some((l) => l.quantity <= 0)) missing.push("quantity");

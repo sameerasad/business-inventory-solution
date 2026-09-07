@@ -63,6 +63,28 @@ export function BookingDictate({
     }
   }, [whisperAvailable]);
 
+  // The same two keys the Voice page uses, so a choice made in either place
+  // is the choice in both. Without a control here the box was stuck on
+  // whatever that page had last been set to - and on English for anyone who
+  // had never opened it, which is why Urdu spoken here came back as nonsense.
+  const chooseLang = (next: SpeechLang) => {
+    setLang(next);
+    try {
+      window.localStorage.setItem(LANG_KEY, next);
+    } catch {
+      // Only affects the next visit.
+    }
+  };
+
+  const chooseEngine = (next: "whisper" | "browser") => {
+    setUseWhisper(next === "whisper");
+    try {
+      window.localStorage.setItem(ENGINE_KEY, next);
+    } catch {
+      // Only affects the next visit.
+    }
+  };
+
   /** Apply an understood result, whichever engine produced it. */
   const apply = useCallback(
     (result: VoiceResult) => {
@@ -82,10 +104,16 @@ export function BookingDictate({
         setTyped(result.transcript);
       }
       if (result.command.kind !== "booking") {
+        // Say what it DID understand. A flat "that was not an order" is
+        // maddening when the sentence was heard correctly and simply asked for
+        // something this box cannot do - and it hides a mishearing too, since
+        // the summary is where you would spot it.
         setOutcome({
           ok: false,
           message:
-            "That did not sound like an order. Try it as one sentence, like “bees aam bottle 250 Corner Store ko bech do”.",
+            result.command.kind === "unknown"
+              ? `${result.summary} This box only takes orders - use the Voice page for anything else.`
+              : `That was understood as: ${result.summary} This box only takes orders - use the Voice page for that.`,
         });
         return;
       }
@@ -194,6 +222,67 @@ export function BookingDictate({
               </>
             )}
           </Button>
+        ) : null}
+
+        {whisperAvailable ? (
+          <div role="group" aria-label="Engine" className="inline-flex rounded-md border p-0.5">
+            {(
+              [
+                ["whisper", "Whisper"],
+                ["browser", "Browser"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => chooseEngine(value)}
+                aria-pressed={useWhisper === (value === "whisper")}
+                disabled={listening || thinking}
+                title={
+                  value === "whisper"
+                    ? "Records a clip and transcribes it on the server. Much better at Urdu, takes a second or two."
+                    : "The browser's own recognition. Instant, but weak on Urdu."
+                }
+                className={cn(
+                  "rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors",
+                  useWhisper === (value === "whisper")
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Neither engine can tell which language is being spoken, so both
+            have to be told. */}
+        {micUsable ? (
+          <div role="group" aria-label="Language" className="inline-flex rounded-md border p-0.5">
+            {(
+              [
+                ["en-PK", "English"],
+                ["ur-PK", "اردو"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => chooseLang(value)}
+                aria-pressed={lang === value}
+                disabled={listening}
+                className={cn(
+                  "rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors",
+                  lang === value
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         ) : null}
 
         {/* Typing the same sentence takes the identical path, which is both the

@@ -167,12 +167,65 @@ async function main() {
     ghostShop.kind === "booking" ? ghostShop.warnings : null,
   );
 
+  // An invented product next to a REAL shop.
+  //
+  // This used to assert that the whole command became unknown. It now keeps
+  // the part that was understood and leaves the product blank, because this
+  // proposal fills a form: discarding a correctly heard shop, quantity and
+  // date because one field was wrong made the entire sentence look unheard.
+  // The invariant is unchanged and is what is checked here - nothing invented
+  // survives, and nothing can be saved.
   const ghostProduct = toCommand(
     said({ kind: "booking", shopId: 21, lines: [{ productId: 777, quantity: 5, unitPrice: 100 }] }),
     CATALOG,
     TODAY,
   );
-  ok("an invented product yields no booking at all", ghostProduct.kind === "unknown", ghostProduct);
+  ok(
+    "an invented product line does not survive",
+    ghostProduct.kind === "booking" && ghostProduct.lines.length === 0,
+    ghostProduct,
+  );
+  ok(
+    "and the form cannot be saved without one",
+    ghostProduct.kind === "booking" && ghostProduct.missing.includes("product"),
+    ghostProduct,
+  );
+  ok(
+    "while the shop that WAS understood is kept",
+    ghostProduct.kind === "booking" && ghostProduct.shopId === 21,
+    ghostProduct,
+  );
+
+  // With nothing else understood there is nothing to fill, so it stays unknown.
+  const nothingUseful = toCommand(
+    said({ kind: "booking", lines: [{ productId: 777, quantity: 5, unitPrice: 100 }] }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "a booking with neither a real product nor a place is still unknown",
+    nothingUseful.kind === "unknown",
+    nothingUseful,
+  );
+
+  // The case this change was made for: the model correctly declines to guess
+  // which of several sizes was meant, and everything else is kept.
+  const vagueSize = toCommand(
+    said({
+      kind: "booking",
+      areaId: 11,
+      lines: [{ productId: null, quantity: 20, unitPrice: null }],
+    }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "abstaining on the size fills the area and asks for the product",
+    vagueSize.kind === "booking" &&
+      vagueSize.areaId === 11 &&
+      vagueSize.missing.includes("product"),
+    vagueSize,
+  );
 
   const ghostInvoice = toCommand(
     said({ kind: "payment", bookingId: 888, amount: 1000 }),
