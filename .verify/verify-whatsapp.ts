@@ -1,12 +1,7 @@
 /**
  * Phone normalisation and message building. Pure logic, no database.
  */
-import {
-  buildInvoiceMessage,
-  buildWhatsAppUrl,
-  normalisePhone,
-  urlTooLong,
-} from "@/lib/whatsapp";
+import { buildInvoiceMessage, buildWhatsAppUrl, normalisePhone, urlTooLong } from "@/lib/whatsapp";
 
 let checks = 0;
 let failures = 0;
@@ -62,7 +57,11 @@ ok("an explicit + is never re-prefixed", intl.ok && intl.e164 === "14155552671",
 // A local number that happens to begin with the country code digits must not be
 // prefixed twice.
 const already = normalisePhone("923001234567", "92");
-ok("already-international number is left alone", already.ok && already.e164 === "923001234567", already);
+ok(
+  "already-international number is left alone",
+  already.ok && already.e164 === "923001234567",
+  already,
+);
 
 section("message body");
 const lines = [
@@ -88,7 +87,11 @@ ok("lists both items", msg.includes("Mango Juice") && msg.includes("Apple Juice"
 ok("prices are in rupees", msg.includes("Rs"), msg);
 ok("shows the total", msg.includes("72,300"), msg);
 ok("says packs", msg.includes("packs"), msg);
-ok("includes the download link", msg.includes("https://example.vercel.app/api/invoices/share/abc123"), msg);
+ok(
+  "includes the download link",
+  msg.includes("https://example.vercel.app/api/invoices/share/abc123"),
+  msg,
+);
 // A customer document must not carry cost or profit.
 ok("leaks no cost or profit", !/\b(cost|profit|margin)\b/i.test(msg), msg);
 
@@ -136,7 +139,11 @@ const bigMsg = buildInvoiceMessage({
   totalUnits: 2600,
   pdfUrl: "https://example.vercel.app/api/invoices/share/abc123",
 });
-ok("only the first 8 lines are listed", (bigMsg.match(/^• /gm) ?? []).length === 9, (bigMsg.match(/^• /gm) ?? []).length);
+ok(
+  "only the first 8 lines are listed",
+  (bigMsg.match(/^• /gm) ?? []).length === 9,
+  (bigMsg.match(/^• /gm) ?? []).length,
+);
 ok("says how many were left out", bigMsg.includes("and 18 more item(s)"), bigMsg);
 const bigUrl = buildWhatsAppUrl("923001234567", bigMsg);
 ok("the resulting URL stays under the practical limit", !urlTooLong(bigUrl), bigUrl.length);

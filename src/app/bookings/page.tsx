@@ -27,7 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import { dateOnly, money, qty } from "@/lib/format";
 import { isDateOnly } from "@/lib/dates";
-import { BOOKINGS_PAGE_SIZE, getBookingList } from "@/lib/bookings";
+import { BOOKINGS_PAGE_SIZE, getBookingList, type PaymentStatusFilter } from "@/lib/bookings";
 import { prisma } from "@/lib/db";
 import { getAreasWithShops } from "@/lib/queries";
 
@@ -53,8 +53,16 @@ export default async function BookingsPage({
   const fromParam = first(sp.from);
   const toParam = first(sp.to);
   const areaParam = first(sp.area);
+  const shopParam = first(sp.shop);
   const bookerParam = first(sp.booker);
+  const statusParam = first(sp.status);
+  const q = (first(sp.q) ?? "").trim();
   const pageParam = Number.parseInt(first(sp.page) ?? "1", 10);
+
+  const status: PaymentStatusFilter =
+    statusParam === "unpaid" || statusParam === "partial" || statusParam === "paid"
+      ? statusParam
+      : "all";
 
   const from = fromParam && isDateOnly(fromParam) ? fromParam : null;
   const to = toParam && isDateOnly(toParam) ? toParam : null;
@@ -76,13 +84,36 @@ export default async function BookingsPage({
       from: invalidRange ? null : from,
       to: invalidRange ? null : to,
       areaId: parseId(areaParam),
+      shopId: parseId(shopParam),
       bookerId: parseId(bookerParam),
-      q: null,
+      status,
+      q: q || null,
       page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1,
     }),
   ]);
 
+  // Shops narrow to the chosen area when there is one. Ten shops is a short
+  // list; a hundred is not, and picking a shop from another area only ever
+  // produces an empty table.
+  const selectedArea = parseId(areaParam);
+  const shopOptions = areasWithShops
+    .filter((a) => selectedArea == null || a.id === selectedArea)
+    .flatMap((a) =>
+      a.shops.map((sh) => ({
+        value: String(sh.id),
+        label: selectedArea == null ? `${sh.name} - ${a.name}` : sh.name,
+      })),
+    );
+
   const filters: FilterSpec[] = [
+    {
+      kind: "search",
+      key: "q",
+      label: "Search",
+      value: q,
+      placeholder: "Invoice, customer, shop, phone, notes",
+      width: "w-[280px]",
+    },
     { kind: "date", key: "from", label: "From", value: from ?? "", width: "w-[160px]" },
     { kind: "date", key: "to", label: "To", value: to ?? "", width: "w-[160px]" },
     {
@@ -96,12 +127,34 @@ export default async function BookingsPage({
     },
     {
       kind: "select",
+      key: "shop",
+      label: "Shop",
+      value: shopParam ?? "all",
+      allLabel: "All shops",
+      width: "w-[200px]",
+      options: shopOptions,
+    },
+    {
+      kind: "select",
       key: "booker",
       label: "Booker",
       value: bookerParam ?? "all",
       allLabel: "All bookers",
       width: "w-[180px]",
       options: bookers.map((b) => ({ value: String(b.id), label: b.name })),
+    },
+    {
+      kind: "select",
+      key: "status",
+      label: "Payment",
+      value: status === "all" ? "all" : status,
+      allLabel: "Any status",
+      width: "w-[160px]",
+      options: [
+        { value: "unpaid", label: "Unpaid" },
+        { value: "partial", label: "Partial" },
+        { value: "paid", label: "Paid" },
+      ],
     },
   ];
 
@@ -215,9 +268,7 @@ export default async function BookingsPage({
                     <PaymentStatusBadge total={row.total} paid={row.paid} />
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-xs">
-                    {row.bookerName ?? (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                    {row.bookerName ?? <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1.5">
@@ -246,28 +297,28 @@ export default async function BookingsPage({
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-0.5">
-                    <EditBookingDialog
-                      booking={{
-                        id: row.id,
-                        invoiceNo: row.invoiceNo,
-                        customerName: row.customerName,
-                        customerPhone: row.customerPhone,
-                        areaId: row.areaId,
-                        shopId: row.shopId,
-                        bookerId: row.bookerId,
-                        bookingDate: dateOnly(row.bookingDate),
-                        notes: row.notes,
-                      }}
-                      areas={areasWithShops}
-                      bookers={bookers}
-                    />
-                    <SoftDeleteButton
-                      action={softDeleteBookingAction}
-                      id={row.id}
-                      title={`Cancel ${row.invoiceNo}`}
-                      description={`${row.customerName ?? "Walk-in customer"}, ${qty(row.units)} unit(s), ${money(row.total)}. All ${row.units} unit(s) go back to the batches they came from and the sales stop counting. The booking is kept so the invoice number is never reused.`}
-                      confirmLabel="Cancel booking"
-                    />
+                      <EditBookingDialog
+                        booking={{
+                          id: row.id,
+                          invoiceNo: row.invoiceNo,
+                          customerName: row.customerName,
+                          customerPhone: row.customerPhone,
+                          areaId: row.areaId,
+                          shopId: row.shopId,
+                          bookerId: row.bookerId,
+                          bookingDate: dateOnly(row.bookingDate),
+                          notes: row.notes,
+                        }}
+                        areas={areasWithShops}
+                        bookers={bookers}
+                      />
+                      <SoftDeleteButton
+                        action={softDeleteBookingAction}
+                        id={row.id}
+                        title={`Cancel ${row.invoiceNo}`}
+                        description={`${row.customerName ?? "Walk-in customer"}, ${qty(row.units)} unit(s), ${money(row.total)}. All ${row.units} unit(s) go back to the batches they came from and the sales stop counting. The booking is kept so the invoice number is never reused.`}
+                        confirmLabel="Cancel booking"
+                      />
                     </div>
                   </TableCell>
                 </TableRow>
@@ -294,15 +345,7 @@ export default async function BookingsPage({
   );
 }
 
-function Tile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "gain" | "loss";
-}) {
+function Tile({ label, value, tone }: { label: string; value: string; tone?: "gain" | "loss" }) {
   return (
     <Card className="p-5">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>

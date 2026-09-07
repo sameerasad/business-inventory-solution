@@ -102,7 +102,10 @@ async function main() {
   const k0 = await getCashKpis(F);
   ok("revenue is zero", near(k0.year.revenue, 0), k0.year.revenue);
   ok("profit is zero", near(k0.year.profit, 0), k0.year.profit);
-  ok("but the stock has gone", (await getStockLevels()).find((s) => s.sku === "MNG-BTL-250")!.currentStock === 900);
+  ok(
+    "but the stock has gone",
+    (await getStockLevels()).find((s) => s.sku === "MNG-BTL-250")!.currentStock === 900,
+  );
   ok("and it shows as awaiting payment", near(k0.awaitingPayment, 45000), k0.awaitingPayment);
   ok("units DELIVERED still counts the 100", k0.year.units === 100, k0.year.units);
 
@@ -126,14 +129,22 @@ async function main() {
     near(k1.year.profit, 25000 * (20000 / 45000)),
     k1.year.profit,
   );
-  ok("margin holds at 55.6%", near((k1.year.profit / k1.year.revenue) * 100, 55.5556), (k1.year.profit / k1.year.revenue) * 100);
+  ok(
+    "margin holds at 55.6%",
+    near((k1.year.profit / k1.year.revenue) * 100, 55.5556),
+    (k1.year.profit / k1.year.revenue) * 100,
+  );
   ok("awaiting payment drops to 25,000", near(k1.awaitingPayment, 25000), k1.awaitingPayment);
 
   section("it is dated by the PAYMENT, not the delivery");
   const t1 = await getCashMonthlyTrend(F);
   ok("March (delivered) counts nothing", near(t1[2].revenue, 0), t1[2].revenue);
   ok("April (paid) counts the 20,000", near(t1[3].revenue, 20000), t1[3].revenue);
-  ok("April profit is the proportional share", near(t1[3].profit, 25000 * (20000 / 45000)), t1[3].profit);
+  ok(
+    "April profit is the proportional share",
+    near(t1[3].profit, 25000 * (20000 / 45000)),
+    t1[3].profit,
+  );
 
   section("the rest, paid in a later month, lands in that month");
   const p2 = await recordPaymentAction(
@@ -155,11 +166,10 @@ async function main() {
   const t2 = await getCashMonthlyTrend(F);
   ok("April keeps its 20,000", near(t2[3].revenue, 20000), t2[3].revenue);
   ok("June gets the other 25,000", near(t2[5].revenue, 25000), t2[5].revenue);
-  ok(
-    "the two months' profit adds to the full margin",
-    near(t2[3].profit + t2[5].profit, 25000),
-    [t2[3].profit, t2[5].profit],
-  );
+  ok("the two months' profit adds to the full margin", near(t2[3].profit + t2[5].profit, 25000), [
+    t2[3].profit,
+    t2[5].profit,
+  ]);
   ok(
     "the year equals the sum of its months",
     near(
@@ -199,7 +209,10 @@ async function main() {
   const byArea = await getCashByArea(scope());
   ok(
     "areas sum to the recognised revenue",
-    near(byArea.reduce((s, r) => s + r.revenue, 0), k3.year.revenue),
+    near(
+      byArea.reduce((s, r) => s + r.revenue, 0),
+      k3.year.revenue,
+    ),
     byArea,
   );
   ok(
@@ -215,13 +228,19 @@ async function main() {
   const byCat = await getCashByCategory(scope());
   ok(
     "categories sum to the same total",
-    near(byCat.reduce((s, r) => s + r.revenue, 0), k3.year.revenue),
+    near(
+      byCat.reduce((s, r) => s + r.revenue, 0),
+      k3.year.revenue,
+    ),
     byCat,
   );
   const byPack = await getCashByPackaging(scope());
   ok(
     "packaging sums to the same total",
-    near(byPack.reduce((s, r) => s + r.revenue, 0), k3.year.revenue),
+    near(
+      byPack.reduce((s, r) => s + r.revenue, 0),
+      k3.year.revenue,
+    ),
     byPack,
   );
 
@@ -245,7 +264,10 @@ async function main() {
   ok("only the counter sale remains", near(k5.year.revenue, 1500), k5.year.revenue);
   ok("its profit too", near(k5.year.profit, 900), k5.year.profit);
   ok("nothing awaiting payment", near(k5.awaitingPayment, 0), k5.awaitingPayment);
-  ok("stock came back", (await getStockLevels()).find((s) => s.sku === "MNG-BTL-250")!.currentStock === 1000);
+  ok(
+    "stock came back",
+    (await getStockLevels()).find((s) => s.sku === "MNG-BTL-250")!.currentStock === 1000,
+  );
 
   section("recognised revenue can never exceed what was invoiced");
   // Force the pathological case straight in SQL: a payment far larger than the
@@ -322,11 +344,19 @@ async function main() {
 
   const byBooker = await getCashByBooker(scope());
   const mine = byBooker.find((r) => r.label === "Rec Booker");
-  ok("they now have a row", mine != null, byBooker.map((r) => r.label));
+  ok(
+    "they now have a row",
+    mine != null,
+    byBooker.map((r) => r.label),
+  );
   ok("credited only the 1,000 received", near(mine?.revenue ?? 0, 1000), mine?.revenue);
 
   const noBooker = byBooker.find((r) => r.label === "Counter sale (no booker)");
-  ok("counter sales are their own row, not dropped", noBooker != null, byBooker.map((r) => r.label));
+  ok(
+    "counter sales are their own row, not dropped",
+    noBooker != null,
+    byBooker.map((r) => r.label),
+  );
   ok(
     "the by-booker rows still add up to total revenue",
     near(
@@ -337,7 +367,11 @@ async function main() {
   );
 
   const filtered = await getCashKpis({ ...F, bookerId: recBooker.id });
-  ok("filtering by booker isolates their 1,000", near(filtered.year.revenue, 1000), filtered.year.revenue);
+  ok(
+    "filtering by booker isolates their 1,000",
+    near(filtered.year.revenue, 1000),
+    filtered.year.revenue,
+  );
   ok(
     "and their profit on it (1,000/2,000 of 4 x 300 margin)",
     near(filtered.year.profit, 600),
@@ -356,7 +390,8 @@ async function main() {
   const trendFiltered = await getCashMonthlyTrend({ ...F, bookerId: recBooker.id });
   ok(
     "and it lands in August, the month it was paid",
-    near(trendFiltered[7].revenue, 1000) && trendFiltered.every((m, i) => i === 7 || m.revenue === 0),
+    near(trendFiltered[7].revenue, 1000) &&
+      trendFiltered.every((m, i) => i === 7 || m.revenue === 0),
     trendFiltered.filter((m) => m.revenue > 0),
   );
 

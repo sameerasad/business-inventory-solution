@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/table";
 import { dateOnly, money, qty } from "@/lib/format";
 import { isDateOnly } from "@/lib/dates";
-import { getSaleList, PAGE_SIZE } from "@/lib/lists";
+import { getSaleList, PAGE_SIZE, type SaleKindFilter } from "@/lib/lists";
 import { getAreasWithShops, getProductOptions } from "@/lib/queries";
 import { prisma } from "@/lib/db";
 
@@ -49,8 +49,14 @@ export default async function SalesPage({
   const fromParam = first(sp.from);
   const toParam = first(sp.to);
   const areaParam = first(sp.area);
+  const shopParam = first(sp.shop);
   const productParam = first(sp.product);
+  const kindParam = first(sp.kind);
+  const q = (first(sp.q) ?? "").trim();
   const pageParam = Number.parseInt(first(sp.page) ?? "1", 10);
+
+  const kind: SaleKindFilter =
+    kindParam === "booked" || kindParam === "counter" ? kindParam : "all";
 
   // A malformed date in the URL should narrow nothing rather than 500 the page.
   const from = fromParam && isDateOnly(fromParam) ? fromParam : null;
@@ -69,7 +75,10 @@ export default async function SalesPage({
       from: invalidRange ? null : from,
       to: invalidRange ? null : to,
       areaId: parseId(areaParam),
+      shopId: parseId(shopParam),
       productId: parseId(productParam),
+      kind,
+      q: q || null,
       page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1,
     }),
   ]);
@@ -105,7 +114,25 @@ export default async function SalesPage({
     batchesByProduct.set(b.productId, forProduct);
   }
 
+  const selectedArea = parseId(areaParam);
+  const shopOptions = areasWithShops
+    .filter((a) => selectedArea == null || a.id === selectedArea)
+    .flatMap((a) =>
+      a.shops.map((sh) => ({
+        value: String(sh.id),
+        label: selectedArea == null ? `${sh.name} - ${a.name}` : sh.name,
+      })),
+    );
+
   const filters: FilterSpec[] = [
+    {
+      kind: "search",
+      key: "q",
+      label: "Search",
+      value: q,
+      placeholder: "Product, SKU, shop, invoice, notes",
+      width: "w-[280px]",
+    },
     { kind: "date", key: "from", label: "From", value: from ?? "", width: "w-[160px]" },
     { kind: "date", key: "to", label: "To", value: to ?? "", width: "w-[160px]" },
     {
@@ -129,6 +156,27 @@ export default async function SalesPage({
         label: `${p.sku} - ${p.name} ${p.packagingType} ${p.variantValue}`,
       })),
     },
+    {
+      kind: "select",
+      key: "shop",
+      label: "Shop",
+      value: shopParam ?? "all",
+      allLabel: "All shops",
+      width: "w-[200px]",
+      options: shopOptions,
+    },
+    {
+      kind: "select",
+      key: "kind",
+      label: "Type",
+      value: kind,
+      allLabel: "Booked and counter",
+      width: "w-[180px]",
+      options: [
+        { value: "booked", label: "On an invoice" },
+        { value: "counter", label: "Counter (cash)" },
+      ],
+    },
   ];
 
   return (
@@ -143,7 +191,11 @@ export default async function SalesPage({
         }
       />
 
-      <Suspense fallback={<FilterBarSkeleton className="mb-4 h-[76px] animate-pulse rounded-lg border bg-card" />}>
+      <Suspense
+        fallback={
+          <FilterBarSkeleton className="mb-4 h-[76px] animate-pulse rounded-lg border bg-card" />
+        }
+      >
         <ListFilters filters={filters} />
       </Suspense>
 
@@ -279,15 +331,7 @@ export default async function SalesPage({
   );
 }
 
-function Tile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "gain" | "loss";
-}) {
+function Tile({ label, value, tone }: { label: string; value: string; tone?: "gain" | "loss" }) {
   return (
     <Card className="p-5">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>

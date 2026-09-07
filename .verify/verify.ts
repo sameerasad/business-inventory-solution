@@ -91,7 +91,11 @@ async function main() {
     where: { idempotencyKey: "batch-key-1" },
   });
   ok("remaining_qty starts at quantity", batch1.remainingQty === 1000, batch1.remainingQty);
-  ok("received_date stored as the day given", batch1.receivedDate.toISOString().slice(0, 10) === `${YEAR}-01-15`, batch1.receivedDate.toISOString());
+  ok(
+    "received_date stored as the day given",
+    batch1.receivedDate.toISOString().slice(0, 10) === `${YEAR}-01-15`,
+    batch1.receivedDate.toISOString(),
+  );
   ok("createdBy recorded from env", batch1.createdBy === "verify-runner", batch1.createdBy);
 
   section("idempotency");
@@ -144,7 +148,11 @@ async function main() {
   const avail = await getAvailableBatchesForProduct(mango250.id);
   ok("two live batches for mango 250ml", avail.length === 2, avail);
   ok("oldest first (FIFO default)", avail[0].receivedDate === "2026-01-15", avail[0]);
-  ok("unit cost is a plain number", typeof avail[0].unitCost === "number", typeof avail[0].unitCost);
+  ok(
+    "unit cost is a plain number",
+    typeof avail[0].unitCost === "number",
+    typeof avail[0].unitCost,
+  );
 
   section("create sale + stock deduction");
   const s1 = await createSaleAction(
@@ -178,7 +186,11 @@ async function main() {
   );
   ok("replayed sale reports success", s1replay.ok, s1replay);
   const afterReplay = await prisma.batch.findUniqueOrThrow({ where: { id: batch1.id } });
-  ok("replayed sale did not deduct twice", afterReplay.remainingQty === 880, afterReplay.remainingQty);
+  ok(
+    "replayed sale did not deduct twice",
+    afterReplay.remainingQty === 880,
+    afterReplay.remainingQty,
+  );
 
   section("oversell guards");
   const over = await createSaleAction(
@@ -194,7 +206,11 @@ async function main() {
     }),
   );
   ok("oversell rejected", !over.ok, over);
-  ok("oversell message names the remaining qty", (over.message ?? "").includes("880"), over.message);
+  ok(
+    "oversell message names the remaining qty",
+    (over.message ?? "").includes("880"),
+    over.message,
+  );
 
   const wrongBatch = await createSaleAction(
     emptyActionState,
@@ -316,7 +332,11 @@ async function main() {
   );
 
   const flavors = await getRevenueByProductName(scope);
-  ok("flavor buckets include Mango Juice", flavors.some((f) => f.label === "Mango Juice"), flavors);
+  ok(
+    "flavor buckets include Mango Juice",
+    flavors.some((f) => f.label === "Mango Juice"),
+    flavors,
+  );
 
   const byArea = await getRevenueByArea(scope);
   ok("three areas with sales", byArea.length === 3, byArea);
@@ -365,7 +385,10 @@ async function main() {
   ok("category + area compose", Math.abs(both.year.revenue - 987.5) < 0.005, both.year.revenue);
   const otherYear = await getKpis({ year: YEAR - 1, categoryId: null, areaId: null });
   ok("past year is empty", otherYear.year.revenue === 0, otherYear.year);
-  ok("past year suppresses the Today card", otherYear.today.units === 0 && !otherYear.isCurrentYear);
+  ok(
+    "past year suppresses the Today card",
+    otherYear.today.units === 0 && !otherYear.isCurrentYear,
+  );
 
   section("stock levels");
   const stock = await getStockLevels();
@@ -386,11 +409,32 @@ async function main() {
   ok("never-stocked product has null avg cost", untouched.avgUnitCost === null, untouched);
 
   section("listings");
-  const batchList = await getBatchList({ productId: null, status: "all", page: 1 });
+  const batchList = await getBatchList({
+    productId: null,
+    status: "all",
+    from: null,
+    to: null,
+    q: null,
+    page: 1,
+  });
   ok("4 batches listed", batchList.total === 4, batchList.total);
-  const activeOnly = await getBatchList({ productId: null, status: "active", page: 1 });
+  const activeOnly = await getBatchList({
+    productId: null,
+    status: "active",
+    from: null,
+    to: null,
+    q: null,
+    page: 1,
+  });
   ok("all 4 batches still active", activeOnly.total === 4, activeOnly.total);
-  const filteredBatches = await getBatchList({ productId: mango250.id, status: "all", page: 1 });
+  const filteredBatches = await getBatchList({
+    productId: mango250.id,
+    status: "all",
+    from: null,
+    to: null,
+    q: null,
+    page: 1,
+  });
   ok("batch product filter works", filteredBatches.total === 2, filteredBatches.total);
   ok(
     "soldQty derived correctly",
@@ -398,7 +442,16 @@ async function main() {
     filteredBatches.rows.map((r) => r.soldQty),
   );
 
-  const saleList = await getSaleList({ from: null, to: null, areaId: null, productId: null, page: 1 });
+  const saleList = await getSaleList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    productId: null,
+    kind: "all",
+    q: null,
+    page: 1,
+  });
   ok("8 sales listed", saleList.total === 8, saleList.total);
   ok(
     "listing totals match the dashboard",
@@ -406,7 +459,11 @@ async function main() {
       Math.abs(saleList.totals.profit - expectedProfit) < 0.005,
     saleList.totals,
   );
-  ok("newest sale first", saleList.rows[0].saleDate.toISOString().slice(0, 10) === `${YEAR}-11-23`, saleList.rows[0].saleDate);
+  ok(
+    "newest sale first",
+    saleList.rows[0].saleDate.toISOString().slice(0, 10) === `${YEAR}-11-23`,
+    saleList.rows[0].saleDate,
+  );
   ok(
     "per-line profit computed in SQL",
     Math.abs(saleList.rows[0].profit - 250 * (1.95 - 1.05)) < 0.005,
@@ -426,7 +483,10 @@ async function main() {
     from: `${YEAR}-02-01`,
     to: `${YEAR}-03-31`,
     areaId: null,
+    shopId: null,
     productId: null,
+    kind: "all",
+    q: null,
     page: 1,
   });
   ok("date range filter works", ranged.total === 3, ranged.total);
@@ -434,7 +494,10 @@ async function main() {
     from: null,
     to: null,
     areaId: online.id,
+    shopId: null,
     productId: null,
+    kind: "all",
+    q: null,
     page: 1,
   });
   ok("area filter on the listing works", byAreaList.total === 2, byAreaList.total);
@@ -442,7 +505,10 @@ async function main() {
   section("soft delete a sale returns stock");
   const saleToRemove = await prisma.sale.findFirstOrThrow({ where: { idempotencyKey: "s3" } });
   const before = await prisma.batch.findUniqueOrThrow({ where: { id: saleToRemove.batchId } });
-  const del = await softDeleteSaleAction(emptyActionState, fd({ id: String(saleToRemove.id), reason: "typo" }));
+  const del = await softDeleteSaleAction(
+    emptyActionState,
+    fd({ id: String(saleToRemove.id), reason: "typo" }),
+  );
   ok("sale soft deleted", del.ok, del);
   const after = await prisma.batch.findUniqueOrThrow({ where: { id: saleToRemove.batchId } });
   ok(
@@ -458,11 +524,23 @@ async function main() {
     Math.abs(afterDelete.year.revenue - (expectedRevenue - 217.5)) < 0.005,
     afterDelete.year.revenue,
   );
-  const listAfterDelete = await getSaleList({ from: null, to: null, areaId: null, productId: null, page: 1 });
+  const listAfterDelete = await getSaleList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    productId: null,
+    kind: "all",
+    q: null,
+    page: 1,
+  });
   ok("deleted sale drops out of the listing", listAfterDelete.total === 7, listAfterDelete.total);
 
   section("soft delete guards");
-  const batchWithSales = await softDeleteBatchAction(emptyActionState, fd({ id: String(batch1.id) }));
+  const batchWithSales = await softDeleteBatchAction(
+    emptyActionState,
+    fd({ id: String(batch1.id) }),
+  );
   ok("batch with sales cannot be removed", !batchWithSales.ok, batchWithSales);
   const areaWithSales = await deleteAreaAction(emptyActionState, fd({ id: String(downtown.id) }));
   ok("area with sales cannot be removed", !areaWithSales.ok, areaWithSales);
@@ -507,13 +585,19 @@ async function main() {
   const emptyAreaDelete = await deleteAreaAction(emptyActionState, fd({ id: String(westZone.id) }));
   ok("area with no sales can be removed", emptyAreaDelete.ok, emptyAreaDelete);
   const westShops = await prisma.shop.findMany({ where: { areaId: westZone.id } });
-  ok("removing an area hides its shops", westShops.every((s) => s.isDeleted), westShops);
+  ok(
+    "removing an area hides its shops",
+    westShops.every((s) => s.isDeleted),
+    westShops,
+  );
 
   section("catalog additions");
   const newProduct = await createProductAction(
     emptyActionState,
     fd({
-      categoryId: String((await prisma.category.findFirstOrThrow({ where: { name: "Chocolate" } })).id),
+      categoryId: String(
+        (await prisma.category.findFirstOrThrow({ where: { name: "Chocolate" } })).id,
+      ),
       name: "Chocolate",
       packagingType: "Bar",
       variantValue: "20g",
@@ -522,13 +606,21 @@ async function main() {
     }),
   );
   ok("new chocolate size added", newProduct.ok, newProduct);
-  ok("SKU auto-generated as CHO-BAR-20", (newProduct.message ?? "").includes("CHO-BAR-20"), newProduct.message);
+  ok(
+    "SKU auto-generated as CHO-BAR-20",
+    (newProduct.message ?? "").includes("CHO-BAR-20"),
+    newProduct.message,
+  );
 
   section("year dropdown");
   const years = await getAvailableYears();
   ok("years include 2026", years.includes(2026), years);
   ok("years include the current year", years.includes(new Date().getFullYear()), years);
-  ok("years sorted descending", years.every((y, i) => i === 0 || years[i - 1] > y), years);
+  ok(
+    "years sorted descending",
+    years.every((y, i) => i === 0 || years[i - 1] > y),
+    years,
+  );
 
   section("audit trail");
   const auditCount = await prisma.auditLog.count();
@@ -549,7 +641,9 @@ async function main() {
   const dupProduct = await createProductAction(
     emptyActionState,
     fd({
-      categoryId: String((await prisma.category.findFirstOrThrow({ where: { name: "Chocolate" } })).id),
+      categoryId: String(
+        (await prisma.category.findFirstOrThrow({ where: { name: "Chocolate" } })).id,
+      ),
       name: "Chocolate",
       packagingType: "Bar",
       variantValue: "20g",

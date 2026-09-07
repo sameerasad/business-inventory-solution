@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { PageHeader } from "@/components/page-header";
+import { ListFilters, type FilterSpec } from "@/components/list-filters";
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { ProductRowActions } from "@/components/products/product-row-actions";
 import { EditProductDialog } from "@/components/products/edit-product-dialog";
@@ -26,8 +27,22 @@ import { prisma } from "@/lib/db";
 export const metadata: Metadata = { title: "Products" };
 export const dynamic = "force-dynamic";
 
-export default async function ProductsPage() {
-  const [rows, categories, categoryCounts] = await Promise.all([
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const q = (first(sp.q) ?? "").trim();
+  const categoryParam = first(sp.category);
+  const packagingParam = first(sp.packaging);
+  const stockParam = first(sp.stock);
+
+  const [allRows, categories, categoryCounts] = await Promise.all([
     getStockLevels(),
     getCategories(),
     prisma.category.findMany({
@@ -36,10 +51,76 @@ export default async function ProductsPage() {
     }),
   ]);
 
-  // Existing values feed the "add product" suggestions so the catalog stays tidy.
-  const packagingTypes = [...new Set(rows.map((r) => r.packagingType))].sort();
-  const variantValues = [...new Set(rows.map((r) => r.variantValue))].sort();
-  const units = [...new Set(rows.map((r) => r.unit))].sort();
+  // The suggestion lists and the filter options come from the WHOLE catalog,
+  // not the filtered view - otherwise choosing one packaging would remove every
+  // other packaging from the dropdown that chose it.
+  const packagingTypes = [...new Set(allRows.map((r) => r.packagingType))].sort();
+  const variantValues = [...new Set(allRows.map((r) => r.variantValue))].sort();
+  const units = [...new Set(allRows.map((r) => r.unit))].sort();
+
+  // Filtered here rather than in the query: the catalog is a few dozen rows
+  // that are already loaded, so a round trip per keystroke would buy nothing.
+  const needle = q.toLowerCase();
+  const rows = allRows.filter((r) => {
+    if (needle) {
+      const haystack = [r.sku, r.name, r.packagingType, r.variantValue, r.categoryName]
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(needle)) return false;
+    }
+    if (categoryParam && categoryParam !== "all" && String(r.categoryId) !== categoryParam) {
+      return false;
+    }
+    if (packagingParam && packagingParam !== "all" && r.packagingType !== packagingParam) {
+      return false;
+    }
+    if (stockParam === "in" && r.currentStock <= 0) return false;
+    if (stockParam === "out" && r.currentStock > 0) return false;
+    if (stockParam === "inactive" && r.isActive) return false;
+    return true;
+  });
+
+  const filters: FilterSpec[] = [
+    {
+      kind: "search",
+      key: "q",
+      label: "Search",
+      value: q,
+      placeholder: "Name, SKU, size, category",
+      width: "w-[280px]",
+    },
+    {
+      kind: "select",
+      key: "category",
+      label: "Category",
+      value: categoryParam ?? "all",
+      allLabel: "All categories",
+      width: "w-[200px]",
+      options: categoryCounts.map((c) => ({ value: String(c.id), label: c.name })),
+    },
+    {
+      kind: "select",
+      key: "packaging",
+      label: "Packaging",
+      value: packagingParam ?? "all",
+      allLabel: "All packaging",
+      width: "w-[180px]",
+      options: packagingTypes.map((t) => ({ value: t, label: t })),
+    },
+    {
+      kind: "select",
+      key: "stock",
+      label: "Stock",
+      value: stockParam ?? "all",
+      allLabel: "Any",
+      width: "w-[170px]",
+      options: [
+        { value: "in", label: "In stock" },
+        { value: "out", label: "Out of stock" },
+        { value: "inactive", label: "Inactive" },
+      ],
+    },
+  ];
 
   const totalStock = rows.reduce((sum, r) => sum + r.currentStock, 0);
   const stockValue = rows.reduce((sum, r) => sum + r.currentStock * (r.avgUnitCost ?? 0), 0);
@@ -59,6 +140,8 @@ export default async function ProductsPage() {
           />
         }
       />
+
+      <ListFilters filters={filters} />
 
       <div className="mb-5">
         <h2 className="mb-2 text-sm font-semibold">Categories</h2>
@@ -198,15 +281,7 @@ export default async function ProductsPage() {
   );
 }
 
-function SummaryTile({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-}) {
+function SummaryTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <Card className="p-5">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>

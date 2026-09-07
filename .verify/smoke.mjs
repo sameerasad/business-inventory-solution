@@ -292,6 +292,35 @@ const pages = [
   ],
   ["/sales?from=2020-01-01&to=2020-12-31", ["No sales match these filters"]],
   ["/sales?from=2030-01-01&to=2020-12-31", ["date filter was ignored"]],
+
+  // Every filter, actually used.
+  //
+  // These exist because a filter is a piece of SQL that only runs when someone
+  // selects it. A search clause reaching for a table the totals query never
+  // joined, or a status predicate naming an alias that only exists in the list
+  // query, is invisible until the moment a person types in the box - and then
+  // it is a 500 on a page that worked a second earlier. Fetching each page
+  // WITH its filters applied is the only thing that exercises those paths.
+  ["/bookings?q=INV", ["Bookings"]],
+  ["/bookings?q=zzzz-nothing-matches", ["Bookings"]],
+  ["/bookings?status=unpaid", ["Bookings", ">Unpaid</span>"]],
+  ["/bookings?status=paid", ["Bookings"]],
+  ["/bookings?status=partial", ["Bookings"]],
+  ["/sales?q=mango", ["Sales"]],
+  ["/sales?q=zzzz-nothing-matches", ["No sales match these filters"]],
+  ["/sales?kind=counter", ["Sales", ">Counter (cash)</span>"]],
+  ["/sales?kind=booked", ["Sales", ">On an invoice</span>"]],
+  ["/batches?q=mango", ["Batches"]],
+  ["/batches?from=2000-01-01&to=2099-12-31", ["Batches"]],
+  ["/receivables?q=a", ["Receivables"]],
+  ["/receivables?age=60%2B", ["Receivables", ">60+ days</span>"]],
+  ["/receivables?age=0-7", ["Receivables"]],
+  ["/products?q=mango", ["Products"]],
+  ["/products?stock=out", ["Products", ">Out of stock</span>"]],
+  ["/products?stock=in", ["Products"]],
+  ["/bookers?q=a", ["Bookers"]],
+  ["/areas?q=a", ["Areas"]],
+  ["/areas?q=zzzz-nothing-matches", ["Nothing matches"]],
 ];
 
 for (const [pathname, markers] of pages) {

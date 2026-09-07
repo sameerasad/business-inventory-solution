@@ -59,7 +59,11 @@ async function main() {
   // Re-adding the same shop without an address must not blank the saved one.
   const noBlank = await createShop({ areaId: area.id, name: shop.name });
   const stillThere = await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } });
-  ok("re-adding a shop with no address does not blank it", noBlank.ok && stillThere.address !== null, stillThere.address);
+  ok(
+    "re-adding a shop with no address does not blank it",
+    noBlank.ok && stillThere.address !== null,
+    stillThere.address,
+  );
 
   section("stock: two mango batches at different costs (to force a split)");
   // 100 @ 40 then 100 @ 50. A 150-unit line must span both.
@@ -101,8 +105,15 @@ async function main() {
   section("bookable products expose availability");
   const bookable = await getBookableProducts();
   const mangoAvail = bookable.find((p) => p.sku === "MNG-BTL-250")!;
-  ok("mango shows 200 available across 2 batches", mangoAvail.available === 200, mangoAvail.available);
-  ok("un-stocked product shows 0, not null", bookable.find((p) => p.sku === "PCH-BTL-500")!.available === 0);
+  ok(
+    "mango shows 200 available across 2 batches",
+    mangoAvail.available === 200,
+    mangoAvail.available,
+  );
+  ok(
+    "un-stocked product shows 0, not null",
+    bookable.find((p) => p.sku === "PCH-BTL-500")!.available === 0,
+  );
 
   section("create a 3-line booking, one line spanning two batches");
   const lines = JSON.stringify([
@@ -128,7 +139,11 @@ async function main() {
   const booking = await prisma.booking.findFirstOrThrow({
     where: { idempotencyKey: "booking-1" },
   });
-  ok("invoice number formatted INV-YYYY-NNNNN", /^INV-2026-\d{5}$/.test(booking.invoiceNo), booking.invoiceNo);
+  ok(
+    "invoice number formatted INV-YYYY-NNNNN",
+    /^INV-2026-\d{5}$/.test(booking.invoiceNo),
+    booking.invoiceNo,
+  );
 
   section("sales were captured automatically");
   const sales = await prisma.sale.findMany({
@@ -154,15 +169,26 @@ async function main() {
     "every sale row carries the booked unit price",
     mangoSales.every((s) => Number(s.salePrice) === 100),
   );
-  ok("sales inherit the area and shop", sales.every((s) => s.areaId === area.id && s.shopId === shop.id));
-  ok("sale date is the booking date", sales.every((s) => s.saleDate.toISOString().slice(0, 10) === DATE));
+  ok(
+    "sales inherit the area and shop",
+    sales.every((s) => s.areaId === area.id && s.shopId === shop.id),
+  );
+  ok(
+    "sale date is the booking date",
+    sales.every((s) => s.saleDate.toISOString().slice(0, 10) === DATE),
+  );
 
   section("stock was deducted");
   const stock = await getStockLevels();
   ok("mango 200 - 150 = 50 left", stock.find((s) => s.sku === "MNG-BTL-250")!.currentStock === 50);
   ok("apple 500 - 40 = 460 left", stock.find((s) => s.sku === "APP-TET-500")!.currentStock === 460);
-  ok("choco 1000 - 200 = 800 left", stock.find((s) => s.sku === "CHO-BAR-10")!.currentStock === 800);
-  const olderBatch = await prisma.batch.findFirstOrThrow({ where: { idempotencyKey: "bk-mango-0" } });
+  ok(
+    "choco 1000 - 200 = 800 left",
+    stock.find((s) => s.sku === "CHO-BAR-10")!.currentStock === 800,
+  );
+  const olderBatch = await prisma.batch.findFirstOrThrow({
+    where: { idempotencyKey: "bk-mango-0" },
+  });
   ok("older mango batch fully drained", olderBatch.remainingQty === 0, olderBatch.remainingQty);
 
   section("profit is exact across the batch split");
@@ -173,7 +199,11 @@ async function main() {
   //   revenue: 150*100 + 40*120 + 200*15 = 15000 + 4800 + 3000 = 22800
   const expectedRevenue = 22800;
   const kpis = await getKpis({ year: YEAR, categoryId: null, areaId: null });
-  ok(`dashboard revenue = ${expectedRevenue}`, Math.abs(kpis.year.revenue - expectedRevenue) < 0.005, kpis.year.revenue);
+  ok(
+    `dashboard revenue = ${expectedRevenue}`,
+    Math.abs(kpis.year.revenue - expectedRevenue) < 0.005,
+    kpis.year.revenue,
+  );
   ok(
     `dashboard profit = ${expectedProfit} (weighted across both mango batches)`,
     Math.abs(kpis.year.profit - expectedProfit) < 0.005,
@@ -181,11 +211,28 @@ async function main() {
   );
 
   section("bookings listing reconciles with the dashboard");
-  const list = await getBookingList({ from: null, to: null, areaId: null, bookerId: null, q: null, page: 1 });
+  const list = await getBookingList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "all",
+    q: null,
+    page: 1,
+  });
   ok("1 booking listed", list.total === 1, list.total);
   const row = list.rows[0];
-  ok("listed total matches the order value", Math.abs(row.total - expectedRevenue) < 0.005, row.total);
-  ok("listed profit matches the dashboard", Math.abs(row.profit - expectedProfit) < 0.005, row.profit);
+  ok(
+    "listed total matches the order value",
+    Math.abs(row.total - expectedRevenue) < 0.005,
+    row.total,
+  );
+  ok(
+    "listed profit matches the dashboard",
+    Math.abs(row.profit - expectedProfit) < 0.005,
+    row.profit,
+  );
   ok("line count counts 3 lines, not 4 sale rows", row.lineCount === 3, row.lineCount);
   ok("units = 390", row.units === 390, row.units);
 
@@ -193,14 +240,32 @@ async function main() {
   const invoice = await getInvoice(booking.id);
   ok("invoice found", invoice !== null);
   if (!invoice) throw new Error("no invoice");
-  ok("3 invoice lines (batch split collapsed back)", invoice.lines.length === 3, invoice.lines.length);
+  ok(
+    "3 invoice lines (batch split collapsed back)",
+    invoice.lines.length === 3,
+    invoice.lines.length,
+  );
   const mangoLine = invoice.lines.find((l) => l.sku === "MNG-BTL-250")!;
   ok("mango line shows 150, not 100 + 50", mangoLine.quantity === 150, mangoLine.quantity);
-  ok("mango line total = 15000", Math.abs(mangoLine.lineTotal - 15000) < 0.005, mangoLine.lineTotal);
-  ok("invoice subtotal matches the order", Math.abs(invoice.subtotal - expectedRevenue) < 0.005, invoice.subtotal);
+  ok(
+    "mango line total = 15000",
+    Math.abs(mangoLine.lineTotal - 15000) < 0.005,
+    mangoLine.lineTotal,
+  );
+  ok(
+    "invoice subtotal matches the order",
+    Math.abs(invoice.subtotal - expectedRevenue) < 0.005,
+    invoice.subtotal,
+  );
   ok("invoice total units = 390", invoice.totalUnits === 390, invoice.totalUnits);
-  ok("customer details on the invoice", invoice.customerName === "Al-Madina Store" && invoice.customerPhone === "0300-1234567");
-  ok("area and shop on the invoice", invoice.areaName === "Downtown" && invoice.shopName === "Central Mart");
+  ok(
+    "customer details on the invoice",
+    invoice.customerName === "Al-Madina Store" && invoice.customerPhone === "0300-1234567",
+  );
+  ok(
+    "area and shop on the invoice",
+    invoice.areaName === "Downtown" && invoice.shopName === "Central Mart",
+  );
   ok(
     "shop address reaches the invoice from the shop record",
     invoice.shopAddress === "Shop 12, Block C, Jinnah Road, Gulberg III, Lahore",
@@ -208,7 +273,11 @@ async function main() {
   );
   // The invoice is a customer document: it must not leak cost or profit.
   const serialised = JSON.stringify(invoice);
-  ok("invoice carries NO unit cost field", !serialised.includes("unitCost"), serialised.slice(0, 120));
+  ok(
+    "invoice carries NO unit cost field",
+    !serialised.includes("unitCost"),
+    serialised.slice(0, 120),
+  );
   ok("invoice carries NO profit field", !serialised.toLowerCase().includes("profit"));
 
   section("invoice PDF");
@@ -323,13 +392,20 @@ async function main() {
     }),
   );
   ok("short order rejected", !short.ok, short);
-  ok("message names the SKU and what is available", (short.message ?? "").includes("MNG-BTL-250") && (short.message ?? "").includes("50"), short.message);
+  ok(
+    "message names the SKU and what is available",
+    (short.message ?? "").includes("MNG-BTL-250") && (short.message ?? "").includes("50"),
+    short.message,
+  );
   const after = await getStockLevels();
   ok(
     "the good line was NOT written - choco stock unchanged",
     after.find((s) => s.sku === "CHO-BAR-10")!.currentStock ===
       before.find((s) => s.sku === "CHO-BAR-10")!.currentStock,
-    { before: before.find((s) => s.sku === "CHO-BAR-10")!.currentStock, after: after.find((s) => s.sku === "CHO-BAR-10")!.currentStock },
+    {
+      before: before.find((s) => s.sku === "CHO-BAR-10")!.currentStock,
+      after: after.find((s) => s.sku === "CHO-BAR-10")!.currentStock,
+    },
   );
   ok("no orphan booking row", (await prisma.booking.count()) === 1);
   ok("no orphan sale rows", (await prisma.sale.count()) === 4);
@@ -386,7 +462,10 @@ async function main() {
     }),
   );
   ok("second booking created", second.ok, second);
-  const two = await prisma.booking.findMany({ orderBy: { id: "asc" }, select: { invoiceNo: true } });
+  const two = await prisma.booking.findMany({
+    orderBy: { id: "asc" },
+    select: { invoiceNo: true },
+  });
   ok(
     "invoice numbers are sequential",
     two[0].invoiceNo === "INV-2026-00001" && two[1].invoiceNo === "INV-2026-00002",
@@ -396,12 +475,19 @@ async function main() {
   const walkInInvoice = await getInvoice(walkIn.id);
   ok("direct sale invoice says no shop", walkInInvoice!.shopName === null);
   const walkInToken = await getInvoiceShareToken(walkIn.id);
-  ok("a second booking gets a different share token", walkInToken !== null && walkInToken !== token, {
-    token,
-    walkInToken,
-  });
+  ok(
+    "a second booking gets a different share token",
+    walkInToken !== null && walkInToken !== token,
+    {
+      token,
+      walkInToken,
+    },
+  );
   const pdf2 = await renderInvoicePdf(walkInInvoice!);
-  ok("single-line invoice PDF renders", Buffer.from(pdf2.slice(0, 5)).toString("latin1") === "%PDF-");
+  ok(
+    "single-line invoice PDF renders",
+    Buffer.from(pdf2.slice(0, 5)).toString("latin1") === "%PDF-",
+  );
 
   section("cancelling a booking returns stock and stops counting");
   const cancel = await softDeleteBookingAction(
@@ -409,7 +495,11 @@ async function main() {
     fd({ id: String(booking.id), reason: "customer cancelled" }),
   );
   ok("cancelled", cancel.ok, cancel);
-  ok("message says how many units came back", (cancel.message ?? "").includes("390"), cancel.message);
+  ok(
+    "message says how many units came back",
+    (cancel.message ?? "").includes("390"),
+    cancel.message,
+  );
   const restored = await getStockLevels();
   ok("mango back to 200", restored.find((s) => s.sku === "MNG-BTL-250")!.currentStock === 200);
   ok("apple back to 500", restored.find((s) => s.sku === "APP-TET-500")!.currentStock === 500);
@@ -426,21 +516,200 @@ async function main() {
     Math.abs(kpisAfter.year.revenue - 120) < 0.005,
     kpisAfter.year.revenue,
   );
-  const listAfter = await getBookingList({ from: null, to: null, areaId: null, bookerId: null, q: null, page: 1 });
+  const listAfter = await getBookingList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "all",
+    q: null,
+    page: 1,
+  });
   ok("cancelled booking hidden from the list", listAfter.total === 2, listAfter.total);
   const cancelledInvoice = await getInvoice(booking.id);
   ok("cancelled booking still has an invoice record", cancelledInvoice !== null);
   ok("cancelled invoice is flagged", cancelledInvoice!.isDeleted === true);
-  ok("cancelled invoice has no live lines", cancelledInvoice!.lines.length === 0, cancelledInvoice!.lines.length);
+  ok(
+    "cancelled invoice has no live lines",
+    cancelledInvoice!.lines.length === 0,
+    cancelledInvoice!.lines.length,
+  );
   const pdf3 = await renderInvoicePdf(cancelledInvoice!);
-  ok("cancelled invoice still renders a PDF (watermarked)", Buffer.from(pdf3.slice(0, 5)).toString("latin1") === "%PDF-");
+  ok(
+    "cancelled invoice still renders a PDF (watermarked)",
+    Buffer.from(pdf3.slice(0, 5)).toString("latin1") === "%PDF-",
+  );
 
   section("audit trail");
-  const created = await prisma.auditLog.findFirst({ where: { entityType: "booking", action: "booking.created" } });
+  const created = await prisma.auditLog.findFirst({
+    where: { entityType: "booking", action: "booking.created" },
+  });
   ok("booking creation audited", created != null);
   ok("audit payload records the lines", JSON.stringify(created?.payload).includes("MNG-BTL-250"));
-  const cancelled = await prisma.auditLog.findFirst({ where: { entityType: "booking", action: "booking.cancelled" } });
+  const cancelled = await prisma.auditLog.findFirst({
+    where: { entityType: "booking", action: "booking.cancelled" },
+  });
   ok("cancellation audited", cancelled != null);
+
+  /* ------------------------------------------------------------- filters */
+  section("list filters");
+
+  // Derived from the rows themselves rather than from fixtures, so this states
+  // the property that matters: the filter must select exactly the rows whose
+  // badge would show that status. The badge rule is paid <= 0 is Unpaid, then
+  // paid >= total is Paid, else Partial - and the ORDER matters, because an
+  // invoice worth nothing with nothing paid is Unpaid, not Paid.
+  const CENT = 0.005;
+  const all = await getBookingList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "all",
+    q: null,
+    page: 1,
+  });
+  const badge = (r: { total: number; paid: number }) =>
+    r.paid <= CENT ? "unpaid" : r.paid >= r.total - CENT ? "paid" : "partial";
+  const ids = (rows: { id: number }[]) => rows.map((r) => r.id).sort((a, b) => a - b);
+
+  for (const want of ["unpaid", "partial", "paid"] as const) {
+    const got = await getBookingList({
+      from: null,
+      to: null,
+      areaId: null,
+      shopId: null,
+      bookerId: null,
+      status: want,
+      q: null,
+      page: 1,
+    });
+    const expected = ids(all.rows.filter((r) => badge(r) === want));
+    ok(
+      `status "${want}" selects exactly the rows whose badge says ${want}`,
+      JSON.stringify(ids(got.rows)) === JSON.stringify(expected),
+      { got: ids(got.rows), expected },
+    );
+    ok(`status "${want}" reports a matching total`, got.total === expected.length, {
+      total: got.total,
+      expected: expected.length,
+    });
+  }
+
+  ok(
+    "the three statuses together account for every booking",
+    all.rows.length > 0 &&
+      ["unpaid", "partial", "paid"].reduce(
+        (sum, w) => sum + all.rows.filter((r) => badge(r) === w).length,
+        0,
+      ) === all.rows.length,
+  );
+
+  // Search has to reach the whole row, not just the invoice number: people
+  // type whichever part they remember.
+  const named = all.rows.find((r) => (r.customerName ?? "").length >= 3);
+  if (named?.customerName) {
+    const needle = named.customerName.slice(1, 3);
+    const found = await getBookingList({
+      from: null,
+      to: null,
+      areaId: null,
+      shopId: null,
+      bookerId: null,
+      status: "all",
+      q: needle,
+      page: 1,
+    });
+    ok(
+      `searching "${needle}" finds the booking for ${named.customerName}`,
+      found.rows.some((r) => r.id === named.id),
+      { needle, ids: ids(found.rows) },
+    );
+    ok(
+      "and every row it returns matches somewhere a person can see",
+      found.rows.every((r) =>
+        [r.invoiceNo, r.customerName, r.customerPhone, r.notes, r.shopName, r.bookerName]
+          .filter((v): v is string => typeof v === "string")
+          .some((v) => v.toLowerCase().includes(needle.toLowerCase())),
+      ),
+      found.rows.map((r) => [r.invoiceNo, r.customerName, r.shopName]),
+    );
+  }
+
+  const byInvoice = await getBookingList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "all",
+    q: all.rows[0]!.invoiceNo,
+    page: 1,
+  });
+  ok(
+    "searching a whole invoice number finds that one invoice",
+    byInvoice.rows.some((r) => r.id === all.rows[0]!.id),
+    byInvoice.rows.map((r) => r.invoiceNo),
+  );
+
+  const nonsenseSearch = await getBookingList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "all",
+    q: "zzzzz-no-such-thing",
+    page: 1,
+  });
+  ok(
+    "a search that matches nothing returns nothing, and says so in the total",
+    nonsenseSearch.rows.length === 0 && nonsenseSearch.total === 0,
+    nonsenseSearch.total,
+  );
+
+  // The totals row is filtered by the same clause as the table. If these two
+  // ever drift, the summary above a filtered table describes a different set
+  // of rows than the table below it.
+  const paidOnly = await getBookingList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "paid",
+    q: null,
+    page: 1,
+  });
+  const paidRevenue = all.rows
+    .filter((r) => badge(r) === "paid")
+    .reduce((sum, r) => sum + r.total, 0);
+  ok(
+    "a filtered summary totals the filtered rows, not all of them",
+    Math.abs(paidOnly.totals.revenue - paidRevenue) < 0.01,
+    { summary: paidOnly.totals.revenue, fromRows: paidRevenue },
+  );
+
+  const withShop = all.rows.find((r) => r.shopId != null);
+  if (withShop?.shopId != null) {
+    const shopRows = await getBookingList({
+      from: null,
+      to: null,
+      areaId: null,
+      shopId: withShop.shopId,
+      bookerId: null,
+      status: "all",
+      q: null,
+      page: 1,
+    });
+    ok(
+      "filtering by shop returns only that shop's bookings",
+      shopRows.rows.length > 0 && shopRows.rows.every((r) => r.shopId === withShop.shopId),
+      shopRows.rows.map((r) => r.shopId),
+    );
+  }
 
   // Silence the unused-import warning while keeping the helper available.
   void yearRange;

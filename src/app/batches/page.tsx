@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { dateOnly, money, qty } from "@/lib/format";
+import { isDateOnly } from "@/lib/dates";
 import { getBatchList, PAGE_SIZE, type BatchStatusFilter } from "@/lib/lists";
 import { getProductOptions } from "@/lib/queries";
 
@@ -39,7 +40,15 @@ export default async function BatchesPage({
   const sp = await searchParams;
   const productParam = first(sp.product);
   const statusParam = first(sp.status);
+  const fromParam = first(sp.from);
+  const toParam = first(sp.to);
+  const q = (first(sp.q) ?? "").trim();
   const pageParam = Number.parseInt(first(sp.page) ?? "1", 10);
+
+  // A malformed date in the URL should narrow nothing rather than 500 the page.
+  const from = fromParam && isDateOnly(fromParam) ? fromParam : null;
+  const to = toParam && isDateOnly(toParam) ? toParam : null;
+  const invalidRange = from != null && to != null && from > to;
 
   const productId = productParam ? Number.parseInt(productParam, 10) : null;
   const status: BatchStatusFilter =
@@ -50,11 +59,24 @@ export default async function BatchesPage({
     getBatchList({
       productId: Number.isInteger(productId) && productId! > 0 ? productId : null,
       status,
+      from: invalidRange ? null : from,
+      to: invalidRange ? null : to,
+      q: q || null,
       page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1,
     }),
   ]);
 
   const filters: FilterSpec[] = [
+    {
+      kind: "search",
+      key: "q",
+      label: "Search",
+      value: q,
+      placeholder: "Product, SKU, notes",
+      width: "w-[260px]",
+    },
+    { kind: "date", key: "from", label: "Received from", value: from ?? "", width: "w-[170px]" },
+    { kind: "date", key: "to", label: "Received to", value: to ?? "", width: "w-[170px]" },
     {
       kind: "select",
       key: "product",
@@ -93,7 +115,11 @@ export default async function BatchesPage({
         }
       />
 
-      <Suspense fallback={<FilterBarSkeleton className="mb-4 h-[76px] animate-pulse rounded-lg border bg-card" />}>
+      <Suspense
+        fallback={
+          <FilterBarSkeleton className="mb-4 h-[76px] animate-pulse rounded-lg border bg-card" />
+        }
+      >
         <ListFilters filters={filters} />
       </Suspense>
 

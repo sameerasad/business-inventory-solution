@@ -85,9 +85,15 @@ async function main() {
   );
   ok("booker updated", renamed.ok, renamed);
   const afterEdit = await prisma.booker.findUniqueOrThrow({ where: { id: imran.id } });
-  ok("name and phone changed", afterEdit.name === "Imran Ali Khan" && afterEdit.phone === "0300-9998887");
+  ok(
+    "name and phone changed",
+    afterEdit.name === "Imran Ali Khan" && afterEdit.phone === "0300-9998887",
+  );
 
-  const second = await createBookerAction(emptyActionState, fd({ name: "Bilal Ahmed", code: "B-07" }));
+  const second = await createBookerAction(
+    emptyActionState,
+    fd({ name: "Bilal Ahmed", code: "B-07" }),
+  );
   ok("second booker created", second.ok, second);
   const bilal = await prisma.booker.findFirstOrThrow({ where: { name: "Bilal Ahmed" } });
 
@@ -117,7 +123,9 @@ async function main() {
   );
   await deleteBookerAction(
     emptyActionState,
-    fd({ id: String((await prisma.booker.findFirstOrThrow({ where: { name: "Typo Person" } })).id) }),
+    fd({
+      id: String((await prisma.booker.findFirstOrThrow({ where: { name: "Typo Person" } })).id),
+    }),
   );
 
   section("attribution");
@@ -160,11 +168,29 @@ async function main() {
   }
 
   const list = await getBookingList({
-    from: null, to: null, areaId: null, bookerId: null, q: null, page: 1,
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "all",
+    q: null,
+    page: 1,
   });
-  ok("bookings list names the booker", list.rows.every((r) => r.bookerName !== null), list.rows.map((r) => r.bookerName));
+  ok(
+    "bookings list names the booker",
+    list.rows.every((r) => r.bookerName !== null),
+    list.rows.map((r) => r.bookerName),
+  );
   const imranOnly = await getBookingList({
-    from: null, to: null, areaId: null, bookerId: imran.id, q: null, page: 1,
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: imran.id,
+    status: "all",
+    q: null,
+    page: 1,
   });
   ok("the booker filter works", imranOnly.total === 2, imranOnly.total);
 
@@ -183,7 +209,11 @@ async function main() {
   ok("Bilal: 2 bookings", rBilal.bookings === 2, rBilal.bookings);
   ok("Bilal: booked value 18,000", near(rBilal.bookedValue, 18000), rBilal.bookedValue);
   ok("Bilal: covers 2 areas", rBilal.areasCovered === 2, rBilal.areasCovered);
-  ok("sorted by booked value, so Bilal leads", perf.rows[0].id === bilal.id, perf.rows.map((r) => r.name));
+  ok(
+    "sorted by booked value, so Bilal leads",
+    perf.rows[0].id === bilal.id,
+    perf.rows.map((r) => r.name),
+  );
   ok("nothing collected yet", near(perf.totals.collected, 0), perf.totals);
   ok("all 27,000 outstanding", near(perf.totals.outstanding, 27000), perf.totals);
   ok("collection rate is 0%", near(rImran.collectionRate ?? -1, 0), rImran.collectionRate);
@@ -217,7 +247,11 @@ async function main() {
     near(rImran2.avgDaysToSettle ?? -1, 4),
     rImran2.avgDaysToSettle,
   );
-  ok("Bilal has no settled order, so no average", rBilal2.avgDaysToSettle === null, rBilal2.avgDaysToSettle);
+  ok(
+    "Bilal has no settled order, so no average",
+    rBilal2.avgDaysToSettle === null,
+    rBilal2.avgDaysToSettle,
+  );
 
   section("area filter narrows to that area's work");
   const dtOnly = await getBookerPerformance({ year: YEAR, areaId: downtown.id });
@@ -259,15 +293,25 @@ async function main() {
   ok("its 450 is reported as unattributed", near(perf.totals.unattributed, 450), perf.totals);
   ok(
     "and is not credited to anyone",
-    near(perf.rows.reduce((s, r) => s + r.bookedValue, 0), 27000),
+    near(
+      perf.rows.reduce((s, r) => s + r.bookedValue, 0),
+      27000,
+    ),
     perf.rows.map((r) => r.bookedValue),
   );
 
   section("a booker with bookings cannot be removed");
   const blocked = await deleteBookerAction(emptyActionState, fd({ id: String(imran.id) }));
   ok("removal refused", !blocked.ok, blocked);
-  ok("the message points at retiring instead", (blocked.message ?? "").toLowerCase().includes("retire"), blocked.message);
-  ok("still present", (await prisma.booker.findUniqueOrThrow({ where: { id: imran.id } })).isDeleted === false);
+  ok(
+    "the message points at retiring instead",
+    (blocked.message ?? "").toLowerCase().includes("retire"),
+    blocked.message,
+  );
+  ok(
+    "still present",
+    (await prisma.booker.findUniqueOrThrow({ where: { id: imran.id } })).isDeleted === false,
+  );
 
   section("cancelling a booking removes it from the booker's numbers");
   const before = (await getBookerPerformance({ year: YEAR, areaId: null })).rows.find(
@@ -275,14 +319,29 @@ async function main() {
   )!;
   await softDeleteBookingAction(
     emptyActionState,
-    fd({ id: String((await prisma.booking.findFirstOrThrow({ where: { idempotencyKey: "bkr-imran-1" } })).id) }),
+    fd({
+      id: String(
+        (await prisma.booking.findFirstOrThrow({ where: { idempotencyKey: "bkr-imran-1" } })).id,
+      ),
+    }),
   );
   const after = (await getBookerPerformance({ year: YEAR, areaId: null })).rows.find(
     (r) => r.id === imran.id,
   )!;
-  ok("bookings count drops", after.bookings === before.bookings - 1, [before.bookings, after.bookings]);
-  ok("booked value drops by 4,500", near(after.bookedValue, before.bookedValue - 4500), after.bookedValue);
-  ok("collection rate recomputes to 100%", near(after.collectionRate ?? 0, 100), after.collectionRate);
+  ok("bookings count drops", after.bookings === before.bookings - 1, [
+    before.bookings,
+    after.bookings,
+  ]);
+  ok(
+    "booked value drops by 4,500",
+    near(after.bookedValue, before.bookedValue - 4500),
+    after.bookedValue,
+  );
+  ok(
+    "collection rate recomputes to 100%",
+    near(after.collectionRate ?? 0, 100),
+    after.collectionRate,
+  );
 
   section("territory: assigning areas");
   const south = await prisma.area.findFirstOrThrow({ where: { name: "South Zone" } });
@@ -422,7 +481,11 @@ async function main() {
   const coverage2 = await getAreaCoverage({ year: YEAR });
   ok("every live area has a row", coverage2.length >= 4, coverage2.length);
   const dtRow = coverage2.find((c) => c.areaName === "Downtown")!;
-  ok("Downtown names Imran", dtRow.bookers.some((b) => b.id === imran.id), dtRow.bookers);
+  ok(
+    "Downtown names Imran",
+    dtRow.bookers.some((b) => b.id === imran.id),
+    dtRow.bookers,
+  );
   ok(
     "Bilal is no longer on Downtown after the replace",
     !dtRow.bookers.some((b) => b.id === bilal.id),
@@ -483,11 +546,7 @@ async function main() {
 
   const backlog = await getUnattributedBookings();
   ok("the backlog is found", backlog.bookings === 2, backlog);
-  ok(
-    "including the cancelled one, counted separately",
-    backlog.cancelled === 1,
-    backlog.cancelled,
-  );
+  ok("including the cancelled one, counted separately", backlog.cancelled === 1, backlog.cancelled);
   ok(
     "its value is the live 450 only - a cancelled order has no sales left",
     near(backlog.value, 450),
@@ -501,7 +560,10 @@ async function main() {
   );
   ok(
     "and the areas they were taken in are reported",
-    backlog.areas.map((x) => x.name).sort().join(",") === "Downtown,South Zone",
+    backlog.areas
+      .map((x) => x.name)
+      .sort()
+      .join(",") === "Downtown,South Zone",
     backlog.areas,
   );
 
@@ -513,10 +575,7 @@ async function main() {
     assignAreas: false,
   });
   ok("both bookings were attributed", result.bookings === 2, result);
-  ok(
-    "nothing is unattributed any more",
-    (await getUnattributedBookings()).bookings === 0,
-  );
+  ok("nothing is unattributed any more", (await getUnattributedBookings()).bookings === 0);
 
   let perfB = await getBookerPerformance({ year: YEAR, areaId: null });
   const imranAfter = perfB.rows.find((r) => r.id === imran.id)!;

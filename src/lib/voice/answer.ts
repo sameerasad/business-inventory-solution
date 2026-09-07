@@ -88,7 +88,7 @@ export async function answerQuery(question: Question): Promise<VoiceAnswer> {
 
   if (metric === "outstanding" || metric === "collected") {
     // Receivables is a position, not a period: what is owed is owed today.
-    const receivables = await getReceivables({ areaId: null });
+    const receivables = await getReceivables({ areaId: null, bookerId: null, age: "all", q: null });
     const isOutstanding = metric === "outstanding";
     const value = isOutstanding ? receivables.totals.outstanding : receivables.totals.collected;
     const label = isOutstanding ? "Outstanding" : "Collected";

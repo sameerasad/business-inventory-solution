@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { dateOnly, money } from "@/lib/format";
-import { getReceivables } from "@/lib/bookings";
+import { getReceivables, type AgeFilter } from "@/lib/bookings";
 import { prisma } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Receivables" };
@@ -44,18 +44,45 @@ export default async function ReceivablesPage({
 }) {
   const sp = await searchParams;
   const areaParam = first(sp.area);
-  const areaId = areaParam && areaParam !== "all" ? Number.parseInt(areaParam, 10) : null;
+  const bookerParam = first(sp.booker);
+  const ageParam = first(sp.age);
+  const q = (first(sp.q) ?? "").trim();
 
-  const [areas, data] = await Promise.all([
+  const areaId = areaParam && areaParam !== "all" ? Number.parseInt(areaParam, 10) : null;
+  const bookerId = bookerParam && bookerParam !== "all" ? Number.parseInt(bookerParam, 10) : null;
+  const age: AgeFilter =
+    ageParam === "0-7" || ageParam === "8-30" || ageParam === "31-60" || ageParam === "60+"
+      ? ageParam
+      : "all";
+
+  const [areas, bookers, data] = await Promise.all([
     prisma.area.findMany({
       where: { isDeleted: false },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
-    getReceivables({ areaId: Number.isInteger(areaId) && areaId! > 0 ? areaId : null }),
+    prisma.booker.findMany({
+      where: { isDeleted: false },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    getReceivables({
+      areaId: Number.isInteger(areaId) && areaId! > 0 ? areaId : null,
+      bookerId: Number.isInteger(bookerId) && bookerId! > 0 ? bookerId : null,
+      age,
+      q: q || null,
+    }),
   ]);
 
   const filters: FilterSpec[] = [
+    {
+      kind: "search",
+      key: "q",
+      label: "Search",
+      value: q,
+      placeholder: "Invoice, customer, shop, phone",
+      width: "w-[280px]",
+    },
     {
       kind: "select",
       key: "area",
@@ -64,6 +91,29 @@ export default async function ReceivablesPage({
       allLabel: "All areas",
       width: "w-[200px]",
       options: areas.map((a) => ({ value: String(a.id), label: a.name })),
+    },
+    {
+      kind: "select",
+      key: "booker",
+      label: "Booker",
+      value: bookerParam ?? "all",
+      allLabel: "All bookers",
+      width: "w-[180px]",
+      options: bookers.map((b) => ({ value: String(b.id), label: b.name })),
+    },
+    {
+      kind: "select",
+      key: "age",
+      label: "Age",
+      value: age,
+      allLabel: "Any age",
+      width: "w-[160px]",
+      options: [
+        { value: "0-7", label: "0-7 days" },
+        { value: "8-30", label: "8-30 days" },
+        { value: "31-60", label: "31-60 days" },
+        { value: "60+", label: "60+ days" },
+      ],
     },
   ];
 
@@ -167,9 +217,7 @@ export default async function ReceivablesPage({
                     {dateOnly(row.bookingDate)}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={ageTone(row.daysOutstanding)}>
-                      {row.daysOutstanding}d
-                    </Badge>
+                    <Badge variant={ageTone(row.daysOutstanding)}>{row.daysOutstanding}d</Badge>
                   </TableCell>
                   <TableCell className="whitespace-nowrap font-medium">
                     {row.customerName ?? (
@@ -224,15 +272,7 @@ export default async function ReceivablesPage({
   );
 }
 
-function Tile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "gain" | "loss";
-}) {
+function Tile({ label, value, tone }: { label: string; value: string; tone?: "gain" | "loss" }) {
   return (
     <Card className="p-5">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>

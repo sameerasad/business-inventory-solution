@@ -70,7 +70,10 @@ async function saleRow(id: number) {
     from: null,
     to: null,
     areaId: null,
+    shopId: null,
     productId: null,
+    kind: "all",
+    q: null,
     page: 1,
   });
   return list.rows.find((r) => r.id === id) ?? null;

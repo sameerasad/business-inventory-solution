@@ -17,6 +17,9 @@ export type BatchStatusFilter = "all" | "active" | "depleted";
 export type BatchListFilters = {
   productId: number | null;
   status: BatchStatusFilter;
+  from: string | null;
+  to: string | null;
+  q: string | null;
   page: number;
 };
 
@@ -45,10 +48,29 @@ export async function getBatchList(filters: BatchListFilters): Promise<{
   page: number;
   pageCount: number;
 }> {
+  for (const value of [filters.from, filters.to]) {
+    if (value) parseDateOnly(value);
+  }
+
   const where: Prisma.BatchWhereInput = { isDeleted: false };
   if (filters.productId != null) where.productId = filters.productId;
   if (filters.status === "active") where.remainingQty = { gt: 0 };
   if (filters.status === "depleted") where.remainingQty = { lte: 0 };
+  if (filters.from || filters.to) {
+    where.receivedDate = {
+      ...(filters.from ? { gte: new Date(`${filters.from}T00:00:00.000Z`) } : {}),
+      ...(filters.to ? { lte: new Date(`${filters.to}T00:00:00.000Z`) } : {}),
+    };
+  }
+  if (filters.q) {
+    // What is readable on the row: the product it is stock of, and the note
+    // written when it was received.
+    where.OR = [
+      { product: { name: { contains: filters.q, mode: "insensitive" } } },
+      { product: { sku: { contains: filters.q, mode: "insensitive" } } },
+      { notes: { contains: filters.q, mode: "insensitive" } },
+    ];
+  }
 
   const page = Math.max(1, filters.page);
   const [total, batches] = await Promise.all([
@@ -100,11 +122,17 @@ export async function getBatchList(filters: BatchListFilters): Promise<{
 
 /* --------------------------------------------------------------------- sales */
 
+/** A sale is either a line of an invoice or a cash sale over the counter. */
+export type SaleKindFilter = "all" | "booked" | "counter";
+
 export type SaleListFilters = {
   from: string | null;
   to: string | null;
   areaId: number | null;
+  shopId: number | null;
   productId: number | null;
+  kind: SaleKindFilter;
+  q: string | null;
   page: number;
 };
 
@@ -142,14 +170,32 @@ export type SaleRow = {
 };
 
 function saleWhere(filters: SaleListFilters): Prisma.Sql {
-  const parts: Prisma.Sql[] = [
-    Prisma.sql`s.is_deleted = false`,
-    Prisma.sql`b.is_deleted = false`,
-  ];
+  const parts: Prisma.Sql[] = [Prisma.sql`s.is_deleted = false`, Prisma.sql`b.is_deleted = false`];
   if (filters.from) parts.push(Prisma.sql`s.sale_date >= ${filters.from}::date`);
   if (filters.to) parts.push(Prisma.sql`s.sale_date <= ${filters.to}::date`);
   if (filters.areaId != null) parts.push(Prisma.sql`s.area_id = ${filters.areaId}`);
+  if (filters.shopId != null) parts.push(Prisma.sql`s.shop_id = ${filters.shopId}`);
   if (filters.productId != null) parts.push(Prisma.sql`s.product_id = ${filters.productId}`);
+
+  // booking_id is the whole distinction: a line of an invoice has one, a cash
+  // sale over the counter does not.
+  if (filters.kind === "booked") parts.push(Prisma.sql`s.booking_id IS NOT NULL`);
+  if (filters.kind === "counter") parts.push(Prisma.sql`s.booking_id IS NULL`);
+
+  if (filters.q) {
+    const like = `%${filters.q}%`;
+    parts.push(
+      Prisma.sql`(
+        p.name ILIKE ${like}
+        OR p.sku ILIKE ${like}
+        OR a.name ILIKE ${like}
+        OR COALESCE(sh.name, '') ILIKE ${like}
+        OR COALESCE(bk.invoice_no, '') ILIKE ${like}
+        OR COALESCE(bk.customer_name, '') ILIKE ${like}
+        OR COALESCE(s.notes, '') ILIKE ${like}
+      )`,
+    );
+  }
   return Prisma.sql`WHERE ${Prisma.join(parts, " AND ")}`;
 }
 
@@ -224,6 +270,9 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
         FROM sales s
         JOIN batches b  ON b.id = s.batch_id
         JOIN products p ON p.id = s.product_id
+        JOIN areas a    ON a.id = s.area_id
+        LEFT JOIN shops sh ON sh.id = s.shop_id
+        LEFT JOIN bookings bk ON bk.id = s.booking_id
         ${clause}
       `,
     ),

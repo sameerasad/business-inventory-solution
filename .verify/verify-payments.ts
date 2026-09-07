@@ -6,11 +6,7 @@ import { prisma } from "@/lib/db";
 import { emptyActionState } from "@/lib/validations";
 import { createBatchAction } from "@/actions/batches";
 import { createBookingAction } from "@/actions/bookings";
-import {
-  deletePaymentAction,
-  getPaymentDetails,
-  recordPaymentAction,
-} from "@/actions/payments";
+import { deletePaymentAction, getPaymentDetails, recordPaymentAction } from "@/actions/payments";
 import {
   getBookingBalance,
   getBookingList,
@@ -121,9 +117,11 @@ async function main() {
   ok("outstanding equals the total", Math.abs(r0.totals.outstanding - TOTAL) < 0.005, r0.totals);
   ok("collected is zero", r0.totals.collected === 0, r0.totals.collected);
   ok("invoiced equals the total", Math.abs(r0.totals.invoiced - TOTAL) < 0.005, r0.totals);
-  ok("aging buckets sum to the outstanding total",
+  ok(
+    "aging buckets sum to the outstanding total",
     Math.abs(r0.buckets.reduce((s, b) => s + b.amount, 0) - TOTAL) < 0.005,
-    r0.buckets);
+    r0.buckets,
+  );
 
   section("first instalment: partial");
   const p1 = await recordPaymentAction(
@@ -174,7 +172,11 @@ async function main() {
   ok("more than the balance is rejected", !over.ok, over);
   ok("the error names the balance", (over.message ?? "").includes("25000"), over.message);
   const bAfterOver = await getBookingBalance(booking.id);
-  ok("nothing was recorded", bAfterOver !== null && Math.abs(bAfterOver.paid - 20000) < 0.005, bAfterOver);
+  ok(
+    "nothing was recorded",
+    bAfterOver !== null && Math.abs(bAfterOver.paid - 20000) < 0.005,
+    bAfterOver,
+  );
 
   section("validation");
   const zero = await recordPaymentAction(
@@ -205,7 +207,11 @@ async function main() {
   );
   ok("replay reports success", replay.ok, replay);
   const bReplay = await getBookingBalance(booking.id);
-  ok("the money was not taken twice", bReplay !== null && Math.abs(bReplay.paid - 20000) < 0.005, bReplay);
+  ok(
+    "the money was not taken twice",
+    bReplay !== null && Math.abs(bReplay.paid - 20000) < 0.005,
+    bReplay,
+  );
 
   section("settling the balance");
   const p2 = await recordPaymentAction(
@@ -219,7 +225,11 @@ async function main() {
     }),
   );
   ok("second instalment recorded", p2.ok, p2);
-  ok("message says fully paid", (p2.message ?? "").toLowerCase().includes("fully paid"), p2.message);
+  ok(
+    "message says fully paid",
+    (p2.message ?? "").toLowerCase().includes("fully paid"),
+    p2.message,
+  );
   const b2 = await getBookingBalance(booking.id);
   ok("balance is zero", b2 !== null && b2.balance < 0.005, b2);
   ok("status is paid", b2?.status === "paid", b2?.status);
@@ -245,10 +255,18 @@ async function main() {
 
   section("the invoice shows paid and balance");
   const invoice = await getInvoice(booking.id);
-  ok("invoice paid is the full total", invoice !== null && Math.abs(invoice.paid - TOTAL) < 0.005, invoice?.paid);
+  ok(
+    "invoice paid is the full total",
+    invoice !== null && Math.abs(invoice.paid - TOTAL) < 0.005,
+    invoice?.paid,
+  );
   ok("invoice balance is zero", invoice !== null && invoice.balance < 0.005, invoice?.balance);
   const paidPdf = pdfText(await renderInvoicePdf(invoice!));
-  ok('a settled invoice says "PAID IN FULL"', paidPdf.includes("PAID IN FULL"), paidPdf.slice(0, 200));
+  ok(
+    'a settled invoice says "PAID IN FULL"',
+    paidPdf.includes("PAID IN FULL"),
+    paidPdf.slice(0, 200),
+  );
   ok("still no cost or profit wording", !/\b(cost|profit|margin)\b/i.test(paidPdf));
 
   section("reversing a payment");
@@ -275,10 +293,23 @@ async function main() {
 
   const unpaidInvoice = await getInvoice(booking.id);
   const partPdf = pdfText(await renderInvoicePdf(unpaidInvoice!));
-  ok('a part-paid invoice says "BALANCE DUE"', partPdf.includes("BALANCE DUE"), partPdf.slice(0, 200));
+  ok(
+    'a part-paid invoice says "BALANCE DUE"',
+    partPdf.includes("BALANCE DUE"),
+    partPdf.slice(0, 200),
+  );
 
   section("bookings list carries the money picture");
-  const list = await getBookingList({ from: null, to: null, areaId: null, bookerId: null, q: null, page: 1 });
+  const list = await getBookingList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "all",
+    q: null,
+    page: 1,
+  });
   const row = list.rows.find((r) => r.id === booking.id)!;
   ok("row total", Math.abs(row.total - TOTAL) < 0.005, row.total);
   ok("row paid", Math.abs(row.paid - 25000) < 0.005, row.paid);
@@ -305,7 +336,11 @@ async function main() {
     (await prisma.sale.findUniqueOrThrow({ where: { id: liveSale.id } })).isDeleted === false,
   );
   const noAnomaly = await getReceivables();
-  ok("no anomalies while everything reconciles", noAnomaly.anomalies.length === 0, noAnomaly.anomalies);
+  ok(
+    "no anomalies while everything reconciles",
+    noAnomaly.anomalies.length === 0,
+    noAnomaly.anomalies,
+  );
   ok(
     "collected never exceeds invoiced",
     noAnomaly.totals.collected <= noAnomaly.totals.invoiced + 0.005,
@@ -347,7 +382,11 @@ async function main() {
     (await prisma.payment.count({ where: { bookingId: booking.id, isDeleted: false } })) === 0,
   );
   const afterCancelR = await getReceivables();
-  ok("cancelling leaves no anomaly behind", afterCancelR.anomalies.length === 0, afterCancelR.anomalies);
+  ok(
+    "cancelling leaves no anomaly behind",
+    afterCancelR.anomalies.length === 0,
+    afterCancelR.anomalies,
+  );
   ok("and no collected money", afterCancelR.totals.collected === 0, afterCancelR.totals);
 
   section("a cancelled booking takes no payment");

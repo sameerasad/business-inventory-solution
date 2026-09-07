@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Loader2, X } from "lucide-react";
+import { Loader2, Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +33,72 @@ export type FilterSpec =
       label: string;
       value: string;
       width?: string;
+    }
+  | {
+      kind: "search";
+      key: string;
+      label: string;
+      value: string;
+      /** Shown inside the empty box: say what it actually searches. */
+      placeholder?: string;
+      width?: string;
     };
+
+/**
+ * A text box that waits for you to stop typing.
+ *
+ * Two things it has to get right. Typing must feel immediate, so the text is
+ * local state rather than the URL - a round trip per keystroke would fight the
+ * keyboard. And the box must follow the URL when the URL changes from
+ * somewhere else: the Clear button, a shared link, the back button. Hence the
+ * value it is given is copied into local state whenever it changes, and the
+ * debounce is skipped when the two already agree, which is also what stops the
+ * two from chasing each other.
+ */
+function SearchBox({
+  id,
+  value,
+  placeholder,
+  onCommit,
+}: {
+  id: string;
+  value: string;
+  placeholder?: string;
+  onCommit: (value: string | null) => void;
+}) {
+  const [text, setText] = useState(value);
+
+  useEffect(() => {
+    setText(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (text.trim() === value) return;
+    const timer = setTimeout(() => onCommit(text.trim() || null), 350);
+    return () => clearTimeout(timer);
+  }, [text, value, onCommit]);
+
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        id={id}
+        type="search"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter should not wait out the debounce, and must not submit
+          // anything: this row sits above a table, not inside a form.
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          onCommit(text.trim() || null);
+        }}
+        placeholder={placeholder ?? "Search"}
+        className="pl-8"
+      />
+    </div>
+  );
+}
 
 /**
  * The filter row above a table. Selections live in the URL so the server
@@ -69,17 +134,15 @@ export function ListFilters({ filters }: { filters: FilterSpec[] }) {
           <div className="space-y-1.5">
             <Label htmlFor={`filter-${filter.key}`}>{filter.label}</Label>
             {filter.kind === "select" ? (
-              <Select
-                value={filter.value || ALL}
-                onValueChange={(v) => setParam(filter.key, v)}
-              >
+              <Select value={filter.value || ALL} onValueChange={(v) => setParam(filter.key, v)}>
                 <SelectTrigger id={`filter-${filter.key}`}>
                   <SelectValueLabel
                     label={
                       !filter.value || filter.value === ALL
                         ? (filter.allLabel ?? "All")
                         : (filter.options.find((o) => o.value === filter.value)?.label ??
-                          (filter.allLabel ?? "All"))
+                          filter.allLabel ??
+                          "All")
                     }
                   />
                 </SelectTrigger>
@@ -92,6 +155,13 @@ export function ListFilters({ filters }: { filters: FilterSpec[] }) {
                   ))}
                 </SelectContent>
               </Select>
+            ) : filter.kind === "search" ? (
+              <SearchBox
+                id={`filter-${filter.key}`}
+                value={filter.value}
+                placeholder={filter.placeholder}
+                onCommit={(v) => setParam(filter.key, v)}
+              />
             ) : (
               <Input
                 id={`filter-${filter.key}`}

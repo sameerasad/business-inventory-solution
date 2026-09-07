@@ -82,6 +82,7 @@ export type BookerRow = {
 export async function getBookerPerformance(filters: {
   year: number;
   areaId: number | null;
+  q?: string | null;
 }): Promise<{
   rows: BookerRow[];
   totals: {
@@ -98,7 +99,7 @@ export async function getBookerPerformance(filters: {
   const areaClause =
     filters.areaId != null ? Prisma.sql`AND bk.area_id = ${filters.areaId}` : Prisma.empty;
 
-  const rows = await prisma.$queryRaw<BookerRow[]>(Prisma.sql`
+  const allRows = await prisma.$queryRaw<BookerRow[]>(Prisma.sql`
     WITH assignments AS (
       -- A deleted area is not a territory any more, so it is dropped here once
       -- rather than being filtered at every use below.
@@ -215,6 +216,18 @@ export async function getBookerPerformance(filters: {
       ${areaClause}
   `);
 
+  // Narrowed before the totals are summed, not after, so the figures above
+  // the table always describe the rows in it. A handful of bookers is not
+  // worth a second query.
+  const needle = (filters.q ?? "").trim().toLowerCase();
+  const rows = needle
+    ? allRows.filter((r) =>
+        [r.name, r.code, r.phone, r.notes]
+          .filter((v): v is string => typeof v === "string")
+          .some((v) => v.toLowerCase().includes(needle)),
+      )
+    : allRows;
+
   return {
     rows,
     totals: {
@@ -232,7 +245,9 @@ export async function getBookerPerformance(filters: {
  * the question "is anyone visiting the north side?", which a single count
  * cannot answer.
  */
-export async function getBookerCoverage(filters: { year: number }): Promise<
+export async function getBookerCoverage(filters: {
+  year: number;
+}): Promise<
   { bookerId: number; bookerName: string; areaName: string; shops: number; value: number }[]
 > {
   const { start, end } = yearRange(filters.year);

@@ -52,6 +52,7 @@ export default async function BookersPage({
   const sp = await searchParams;
   const yearParam = parseId(first(sp.year));
   const areaParam = first(sp.area);
+  const q = (first(sp.q) ?? "").trim();
 
   const [years, areas] = await Promise.all([
     getCashYears(),
@@ -64,7 +65,7 @@ export default async function BookersPage({
   const year = yearParam && years.includes(yearParam) ? yearParam : (years[0] ?? currentYear());
 
   const [perf, uncovered, unassigned, bookers] = await Promise.all([
-    getBookerPerformance({ year, areaId: parseId(areaParam) }),
+    getBookerPerformance({ year, areaId: parseId(areaParam), q: q || null }),
     getUncoveredAreas({ year }),
     getUnassignedAreas(),
     prisma.booker.findMany({
@@ -88,6 +89,14 @@ export default async function BookersPage({
   ]);
 
   const filters: FilterSpec[] = [
+    {
+      kind: "search",
+      key: "q",
+      label: "Search",
+      value: q,
+      placeholder: "Name or phone",
+      width: "w-[240px]",
+    },
     {
       kind: "select",
       key: "year",
@@ -151,7 +160,9 @@ export default async function BookersPage({
 
       {uncovered.length > 0 ? (
         <Alert tone="error" className="mb-4">
-          <strong>No orders at all from {uncovered.length} area(s) in {year}:</strong>{" "}
+          <strong>
+            No orders at all from {uncovered.length} area(s) in {year}:
+          </strong>{" "}
           {uncovered.join(", ")}. Either nobody is covering them or they are no longer worth
           keeping.
         </Alert>
@@ -315,15 +326,7 @@ export default async function BookersPage({
   );
 }
 
-function Tile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "gain" | "loss";
-}) {
+function Tile({ label, value, tone }: { label: string; value: string; tone?: "gain" | "loss" }) {
   return (
     <Card className="p-5">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>

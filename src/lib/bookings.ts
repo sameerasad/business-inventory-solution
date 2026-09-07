@@ -6,11 +6,16 @@ export const BOOKINGS_PAGE_SIZE = 50;
 
 /* ------------------------------------------------------------------ listing */
 
+/** Exactly the three states the badge on the list shows. */
+export type PaymentStatusFilter = "all" | "unpaid" | "partial" | "paid";
+
 export type BookingListFilters = {
   from: string | null;
   to: string | null;
   areaId: number | null;
+  shopId: number | null;
   bookerId: number | null;
+  status: PaymentStatusFilter;
   q: string | null;
   page: number;
 };
@@ -46,11 +51,42 @@ function bookingWhere(filters: BookingListFilters): Prisma.Sql {
   if (filters.from) parts.push(Prisma.sql`b.booking_date >= ${filters.from}::date`);
   if (filters.to) parts.push(Prisma.sql`b.booking_date <= ${filters.to}::date`);
   if (filters.areaId != null) parts.push(Prisma.sql`b.area_id = ${filters.areaId}`);
+  if (filters.shopId != null) parts.push(Prisma.sql`b.shop_id = ${filters.shopId}`);
   if (filters.bookerId != null) parts.push(Prisma.sql`b.booker_id = ${filters.bookerId}`);
+
+  // The same three cases the badge draws, in the same order, including the
+  // order itself: an invoice worth nothing that has been paid nothing is
+  // unpaid, not paid, because the first test wins. If these two ever disagree
+  // the list will filter to rows whose badge says something else.
+  if (filters.status === "unpaid") {
+    parts.push(Prisma.sql`COALESCE(pay.paid, 0) <= 0.005`);
+  } else if (filters.status === "paid") {
+    parts.push(
+      Prisma.sql`COALESCE(pay.paid, 0) > 0.005
+        AND COALESCE(pay.paid, 0) >= COALESCE(agg.total, 0) - 0.005`,
+    );
+  } else if (filters.status === "partial") {
+    parts.push(
+      Prisma.sql`COALESCE(pay.paid, 0) > 0.005
+        AND COALESCE(pay.paid, 0) < COALESCE(agg.total, 0) - 0.005`,
+    );
+  }
+
   if (filters.q) {
     const like = `%${filters.q}%`;
+    // Everything on the row that a person can read, because the box is one box
+    // and they will type whichever of these they remember - an invoice number,
+    // half a shop name, the last digits of a phone.
     parts.push(
-      Prisma.sql`(b.invoice_no ILIKE ${like} OR COALESCE(b.customer_name, '') ILIKE ${like})`,
+      Prisma.sql`(
+        b.invoice_no ILIKE ${like}
+        OR COALESCE(b.customer_name, '') ILIKE ${like}
+        OR COALESCE(b.customer_phone, '') ILIKE ${like}
+        OR COALESCE(b.notes, '') ILIKE ${like}
+        OR COALESCE(sh.name, '') ILIKE ${like}
+        OR COALESCE(sh.phone, '') ILIKE ${like}
+        OR COALESCE(bo.name, '') ILIKE ${like}
+      )`,
     );
   }
   return Prisma.sql`WHERE ${Prisma.join(parts, " AND ")}`;
@@ -133,22 +169,25 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
       Prisma.sql`
         SELECT
           COUNT(*)::int AS total,
-          COALESCE(SUM(t.revenue), 0)::float8 AS revenue,
-          COALESCE(SUM(t.profit), 0)::float8  AS profit,
-          COALESCE(SUM(t.units), 0)::int      AS units,
+          COALESCE(SUM(agg.revenue), 0)::float8 AS revenue,
+          COALESCE(SUM(agg.profit), 0)::float8  AS profit,
+          COALESCE(SUM(agg.units), 0)::int      AS units,
           COALESCE(SUM(pay.paid), 0)::float8  AS collected
         FROM bookings b
+        LEFT JOIN shops sh ON sh.id = b.shop_id
+        LEFT JOIN bookers bo ON bo.id = b.booker_id
         LEFT JOIN (
           SELECT
             s.booking_id,
             SUM(s.sale_price * s.quantity)                 AS revenue,
             SUM((s.sale_price - bt.unit_cost) * s.quantity) AS profit,
-            SUM(s.quantity)                                AS units
+            SUM(s.quantity)                                AS units,
+            SUM(s.sale_price * s.quantity)                 AS total
           FROM sales s
           JOIN batches bt ON bt.id = s.batch_id
           WHERE s.is_deleted = false AND bt.is_deleted = false AND s.booking_id IS NOT NULL
           GROUP BY s.booking_id
-        ) t ON t.booking_id = b.id
+        ) agg ON agg.booking_id = b.id
         LEFT JOIN (
           SELECT p.booking_id, SUM(p.amount) AS paid
           FROM payments p WHERE p.is_deleted = false
@@ -458,7 +497,26 @@ export type PaymentAnomaly = {
   excess: number;
 };
 
-export async function getReceivables(filters: { areaId: number | null } = { areaId: null }): Promise<{
+/** The aging buckets a collections list is normally read in. */
+export type AgeFilter = "all" | "0-7" | "8-30" | "31-60" | "60+";
+
+const AGE_RANGES: Record<Exclude<AgeFilter, "all">, [number, number]> = {
+  "0-7": [0, 7],
+  "8-30": [8, 30],
+  "31-60": [31, 60],
+  "60+": [61, Number.MAX_SAFE_INTEGER],
+};
+
+export type ReceivableFilters = {
+  areaId: number | null;
+  bookerId: number | null;
+  age: AgeFilter;
+  q: string | null;
+};
+
+export async function getReceivables(
+  filters: ReceivableFilters = { areaId: null, bookerId: null, age: "all", q: null },
+): Promise<{
   rows: ReceivableRow[];
   totals: { invoiced: number; collected: number; outstanding: number };
   buckets: { label: string; count: number; amount: number }[];
@@ -466,6 +524,35 @@ export async function getReceivables(filters: { areaId: number | null } = { area
 }> {
   const areaClause =
     filters.areaId != null ? Prisma.sql`AND b.area_id = ${filters.areaId}` : Prisma.empty;
+  const bookerClause =
+    filters.bookerId != null ? Prisma.sql`AND b.booker_id = ${filters.bookerId}` : Prisma.empty;
+
+  // Search and the age bucket narrow the LIST. That also narrows the
+  // outstanding total, which is summed from these rows - but not Invoiced or
+  // Collected, which are all-time figures for the area and always were: they
+  // include invoices that are fully paid and therefore never appear here.
+  const searchClause = filters.q
+    ? (() => {
+        const like = `%${filters.q}%`;
+        return Prisma.sql`AND (
+          b.invoice_no ILIKE ${like}
+          OR COALESCE(b.customer_name, '') ILIKE ${like}
+          OR COALESCE(b.customer_phone, '') ILIKE ${like}
+          OR COALESCE(sh.name, '') ILIKE ${like}
+          OR COALESCE(sh.phone, '') ILIKE ${like}
+        )`;
+      })()
+    : Prisma.empty;
+
+  const ageClause =
+    filters.age === "all"
+      ? Prisma.empty
+      : (() => {
+          const [lo, hi] = AGE_RANGES[filters.age];
+          return hi === Number.MAX_SAFE_INTEGER
+            ? Prisma.sql`AND (CURRENT_DATE - b.booking_date) >= ${lo}`
+            : Prisma.sql`AND (CURRENT_DATE - b.booking_date) BETWEEN ${lo} AND ${hi}`;
+        })();
 
   const rows = await prisma.$queryRaw<ReceivableRow[]>(Prisma.sql`
     SELECT
@@ -498,6 +585,9 @@ export async function getReceivables(filters: { areaId: number | null } = { area
     ) pay ON pay.booking_id = b.id
     WHERE b.is_deleted = false
       ${areaClause}
+      ${bookerClause}
+      ${searchClause}
+      ${ageClause}
       -- Only what is actually still owed, to the paisa.
       AND t.total - COALESCE(pay.paid, 0) > 0.005
     ORDER BY b.booking_date ASC, b.id ASC
@@ -509,18 +599,22 @@ export async function getReceivables(filters: { areaId: number | null } = { area
     filters.areaId != null ? Prisma.sql`AND b2.area_id = ${filters.areaId}` : Prisma.empty;
   const collectedArea =
     filters.areaId != null ? Prisma.sql`AND b3.area_id = ${filters.areaId}` : Prisma.empty;
+  const invoicedBooker =
+    filters.bookerId != null ? Prisma.sql`AND b2.booker_id = ${filters.bookerId}` : Prisma.empty;
+  const collectedBooker =
+    filters.bookerId != null ? Prisma.sql`AND b3.booker_id = ${filters.bookerId}` : Prisma.empty;
 
   const totalsRow = await prisma.$queryRaw<{ invoiced: number; collected: number }[]>(Prisma.sql`
     SELECT
       COALESCE((
         SELECT SUM(s.sale_price * s.quantity)
         FROM sales s JOIN bookings b2 ON b2.id = s.booking_id
-        WHERE s.is_deleted = false AND b2.is_deleted = false ${invoicedArea}
+        WHERE s.is_deleted = false AND b2.is_deleted = false ${invoicedArea} ${invoicedBooker}
       ), 0)::float8 AS invoiced,
       COALESCE((
         SELECT SUM(p.amount)
         FROM payments p JOIN bookings b3 ON b3.id = p.booking_id
-        WHERE p.is_deleted = false AND b3.is_deleted = false ${collectedArea}
+        WHERE p.is_deleted = false AND b3.is_deleted = false ${collectedArea} ${collectedBooker}
       ), 0)::float8 AS collected
   `);
   const { invoiced, collected } = totalsRow[0] ?? { invoiced: 0, collected: 0 };
