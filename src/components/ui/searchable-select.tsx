@@ -36,6 +36,16 @@ export function SearchableSelect({
    * takes a tab stop and a line of height to save nobody any scrolling.
    */
   searchThreshold = 8,
+  /**
+   * Whether "everything" is one of the choices.
+   *
+   * True for a filter, where clearing it is the normal thing to do. False
+   * where every option is a real value and there is nothing to clear to - the
+   * dashboard's year, for instance, which always names one year. Passing a
+   * year as allLabel to fake it put that year in the list twice: once as the
+   * clear-the-filter row and once as itself.
+   */
+  includeAll = true,
 }: {
   id?: string;
   value: string;
@@ -44,6 +54,7 @@ export function SearchableSelect({
   disabled?: boolean;
   onChange: (value: string) => void;
   searchThreshold?: number;
+  includeAll?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -59,16 +70,22 @@ export function SearchableSelect({
   // "All" is an option like any other, so one arrow key reaches it and the
   // keyboard never has to treat clearing the filter as a special case.
   const shown = React.useMemo(() => {
-    const all: SelectOption[] = [{ value: ALL, label: allLabel }];
+    const all: SelectOption[] = includeAll ? [{ value: ALL, label: allLabel }] : [];
     const needle = query.trim().toLowerCase();
     if (!needle) return all.concat(options);
     return all
       .concat(options)
       .filter((o) => o.value === ALL || o.label.toLowerCase().includes(needle));
-  }, [options, query, allLabel]);
+  }, [options, query, allLabel, includeAll]);
 
-  const selectedLabel =
-    !value || value === ALL ? allLabel : (options.find((o) => o.value === value)?.label ?? allLabel);
+  const chosen = options.find((o) => o.value === value);
+  const selectedLabel = chosen
+    ? chosen.label
+    : includeAll
+      ? allLabel
+      : // Nothing matched and there is no "all" to fall back on: show the raw
+        // value rather than a label that claims a choice was made.
+        (value ?? "");
 
   const close = React.useCallback(() => {
     setOpen(false);

@@ -72,9 +72,10 @@ export function DashboardFilters({
         <SearchableSelect
           id="filter-year"
           value={String(selected.year)}
-          // No "all years" here: every figure on this page is for one period,
-          // and the year is what defines it when no range is given.
-          allLabel={String(selected.year)}
+          // Every figure on this page belongs to one period, so there is no
+          // "all years" to offer - and offering one anyway listed the current
+          // year twice.
+          includeAll={false}
           options={years.map((y) => ({ value: String(y), label: String(y) }))}
           onChange={(v) => setParam("year", v)}
           disabled={hasRange}
