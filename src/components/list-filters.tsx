@@ -7,13 +7,7 @@ import { Loader2, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValueLabel,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 const ALL = "all";
 
@@ -134,27 +128,13 @@ export function ListFilters({ filters }: { filters: FilterSpec[] }) {
           <div className="space-y-1.5">
             <Label htmlFor={`filter-${filter.key}`}>{filter.label}</Label>
             {filter.kind === "select" ? (
-              <Select value={filter.value || ALL} onValueChange={(v) => setParam(filter.key, v)}>
-                <SelectTrigger id={`filter-${filter.key}`}>
-                  <SelectValueLabel
-                    label={
-                      !filter.value || filter.value === ALL
-                        ? (filter.allLabel ?? "All")
-                        : (filter.options.find((o) => o.value === filter.value)?.label ??
-                          filter.allLabel ??
-                          "All")
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>{filter.allLabel ?? "All"}</SelectItem>
-                  {filter.options.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                id={`filter-${filter.key}`}
+                value={filter.value || ALL}
+                allLabel={filter.allLabel ?? "All"}
+                options={filter.options}
+                onChange={(v) => setParam(filter.key, v)}
+              />
             ) : filter.kind === "search" ? (
               <SearchBox
                 id={`filter-${filter.key}`}
