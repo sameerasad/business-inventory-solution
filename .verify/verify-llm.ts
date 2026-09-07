@@ -119,7 +119,7 @@ function said(over: Partial<Parameters<typeof toCommand>[0]>): Parameters<typeof
     productId: null,
     customerName: null,
     customerPhone: null,
-    shopName: null,
+    newName: null,
     amount: null,
     quantity: null,
     unitPrice: null,
@@ -311,7 +311,7 @@ async function main() {
   /* ------------------------------------------------------------- new shops */
   section("new shops");
   const newShop = toCommand(
-    said({ kind: "shop", shopName: "Rehman Kiryana", areaId: 11 }),
+    said({ kind: "shop", newName: "Rehman Kiryana", areaId: 11 }),
     CATALOG,
     TODAY,
   );
@@ -322,7 +322,7 @@ async function main() {
     newShop,
   );
   const duplicateShop = toCommand(
-    said({ kind: "shop", shopName: "Rajput Dairy", areaId: 11 }),
+    said({ kind: "shop", newName: "Rajput Dairy", areaId: 11 }),
     CATALOG,
     TODAY,
   );
@@ -330,6 +330,29 @@ async function main() {
     "a name that already exists in that area is warned about",
     duplicateShop.kind === "shop" && duplicateShop.warnings.some((w) => w.includes("already has")),
     duplicateShop.kind === "shop" ? duplicateShop.warnings : null,
+  );
+
+  /* --------------------------------------------------------- new areas */
+  section("new areas");
+  const newArea = toCommand(said({ kind: "area", newName: "Sikander goth" }), CATALOG, TODAY);
+  ok("accepted", newArea.kind === "area" && newArea.name === "Sikander goth", newArea);
+  ok(
+    "always low confidence - there is no catalog row to check a name against",
+    newArea.kind === "area" &&
+      newArea.confidence === "low" &&
+      newArea.warnings.some((w) => w.includes("dictated")),
+    newArea,
+  );
+
+  const namelessArea = toCommand(said({ kind: "area" }), CATALOG, TODAY);
+  ok("an area with no name yields nothing to save", namelessArea.kind === "unknown", namelessArea);
+
+  const duplicateArea = toCommand(said({ kind: "area", newName: "downtown" }), CATALOG, TODAY);
+  ok(
+    "an existing name is warned about, whatever the casing",
+    duplicateArea.kind === "area" &&
+      duplicateArea.warnings.some((w) => w.includes("already exists")),
+    duplicateArea.kind === "area" ? duplicateArea.warnings : duplicateArea,
   );
 
   /* ----------------------------------------------------- nothing auto-saves */

@@ -234,7 +234,28 @@ export const PHRASES: [RegExp, string][] = [
   [/\bna(?:i|yi|ya)\s+duka{1,2}n\b/g, "naidukan"],
   [/\bduka{1,2}n\s+add\b/g, "dukanadd"],
   [/\bsave\s+kar(?:o|do|dein)\b/g, "save"],
-  [/\bنئی\s*دکان\b/g, "naidukan"],
+  [/(?<!\p{L})نئی\s*دکان(?!\p{L})/gu, "naidukan"],
+  // NOTE for anything added below in Urdu script: \b does NOT work here. It is
+  // an ASCII boundary - a position between a \w character and a non-\w one -
+  // and an Urdu letter is not \w, so /\bنیا/ never matches at all. The
+  // add-a-shop phrase above sat broken for exactly that reason until a test
+  // for the area version found it. Use (?<!\p{L}) ... (?!\p{L}) with the u
+  // flag, which is a real boundary in every script.
+  //
+  // Adding an area. Collapsed to one token for the same reason the shop verbs
+  // are: it keeps the verb out of the name, and it keeps a bare "area" - which
+  // is also the word for the areas PAGE - from being mistaken for a request to
+  // create one.
+  [/\bnew\s+area\b/g, "newarea"],
+  [/\badd\s+(?:an?\s+)?area\b/g, "addarea"],
+  [/\barea\s+add\b/g, "addarea"],
+  [/\bna(?:i|ya|yi)\s+area\b/g, "newarea"],
+  [/\bna(?:i|ya|yi)\s+ila(?:q|k)a{1,2}\b/g, "newarea"],
+  [/\bila(?:q|k)a{1,2}\s+add\b/g, "addarea"],
+  [/(?<!\p{L})نیا\s*علاقہ(?!\p{L})/gu, "newarea"],
+  [/(?<!\p{L})نیا\s*ایریا(?!\p{L})/gu, "newarea"],
+  [/(?<!\p{L})علاقہ\s*شامل(?!\p{L})/gu, "addarea"],
+  [/(?<!\p{L})ایریا\s*شامل(?!\p{L})/gu, "addarea"],
 ];
 
 /* --------------------------------------------------------------------- dates */
@@ -682,6 +703,17 @@ export const NEW_SHOP_VERBS = [
   "نئیدکان",
   "دکاناضافہ",
 ];
+
+/* ------------------------------------------------------------ new area */
+
+/**
+ * Words that mean "create an area that does not exist yet".
+ *
+ * Deliberately none of these is a bare "area": that word belongs to the areas
+ * page, and "area kholo" has to keep opening it. Only an explicit creating
+ * phrase - already collapsed to one token above - reaches this list.
+ */
+export const NEW_AREA_VERBS = ["newarea", "addarea", "نیاعلاقہ", "نیاایریا", "علاقہشامل"];
 
 /**
  * Words that introduce a phone number.

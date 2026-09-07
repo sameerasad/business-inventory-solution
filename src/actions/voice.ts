@@ -97,6 +97,10 @@ function describe(command: VoiceCommand): string {
       return command.name && command.areaName
         ? `Add the shop "${command.name}" in ${command.areaName}.`
         : "A new shop, but the name or the area is missing.";
+    case "area":
+      return command.name
+        ? `Add the area "${command.name}".`
+        : "A new area, but the name is missing.";
     case "query":
       return "A question.";
     case "unknown":

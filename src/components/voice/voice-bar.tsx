@@ -14,7 +14,7 @@ import { createBookingAction } from "@/actions/bookings";
 import { recordPaymentAction } from "@/actions/payments";
 import { createBatchAction } from "@/actions/batches";
 import { createSaleAction } from "@/actions/sales";
-import { createShopAction } from "@/actions/areas";
+import { createAreaAction, createShopAction } from "@/actions/areas";
 import { parseConfirmation } from "@/lib/voice/parse";
 import { Input } from "@/components/ui/input";
 import { emptyActionState, type ActionState } from "@/lib/validations";
@@ -242,7 +242,8 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
       command.kind === "payment" ||
       command.kind === "batch" ||
       command.kind === "sale" ||
-      command.kind === "shop";
+      command.kind === "shop" ||
+      command.kind === "area";
     if (handsFree && writable && command.missing.length === 0) {
       pendingRef.current = command;
       modeRef.current = "confirm";
@@ -495,7 +496,8 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
           command.kind === "payment" ||
           command.kind === "batch" ||
           command.kind === "sale" ||
-          command.kind === "shop" ? (
+          command.kind === "shop" ||
+          command.kind === "area" ? (
             <ConfirmWrite
               command={command}
               saving={saving}
@@ -517,7 +519,7 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
  */
 type WriteCommand = Extract<
   VoiceResult["command"],
-  { kind: "booking" | "payment" | "batch" | "sale" | "shop" }
+  { kind: "booking" | "payment" | "batch" | "sale" | "shop" | "area" }
 >;
 
 /**
@@ -576,6 +578,12 @@ function buildPayload(command: WriteCommand): FormData {
     form.set("areaId", String(command.areaId ?? ""));
     form.set("name", command.name);
     if (command.phone) form.set("phone", command.phone);
+  } else if (command.kind === "area") {
+    // An area is a name and nothing else. The action restores a previously
+    // removed area of the same name rather than duplicating it, which is the
+    // right behaviour here too - saying the name of an area that was deleted
+    // brings it back instead of failing on the unique index.
+    form.set("name", command.name);
   } else {
     form.set("bookingId", String(command.bookingId ?? ""));
     form.set("amount", String(command.amount ?? ""));
@@ -591,6 +599,7 @@ const ACTIONS = {
   batch: createBatchAction,
   sale: createSaleAction,
   shop: createShopAction,
+  area: createAreaAction,
 } as const;
 
 /**
@@ -691,6 +700,14 @@ function ConfirmWrite({
               />
               {command.phone ? <Row label="Phone" value={command.phone} /> : null}
             </>
+          ) : command.kind === "area" ? (
+            <>
+              <Row
+                label="Area name"
+                value={command.name || "missing"}
+                missing={command.name.length === 0}
+              />
+            </>
           ) : command.kind === "sale" ? (
             <>
               <Row label="Product" value={command.label} />
@@ -779,6 +796,7 @@ const KIND_LABEL = {
   batch: "Stock in",
   sale: "Cash sale",
   shop: "New shop",
+  area: "New area",
 } as const;
 
 function Row({ label, value, missing }: { label: string; value: string; missing?: boolean }) {

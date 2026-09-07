@@ -17,6 +17,7 @@ import {
   CONFIRM_WORDS,
   COST_WORDS,
   COUNTER_WORDS,
+  NEW_AREA_VERBS,
   NEW_SHOP_VERBS,
   LOCALITY_WORDS,
   PHONE_WORDS,
@@ -160,7 +161,52 @@ export type VoiceCommand =
       warnings: string[];
       confidence: Confidence;
     }
+  | {
+      kind: "area";
+      name: string;
+      missing: string[];
+      warnings: string[];
+      confidence: Confidence;
+    }
   | { kind: "unknown"; reason: string };
+
+/**
+ * "naya area Sikander goth" - create an area.
+ *
+ * An area is only a name, which makes this the simplest write in the app and
+ * also the one with the least to check against: there is no catalog row to
+ * match, so a mishearing cannot be caught by failing to find something. The
+ * name is whatever is left once the verb is removed, it is always low
+ * confidence, and it always says the spelling was dictated.
+ */
+function parseNewArea(tokens: string[], catalog: VoiceCatalog): VoiceCommand {
+  const missing: string[] = [];
+  const warnings: string[] = [];
+
+  // Everything that is grammar rather than the name. "mein"/"main" and the
+  // like are dropped, but nothing that could be part of a locality name is:
+  // "goth", "nagri", "market" and "chowk" are what these areas are called.
+  const nameWords = tokens.filter(
+    (t) => !NEW_AREA_VERBS.includes(t) && !LOCALITY_WORDS.has(t) && !/^\d+$/.test(t),
+  );
+
+  const name = nameWords
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ")
+    .trim();
+
+  if (name.length === 0) missing.push("area name");
+  else warnings.push("The name was dictated - check the spelling before saving.");
+
+  // Areas are unique by name, so the insert would be rejected anyway. Caught
+  // here, where the message can name the area that already exists.
+  if (name) {
+    const clash = catalog.areas.find((a) => a.name.toLowerCase() === name.toLowerCase());
+    if (clash) warnings.push(`An area called "${clash.name}" already exists.`);
+  }
+
+  return { kind: "area", name, missing, warnings, confidence: "low" };
+}
 
 /**
  * Was that a yes?
@@ -326,6 +372,12 @@ export function parseCommand(
   if (hasAny(tokens, QUERY_VERBS) && matchMetric(tokens)) {
     return parseQuery(tokens, catalog);
   }
+
+  // Adding an area is checked before adding a shop. Both sentences are "make
+  // me a new <place>", and an area name reads exactly like a shop name, so the
+  // only thing separating them is which verb was said - test the narrower one
+  // first and a shop can never swallow an area.
+  if (hasAny(tokens, NEW_AREA_VERBS)) return parseNewArea(tokens, catalog);
 
   // Adding a shop is checked before orders: "nai dukan Al Madina Downtown mein"
   // names a place and no product, and must not be read as an order to a shop

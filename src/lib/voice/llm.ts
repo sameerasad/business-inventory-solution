@@ -84,7 +84,17 @@ const TOOL_NAME = "record_command";
  * union happens below, where the ids get validated anyway.
  */
 const Extracted = z.object({
-  kind: z.enum(["navigate", "query", "booking", "payment", "batch", "sale", "shop", "unknown"]),
+  kind: z.enum([
+    "navigate",
+    "query",
+    "booking",
+    "payment",
+    "batch",
+    "sale",
+    "shop",
+    "area",
+    "unknown",
+  ]),
   /** Why nothing could be made of it. Only for kind "unknown". */
   reason: z.string().nullable(),
   /** Exactly one of the hrefs offered in the prompt. */
@@ -102,8 +112,16 @@ const Extracted = z.object({
   productId: z.number().nullable(),
   customerName: z.string().nullable(),
   customerPhone: z.string().nullable(),
-  /** New shop name, for kind "shop". */
-  shopName: z.string().nullable(),
+  /**
+   * The name of the thing being created, for kind "shop" or "area".
+   *
+   * One field rather than one per kind. Every property in this schema costs
+   * prompt tokens on every single command, and the free tier's daily
+   * allowance is what limits how many commands a day the feature can handle -
+   * so a second name field would be paid for by every booking and every
+   * question too, to serve one sentence in a hundred.
+   */
+  newName: z.string().nullable(),
   amount: z.number().nullable(),
   quantity: z.number().nullable(),
   unitPrice: z.number().nullable(),
@@ -148,7 +166,7 @@ const COMMAND_SCHEMA = {
   properties: {
     kind: {
       type: "string",
-      enum: ["navigate", "query", "booking", "payment", "batch", "sale", "shop", "unknown"],
+      enum: ["navigate", "query", "booking", "payment", "batch", "sale", "shop", "area", "unknown"],
       description: "Which kind of command this is.",
     },
     reason: { type: ["string", "null"], description: "Only for unknown: what was unclear." },
@@ -176,7 +194,10 @@ const COMMAND_SCHEMA = {
     productId: { type: ["integer", "null"] },
     customerName: { type: ["string", "null"] },
     customerPhone: { type: ["string", "null"], description: "Digits only." },
-    shopName: { type: ["string", "null"], description: "Only for shop: the new shop's name." },
+    newName: {
+      type: ["string", "null"],
+      description: "Only for shop or area: the name of the new shop or area.",
+    },
     amount: { type: ["number", "null"], description: "Only for payment." },
     quantity: { type: ["integer", "null"] },
     unitPrice: { type: ["number", "null"] },
@@ -219,7 +240,7 @@ const COMMAND_SCHEMA = {
     "productId",
     "customerName",
     "customerPhone",
-    "shopName",
+    "newName",
     "amount",
     "quantity",
     "unitPrice",
@@ -239,7 +260,7 @@ const COMMAND_SCHEMA = {
  * arguments against the schema and rejects the call when a required property
  * is absent - and a model naturally omits the fifteen fields that have nothing
  * to do with the sentence it just heard. The first live call against Groq
- * failed exactly that way: 400, "missing properties: 'shopName'".
+ * failed exactly that way: 400, "missing properties: 'newName'".
  *
  * So one schema cannot serve both. This variant is derived from the strict one
  * rather than written out a second time, because a hand-copied schema is a
@@ -344,7 +365,11 @@ Choose exactly one kind:
   a shop or an area is named, it is a booking unless cash was actually said.
 - batch: stock arriving. Set productId, quantity and unitCost.
 - payment: money received against an invoice. Set bookingId and amount.
-- shop: adding a new shop. Set shopName and areaId.
+- shop: adding a new shop. Set newName and areaId.
+- area: adding a new AREA - a locality, not a shop inside one. Set newName only. Choose this
+  when they say new area / naya area / naya ilaqa / نیا علاقہ. An area is a place a booker
+  covers; a shop is a business inside an area. "naya area Sikander goth" is an area, while
+  "nai dukan Sikander goth mein" is a shop in an area that already exists.
 - unknown: none of the above. Set reason, in plain language, saying what was unclear.
 
 The verb decides between navigate and query, and only the verb. "dikhao", "kholo",
@@ -526,7 +551,27 @@ export async function interpretWithLlm(
  * missing. A hallucinated shop cannot become a booking - at worst it becomes a
  * booking with no shop, which the form will not save.
  */
+/**
+ * Turn the model's answer into a real command, dropping repeated warnings.
+ *
+ * The model writes its own warnings and buildCommand writes more, so the same
+ * observation can arrive twice - both notice a duplicate name, for instance.
+ * Collapsed here, in one place, rather than at each of the fifteen places a
+ * warning is added.
+ */
 export function toCommand(
+  extracted: Extracted,
+  catalog: VoiceCatalog,
+  today = new Date(),
+): VoiceCommand {
+  const command = buildCommand(extracted, catalog, today);
+  if ("warnings" in command && command.warnings.length > 1) {
+    return { ...command, warnings: [...new Set(command.warnings)] };
+  }
+  return command;
+}
+
+function buildCommand(
   extracted: Extracted,
   catalog: VoiceCatalog,
   today = new Date(),
@@ -539,7 +584,13 @@ export function toCommand(
       .slice(0, 10);
 
   const date = /^\d{4}-\d{2}-\d{2}$/.test(extracted.date ?? "") ? extracted.date! : iso(today);
-  if (extracted.date == null) warnings.push("No date was said, so today is assumed.");
+  // Only for the kinds that record one. An area and a shop have no date, so
+  // "today is assumed" is noise there - and noise in this list is expensive,
+  // because it teaches people to skim past the warnings that do matter.
+  const datedKinds = ["booking", "sale", "batch", "payment"];
+  if (extracted.date == null && datedKinds.includes(extracted.kind)) {
+    warnings.push("No date was said, so today is assumed.");
+  }
 
   const area = catalog.areas.find((a) => a.id === extracted.areaId) ?? null;
   const shop = catalog.shops.find((s) => s.id === extracted.shopId) ?? null;
@@ -746,8 +797,28 @@ export function toCommand(
       };
     }
 
+    case "area": {
+      const name = (extracted.newName ?? "").trim();
+      if (!name) {
+        return {
+          kind: "unknown",
+          reason: 'An area, but no name was heard. Say it as "naya area" and then the name.',
+        };
+      }
+
+      // Areas are unique by name and there is nothing else to check a dictated
+      // one against - no catalog row it has to match, no id to validate. So
+      // the only guard available is the clash, and the only honest confidence
+      // is low.
+      const clash = catalog.areas.find((a) => a.name.toLowerCase() === name.toLowerCase());
+      if (clash) warnings.push(`An area called "${clash.name}" already exists.`);
+      warnings.push("The name was dictated - check the spelling before saving.");
+
+      return { kind: "area", name, missing: [], warnings, confidence: "low" };
+    }
+
     case "shop": {
-      const name = (extracted.shopName ?? "").trim();
+      const name = (extracted.newName ?? "").trim();
       if (name.length === 0) missing.push("shop name");
       else warnings.push("The name was dictated - check the spelling before saving.");
       if (effectiveArea == null) missing.push("area");

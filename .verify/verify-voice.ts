@@ -629,6 +629,68 @@ async function main() {
   const sh3 = parse("new shop Al Madina Store");
   ok("a shop with no area is blocked", sh3.kind === "shop" && sh3.missing.includes("area"), sh3);
 
+  /* ---------------------------------------------------------- new area */
+  section("adding an area by voice");
+
+  const ar1 = parse("naya area Sikander goth");
+  ok("recognised as a new area", ar1.kind === "area", ar1);
+  if (ar1.kind === "area") {
+    ok("name title-cased", ar1.name === "Sikander Goth", ar1.name);
+    ok("nothing missing - an area is only a name", ar1.missing.length === 0, ar1.missing);
+    ok(
+      "always flagged, because a dictated name cannot be checked against anything",
+      ar1.confidence === "low" && ar1.warnings.some((w) => w.includes("dictated")),
+      ar1.warnings,
+    );
+  }
+
+  const ar2 = parse("new area Punjab Adda");
+  ok("English phrasing works", ar2.kind === "area" && ar2.name === "Punjab Adda", ar2);
+
+  const ar3 = parse("add area Bashir chowk");
+  ok(
+    'and so does "add area" - chowk is part of the name, not grammar',
+    ar3.kind === "area" && ar3.name === "Bashir Chowk",
+    ar3,
+  );
+
+  const ar4 = parse("نیا علاقہ سکندر گوٹھ");
+  ok("Urdu script works", ar4.kind === "area", ar4);
+
+  const ar5 = parse("naya area");
+  ok(
+    "an area with no name is blocked rather than created empty",
+    ar5.kind === "area" && ar5.missing.includes("area name"),
+    ar5,
+  );
+
+  const ar6 = parse("naya area Downtown");
+  ok(
+    "a name that already exists is warned about",
+    ar6.kind === "area" && ar6.warnings.some((w) => w.includes("already exists")),
+    ar6.kind === "area" ? ar6.warnings : ar6,
+  );
+
+  // The regression that matters. "area" is also the word for the areas PAGE,
+  // and it would be a bad trade to gain "naya area" and lose "area kholo".
+  const navArea = parse("area kholo");
+  ok('"area kholo" still opens the page', navArea.kind === "navigate", navArea);
+  const navAreas = parse("areas");
+  ok('"areas" still opens the page', navAreas.kind === "navigate", navAreas);
+  const navAreaUrdu = parse("علاقے دکھاؤ");
+  ok("and so does the Urdu for it", navAreaUrdu.kind === "navigate", navAreaUrdu);
+
+  // The other direction: a shop is still a shop. Both sentences are "make me a
+  // new place", so the only thing telling them apart is the verb.
+  const stillShop = parse("nai dukan Al Madina Store Downtown mein");
+  ok("a shop sentence is still a shop", stillShop.kind === "shop", stillShop);
+
+  // This one had never worked. The Urdu add-a-shop phrase used an ASCII word
+  // boundary, which cannot match beside an Urdu letter, so the whole phrase
+  // was dead until the area version was tested and exposed it.
+  const urduShop = parse("نئی دکان المدینہ اسٹور");
+  ok("the Urdu add-a-shop phrase works too", urduShop.kind === "shop", urduShop);
+
   const sh4 = parse("new shop in Downtown");
   ok(
     "a shop with no name is blocked",
