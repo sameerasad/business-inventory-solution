@@ -283,25 +283,41 @@ export async function getVoiceCatalog() {
       orderBy: { name: "asc" },
       select: { id: true, name: true, voiceAlias: true },
     }),
-    prisma.shop.findMany({
-      where: { isDeleted: false },
-      /**
-       * Busiest first, not alphabetical.
-       *
-       * Whisper is told about as many shop names as fit a short budget, and it
-       * used to be handed them in name order - so the first eight of the
-       * alphabet were offered on every command and a shop starting with S
-       * never was. Shortening the names roughly doubled how many fit and still
-       * did not reach Saleem, because the cut-off was alphabetical rather than
-       * useful. The shops you sell to most are the ones worth spending that
-       * budget on.
-       *
-       * Order does not matter to the model that interprets the sentence: it is
-       * shown the whole list either way.
-       */
-      orderBy: [{ sales: { _count: "desc" } }, { name: "asc" }],
-      select: { id: true, name: true, areaId: true, voiceAlias: true },
-    }),
+    /**
+     * Shops, most recently relevant first.
+     *
+     * Whisper is told about as many names as fit a short budget, so this order
+     * decides which shops it can hear at all - and the budget is already full
+     * at twenty-three of them.
+     *
+     * Ordered by the last day something was sold, falling back to the day the
+     * shop was added. Two earlier attempts were worse in instructive ways.
+     * Alphabetical spent the whole budget on the front of the alphabet, so a
+     * shop starting with S was never offered. Busiest-all-time was better but
+     * sorted a BRAND NEW shop last, having no sales yet - which is exactly
+     * backwards, because a new shop is the one whose name you are about to say
+     * for the first time and the one Whisper has never been told about.
+     *
+     * Falling back to created_at fixes that without a special case: a new shop
+     * arrives at the top, and drifts down on its own if nothing is ever sold
+     * there.
+     */
+    prisma.$queryRaw<{ id: number; name: string; areaId: number; voiceAlias: string | null }[]>`
+      SELECT sh.id                AS "id",
+             sh.name              AS "name",
+             sh.area_id           AS "areaId",
+             sh.voice_alias       AS "voiceAlias"
+        FROM shops sh
+        LEFT JOIN sales s ON s.shop_id = sh.id AND s.is_deleted = false
+       WHERE sh.is_deleted = false
+       GROUP BY sh.id, sh.name, sh.area_id, sh.voice_alias, sh.created_at
+       -- created_at breaks the tie, not the alphabet. A shop added today ties
+       -- with every shop sold to today, and on that day the new one is the
+       -- name nobody has heard yet - so the newer record wins.
+       ORDER BY COALESCE(MAX(s.sale_date), sh.created_at::date) DESC,
+                sh.created_at DESC,
+                sh.name ASC
+    `,
     prisma.booker.findMany({
       where: { isDeleted: false, isActive: true },
       orderBy: { name: "asc" },

@@ -519,32 +519,66 @@ async function main() {
   }
 
   /* --------------------------------------------- the catalog's own order */
-  section("the shops Whisper hears about are the ones you sell to");
+  section("a shop added today can be heard today");
 
-  // The pure tests next door prove that whoever is first in the list gets
-  // offered. This is the half that decides who that is - and it is a claim
-  // about a query, so it needs the database.
+  // This is the question a product still being added to actually has: when a
+  // new shop is created, is its name offered to Whisper straight away?
+  //
+  // It used to be the opposite. Ordering by all-time sales put a brand new
+  // shop LAST, having sold nothing yet - which is exactly backwards, because
+  // that is the shop whose name you are about to say for the first time and
+  // the one Whisper has never been told about. Ordering falls back to the
+  // creation date so a new shop arrives at the front instead.
+  //
+  // No sales are needed for this, which is why it replaced a check that
+  // skipped for want of them.
   const { getVoiceCatalog } = await import("@/lib/voice/answer");
-  const voiceCatalog = await getVoiceCatalog();
+  const { buildPrompt } = await import("@/lib/voice/transcribe");
+  const { speechVocabulary } = await import("@/lib/voice/names");
 
-  const soldTo = await prisma.sale.groupBy({
-    by: ["shopId"],
-    where: { isDeleted: false, shopId: { not: null } },
-    _count: { _all: true },
+  const promptNow = async () => buildPrompt(speechVocabulary(await getVoiceCatalog()));
+
+  const beforeAdding = await promptNow();
+  ok("a shop that does not exist is not offered", !beforeAdding.includes("zubair"), beforeAdding);
+
+  const anyArea = await prisma.area.findFirstOrThrow({ where: { isDeleted: false } });
+  const freshShop = await prisma.shop.create({
+    data: { name: "Zubair kiryana", areaId: anyArea.id },
   });
-  const salesByShop = new Map(soldTo.map((row) => [row.shopId, row._count._all]));
 
-  if (salesByShop.size > 0 && voiceCatalog.shops.length > 1) {
-    const counts = voiceCatalog.shops.map((s) => salesByShop.get(s.id) ?? 0);
-    const descending = counts.every((n, i) => i === 0 || counts[i - 1]! >= n);
-    ok("shops come back busiest first", descending, counts);
+  try {
+    const catalogAfter = await getVoiceCatalog();
+    const position = catalogAfter.shops.findIndex((sh) => sh.id === freshShop.id);
+    ok("a shop added a moment ago comes back first", position === 0, {
+      position,
+      of: catalogAfter.shops.length,
+    });
+
+    const afterAdding = await promptNow();
     ok(
-      "so the busiest shop is the one Whisper is told about first",
-      (counts[0] ?? 0) >= Math.max(...counts),
-      { first: counts[0], max: Math.max(...counts) },
+      "and its name is offered to Whisper immediately, with nothing configured",
+      afterAdding.includes("zubair"),
+      afterAdding,
     );
-  } else {
-    console.log("  SKIP  shop ordering (needs both busy and idle shops)");
+
+    // The derived word comes before the full name in the vocabulary, so when
+    // the budget does run out it is a redundant full name that goes rather
+    // than a shop nobody has heard of. Checked on the vocabulary itself
+    // rather than on a name from another database.
+    const vocab = speechVocabulary(catalogAfter);
+    ok(
+      "every derived word is offered before its own full name",
+      catalogAfter.shops.every((sh) => {
+        const short = vocab.indexOf(sh.name.toLowerCase().split(/[^a-z0-9]+/i)[0] ?? "");
+        const full = vocab.indexOf(sh.name);
+        return short === -1 || full === -1 || short < full;
+      }),
+      vocab,
+    );
+  } finally {
+    // Created for the check and removed again: it has no sales, so nothing
+    // else in this suite can see it.
+    await prisma.shop.delete({ where: { id: freshShop.id } });
   }
 
   console.log(`\n${checks - failures}/${checks} recognition checks passed`);
