@@ -200,6 +200,13 @@ export function SearchableSelect({
           ) : null}
 
           <div ref={listRef} role="listbox" className="max-h-60 overflow-y-auto p-1">
+            {/* The clear-the-filter row always survives a search, so an empty
+                result is not an empty list - without saying so, a search that
+                matched nothing looks identical to one that matched only "All".
+                Found by the test below this component, not by using it. */}
+            {query.trim() && !shown.some((o) => o.value !== ALL) ? (
+              <p className="px-2 py-1.5 text-sm text-muted-foreground">No match.</p>
+            ) : null}
             {shown.length === 0 ? (
               <p className="px-2 py-3 text-sm text-muted-foreground">No match.</p>
             ) : (

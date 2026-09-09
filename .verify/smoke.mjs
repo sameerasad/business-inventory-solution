@@ -195,12 +195,6 @@ const pages = [
       "Order total",
       // The booker picker must offer the seeded booker, not an empty state.
       "Sample Booker",
-      // Dictating the order lives on this page, so its entry point must render
-      // server-side even though the microphone is client-only.
-      // Only the typed half is asserted: the microphone button renders after
-      // hydration, once the browser has said whether it supports recording, so
-      // it is never in the server HTML.
-      "or type the whole order",
     ],
   ],
   [

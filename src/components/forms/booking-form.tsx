@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AddShopDialog } from "@/components/forms/add-shop-dialog";
-import { BookingDictate, type DictatedBooking } from "@/components/forms/booking-dictate";
 import { SubmitButton, useIdempotencyKey } from "@/components/forms/form-bits";
 import type { AreaOption } from "@/components/forms/sale-form";
 
@@ -53,13 +52,10 @@ export function BookingForm({
   products,
   areas,
   bookers,
-  whisperAvailable = false,
 }: {
   products: BookableProduct[];
   areas: AreaOption[];
   bookers: { id: number; name: string; code: string | null; areaIds: number[] }[];
-  /** Whether the server can transcribe with Whisper, for the voice filler. */
-  whisperAvailable?: boolean;
 }) {
   const [state, formAction, isPending] = useActionState(createBookingAction, emptyActionState);
   const { key: idempotencyKey, rotate } = useIdempotencyKey();
@@ -88,28 +84,6 @@ export function BookingForm({
    * a number on screen that can be corrected with the keyboard, instead of a
    * reason to say the entire order again.
    */
-  const applyDictated = (command: DictatedBooking) => {
-    setBookingDate(command.date);
-    setBookerId(command.bookerId == null ? "" : String(command.bookerId));
-    setCustomerPhone(command.customerPhone ?? "");
-    setAreaId(command.areaId == null ? "" : String(command.areaId));
-    setShopId(command.shopId == null ? NO_SHOP : String(command.shopId));
-    setLines(
-      command.lines.length === 0
-        ? [blankLine()]
-        : command.lines.map((line, index) => ({
-            key: `dictated-${index}-${line.productId}`,
-            productId: String(line.productId),
-            // Empty, not "0", when no quantity was said. A zero looks like an
-            // answer and has to be deleted before it can be corrected; an
-            // empty required field asks the question by itself, and the
-            // browser will not let the form save until it is answered.
-            quantity: line.quantity > 0 ? String(line.quantity) : "",
-            unitPrice: String(line.unitPrice),
-          })),
-    );
-  };
-
   useEffect(() => {
     if (state.ok) {
       // A booker takes one order after another; clear the order but keep the
@@ -228,11 +202,8 @@ export function BookingForm({
 
       {/* ------------------------------------------------ who and when */}
       <Card>
-        <CardHeader className="flex flex-col gap-3">
-          <div className="flex flex-col gap-3">
-            <CardTitle>Customer &amp; date</CardTitle>
-            <BookingDictate whisperAvailable={whisperAvailable} onFilled={applyDictated} />
-          </div>
+        <CardHeader>
+          <CardTitle>Customer &amp; date</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
