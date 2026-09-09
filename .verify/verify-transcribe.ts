@@ -122,9 +122,12 @@ async function main() {
   // worse than no prompt, so it has to stop somewhere.
   const many = Array.from({ length: 500 }, (_, i) => `Shop Number ${i} General Store`);
   const capped = buildPrompt(many);
-  // Short on purpose: a long list of proper nouns makes Whisper invent names
-  // that look like the list, which is what produced "Mokin Tukonu".
-  ok("a huge catalog is capped tightly", capped.length < 400, capped.length);
+  // Capped, but at a length that was measured rather than feared. 180 was set
+  // when the list carried full multi-word names; short derived words were
+  // tested against the real API up to 392 characters with no more invention
+  // than the short list produced, and the longer list demonstrably fixed a
+  // name it had been getting wrong. What must not happen is unbounded growth.
+  ok("a huge catalog is still capped", capped.length <= 480, capped.length);
   ok("but still carries the first names", capped.includes("Shop Number 0"), capped.slice(0, 120));
 
   /* --------------------------------------------------------- input guards */

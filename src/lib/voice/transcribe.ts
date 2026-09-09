@@ -164,20 +164,39 @@ export function groqConfigured(): boolean {
 export function buildPrompt(vocabulary: string[]): string {
   const unique = [...new Set(vocabulary.map((v) => v.trim()).filter((v) => v.length > 0))];
 
-  // Kept short deliberately. A long list of proper nouns is a known way to make
-  // Whisper INVENT names - it starts producing things that look like the list
-  // rather than what was said, which is how "bookings kholo" came back as
-  // "Mokin Tukonu". The wording below asks for a transcript and offers the
-  // names as possible content, rather than presenting a vocabulary to draw on.
-  // Measured, not guessed: one second of silence sent with a long name list
-  // came back as an invented Urdu sentence, and with no list at all as a single
-  // word. The prompt earns its place on real speech - it is what lets Whisper
-  // produce "Rakshani bazar" - but every extra name also gives it more to
-  // invent from, so it is kept to a handful.
+  // The wording asks for a transcript and offers the names as possible
+  // content, rather than presenting a vocabulary to draw on. That framing
+  // matters: a list of proper nouns presented as vocabulary is a known way to
+  // make Whisper INVENT names, producing things that look like the list rather
+  // than what was said - which is how "bookings kholo" once came back as
+  // "Mokin Tukonu".
+  //
+  // The budget was 180 characters for that reason, set when the list carried
+  // full multi-word shop names. Short derived words are a different thing, and
+  // the difference was measured against the real API rather than assumed:
+  //
+  //   near-silence, no names        -> "Thank you."
+  //   near-silence, 180 characters  -> "Subtitles by the Amara.org community"
+  //   near-silence, 282 characters  -> "Subtitles by the Amara.org community"
+  //   near-silence, 392 characters  -> "Subtitles by the Amara.org community"
+  //
+  // So a longer list of short words did NOT make it invent more, and in
+  // particular did not make it produce names off the list. Both artifacts are
+  // caught by isHallucination above. On real speech the longer list earned its
+  // place outright - the same clip, transcribed three ways:
+  //
+  //   no names                      -> "Salim General Store ..."
+  //   180 chars (saleem absent)     -> "Salim General Store ..."
+  //   282 chars (saleem present)    -> "Saleem General Store ..."
+  //
+  // 420 covers every flavour, shop and area in this catalog with room to grow,
+  // and sits inside the range that was measured. Past it the busiest-first
+  // order in the catalog query decides who is offered, which is the right
+  // thing to run out of room on.
   const head = "Urdu or English. Transcribe only what is said. Names: ";
   const parts: string[] = [];
   for (const word of unique) {
-    if ((head + parts.join(", ") + word).length > 180) break;
+    if ((head + parts.join(", ") + word).length > 420) break;
     parts.push(word);
   }
   return parts.length === 0

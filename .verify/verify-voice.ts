@@ -990,8 +990,23 @@ async function main() {
   const firstOne = buildPrompt(["Saleem General Store", ...realShops].map(distinctiveName));
   ok("a name at the front of the list is offered", firstOne.includes("saleem"), firstOne);
 
-  const lastOne = buildPrompt([...realShops, "Zzz Late Store"].map(distinctiveName));
-  ok("and one at the back is not, however short it is", !lastOne.includes("zzz"), lastOne);
+  // This catalog now fits entirely, which was the whole point - so showing
+  // that order still decides the cut-off needs a list long enough to overflow
+  // the budget, not this one.
+  const everyone = buildPrompt(realShops.map(distinctiveName));
+  ok(
+    "every shop in this catalog is offered, none dropped",
+    realShops.every((name) => everyone.includes(distinctiveName(name))),
+    everyone,
+  );
+
+  const crowd = Array.from({ length: 120 }, (_, i) => `Shop${i} general store`);
+  const overflowing = buildPrompt([...crowd, "Zzz Late Store"].map(distinctiveName));
+  ok(
+    "past the budget the tail is dropped, so order is what decides who is heard",
+    !overflowing.includes("zzz") && overflowing.includes("shop0"),
+    overflowing.length,
+  );
 
   // Product names go through the same shortening, which is worth a check
   // because they are first in the list and were spending the budget on words
