@@ -339,6 +339,15 @@ for (const [pathname, markers] of pages) {
       }
     }
     check(`${pathname} has no error digest`, !html.includes("Application error"), pathname);
+    // Voice has to be reachable from EVERY page, which is a claim about every
+    // page rather than about any one of them - so it is checked in the loop
+    // rather than listed per page, and a page added to this suite later gets
+    // the check for free. Server-rendered, so it is there before hydration.
+    check(
+      `${pathname} has the voice button`,
+      html.includes('aria-label="Open voice commands"'),
+      pathname,
+    );
   } catch (err) {
     check(`${pathname} fetched`, false, err.message);
   }

@@ -1,5 +1,6 @@
 /**
- * The searchable select, rendered for real.
+ * The interactive bits, rendered for real: the searchable select and the
+ * floating voice launcher.
  *
  * This suite replaced the one that tested the dictate box, which was removed
  * from the booking page. Keeping the harness was the point: the select shipped
@@ -45,9 +46,72 @@ g.Node = dom.window.Node;
 g.getComputedStyle = dom.window.getComputedStyle;
 g.IS_REACT_ACT_ENVIRONMENT = true;
 
+/**
+ * Every browser global jsdom provides, in one pass.
+ *
+ * Radix builds the dialog out of a focus scope and a dismissable layer, and
+ * between them they reach for MutationObserver, CustomEvent, NodeFilter and
+ * more. Adding them one at a time is a treadmill - each missing one throws
+ * from inside an effect, which surfaces as an unhandled error rather than a
+ * failed check, so you learn about exactly one per run. Copying what is
+ * missing settles the whole class of it.
+ *
+ * Guarded on "already present" so Node keeps its own setTimeout, fetch and
+ * crypto rather than being handed jsdom versions of them.
+ */
+for (const key of Object.getOwnPropertyNames(dom.window)) {
+  if (key in globalThis) continue;
+  try {
+    g[key] = (dom.window as unknown as Record<string, unknown>)[key];
+  } catch {
+    // A few are getter-only on the window; none of those are needed here.
+  }
+}
+/**
+ * These three are the exception to the guard above, and have to be forced.
+ *
+ * Node 22 ships its own Event, CustomEvent and EventTarget, so they are
+ * "already present" and the loop skips them - and then jsdom rejects them:
+ * document.dispatchEvent checks the object is one of ITS Events and throws
+ * "parameter 1 is not of type Event" from inside a Radix effect.
+ */
+g.Event = dom.window.Event;
+g.CustomEvent = dom.window.CustomEvent;
+g.EventTarget = dom.window.EventTarget;
+
+g.ResizeObserver =
+  dom.window.ResizeObserver ??
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+
 // jsdom has no layout, so scrollIntoView is missing and the component calls it
 // while arrowing through a list.
 dom.window.Element.prototype.scrollIntoView = function scrollIntoView() {};
+
+/**
+ * Just enough microphone to mount.
+ *
+ * Nothing here records anything - the launcher test never presses the button.
+ * The hooks inside VoiceBar ask at mount whether recording is possible at all,
+ * and answering "no" would render a different component than the one people
+ * see.
+ */
+class StubRecorder {
+  static isTypeSupported() {
+    return true;
+  }
+  start() {}
+  stop() {}
+}
+g.MediaRecorder = StubRecorder;
+g.Blob = dom.window.Blob;
+Object.defineProperty(dom.window.navigator, "mediaDevices", {
+  configurable: true,
+  value: { getUserMedia: async () => ({ getTracks: () => [] }) },
+});
 
 const AREAS = [
   { value: "1", label: "laal market" },
@@ -235,7 +299,73 @@ async function main() {
   });
   ok("escape closes it", optionButtons().length === 0);
 
-  console.log(`\n${checks - failures}/${checks} select checks passed`);
+  /* ------------------------------------------------- the voice launcher */
+  section("the floating voice button");
+
+  const { VoiceLauncher } = await import("@/components/voice/voice-launcher");
+
+  const launcherHost = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(launcherHost);
+  const launcherRoot = createRoot(launcherHost);
+
+  // VoiceBar calls useRouter, which throws outside a Next tree, so the test
+  // has to supply the context. Only push is exercised here - and not even
+  // that, since the panel is opened but never spoken to.
+  const { AppRouterContext } =
+    await import("next/dist/shared/lib/app-router-context.shared-runtime");
+  const stubRouter = {
+    push: () => {},
+    replace: () => {},
+    refresh: () => {},
+    back: () => {},
+    forward: () => {},
+    prefetch: async () => {},
+  };
+
+  await act(async () => {
+    launcherRoot.render(
+      React.createElement(
+        AppRouterContext.Provider,
+        { value: stubRouter as never },
+        React.createElement(VoiceLauncher, { whisperAvailable: true }),
+      ),
+    );
+  });
+
+  const fab = () =>
+    dom.window.document.querySelector(
+      '[aria-label="Open voice commands"]',
+    ) as HTMLButtonElement | null;
+  // Radix puts the panel in a portal on document.body, not inside the host.
+  const panel = () => dom.window.document.querySelector('[role="dialog"]');
+
+  ok("the button is there", fab() !== null);
+  ok("and nothing is open yet", panel() === null);
+
+  // The reason the panel is mounted conditionally: the microphone hooks should
+  // not be alive behind every page in the app, only while the panel is up.
+  ok(
+    "voice is not mounted while it is closed",
+    !dom.window.document.body.textContent?.includes("Say the order"),
+    dom.window.document.body.textContent?.slice(0, 120),
+  );
+
+  await click(fab()!);
+  ok("clicking it opens a dialog", panel() !== null);
+  ok(
+    "with the voice module inside",
+    (panel()?.textContent ?? "").length > 0 && panel()?.textContent?.includes("Voice") === true,
+    panel()?.textContent?.slice(0, 160),
+  );
+
+  await act(async () => {
+    dom.window.document.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
+  ok("escape closes it again", panel() === null);
+
+  console.log(`\n${checks - failures}/${checks} ui checks passed`);
   if (failures > 0) process.exitCode = 1;
 }
 

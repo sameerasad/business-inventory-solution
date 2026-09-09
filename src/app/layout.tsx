@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import "./globals.css";
 import { NavActions, NavTabs } from "@/components/site-nav";
+import { VoiceLauncher } from "@/components/voice/voice-launcher";
+import { groqConfigured } from "@/lib/voice/transcribe";
 import { business, businessInitials } from "@/lib/business";
 
 const { name: BUSINESS } = business();
@@ -62,6 +64,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
 
         <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">{children}</main>
+
+        {/* Voice, on every page. groqConfigured() is read here rather than
+            through the server action that wraps it: it only looks at
+            environment variables, so calling it in the layout costs nothing
+            and does not make the layout async. */}
+        <VoiceLauncher whisperAvailable={groqConfigured()} />
 
         <footer className="mx-auto max-w-[1400px] px-4 pb-8 text-xs text-muted-foreground sm:px-6">
           Profit is calculated on read as (sale price - batch unit cost) x quantity. It is never
