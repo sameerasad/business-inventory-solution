@@ -99,7 +99,23 @@ const EXAMPLES: Record<SpeechLang, string[]> = {
  * button. Speech recognition confuses fifteen and fifty, and this app moves
  * stock and money.
  */
-export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: boolean }) {
+export function VoiceBar({
+  whisperAvailable = false,
+  embedded = false,
+  onNavigate,
+}: {
+  whisperAvailable?: boolean;
+  /** Inside a dialog, the page-level margin below the bar is wrong. */
+  embedded?: boolean;
+  /**
+   * Called once a command has moved the page.
+   *
+   * The floating panel closes on this. Left open over the page it just opened,
+   * it hides the very thing the command was for and leaves you wondering
+   * whether anything happened at all.
+   */
+  onNavigate?: () => void;
+}) {
   const router = useRouter();
   const [lang, setLang] = useState<SpeechLang>("en-PK");
   const [result, setResult] = useState<VoiceResult | null>(null);
@@ -268,6 +284,7 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
     // voice carries you to the record and the change itself stays a hand.
     if (command.kind === "navigate" || command.kind === "open") {
       router.push(command.href);
+      onNavigate?.();
       return;
     }
     if (interpreted.answer) {
@@ -307,8 +324,8 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
   const command = result?.command;
 
   return (
-    <Card className="mb-4 overflow-hidden">
-      <div className="flex flex-wrap items-center gap-3 p-4">
+    <Card className={cn("overflow-hidden", embedded ? null : "mb-4")}>
+      <div className="flex flex-wrap items-center gap-2.5 px-4 pt-4">
         {micUsable ? (
           <Button
             type="button"
@@ -423,8 +440,11 @@ export function VoiceBar({ whisperAvailable = false }: { whisperAvailable?: bool
             <span className="text-muted-foreground">Hands-free</span>
           </label>
         ) : null}
+      </div>
 
-        <p aria-live="polite" className="min-w-0 flex-1 text-sm">
+      {/* What was heard, on its own line with the whole width to itself. */}
+      <div className="flex items-start gap-2 px-4 pb-4 pt-3">
+        <p aria-live="polite" className="min-w-0 flex-1 text-sm leading-relaxed">
           {listening ? (
             <span className="text-muted-foreground">{transcript || "Listening..."}</span>
           ) : result ? (

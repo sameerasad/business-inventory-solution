@@ -12,6 +12,8 @@
  *
  * So: mount it, open it, type in it, and check what comes back.
  */
+import path from "node:path";
+
 import { JSDOM } from "jsdom";
 
 let checks = 0;
@@ -302,6 +304,42 @@ async function main() {
   /* ------------------------------------------------- the voice launcher */
   section("the floating voice button");
 
+  /**
+   * The voice action, stubbed.
+   *
+   * Without this the panel would talk to a real database and a real model, and
+   * this suite is about the component's own wiring. Seeding the CommonJS cache
+   * under the resolved path works because tsx loads TypeScript through the CJS
+   * loader - and it has to happen before the component that imports it.
+   */
+  const pushed: string[] = [];
+  const actionsPath = path.resolve("src/actions/voice.ts");
+  require.cache[actionsPath] = {
+    id: actionsPath,
+    filename: actionsPath,
+    loaded: true,
+    exports: {
+      interpretVoiceAction: async (said: string) => ({
+        transcript: said,
+        command: {
+          kind: "navigate" as const,
+          href: "/receivables",
+          label: "Receivables",
+          confidence: "high" as const,
+        },
+        answer: null,
+        summary: "Open Receivables.",
+      }),
+      transcribeAndInterpretAction: async () => ({ ok: false as const, reason: "not used" }),
+      transcribeOnlyAction: async () => ({ ok: false as const, reason: "not used" }),
+      voiceEnginesAvailable: async () => ({
+        groq: true,
+        llm: true,
+        llmProvider: "openai-compatible" as const,
+      }),
+    },
+  } as unknown as NodeModule;
+
   const { VoiceLauncher } = await import("@/components/voice/voice-launcher");
 
   const launcherHost = dom.window.document.createElement("div");
@@ -314,7 +352,7 @@ async function main() {
   const { AppRouterContext } =
     await import("next/dist/shared/lib/app-router-context.shared-runtime");
   const stubRouter = {
-    push: () => {},
+    push: (href: string) => pushed.push(href),
     replace: () => {},
     refresh: () => {},
     back: () => {},
@@ -364,6 +402,33 @@ async function main() {
     );
   });
   ok("escape closes it again", panel() === null);
+
+  /* --------------------------------------- a command that moves the page */
+  section("navigating closes the panel");
+
+  // Typed rather than spoken: the same path an utterance takes once it has
+  // been transcribed, without needing a microphone to fake.
+  await click(fab()!);
+  ok("open again", panel() !== null);
+
+  // No type attribute on that input, so do not select on one.
+  const typeBox = panel()!.querySelector("input:not([type=checkbox])") as HTMLInputElement | null;
+  ok("there is a box to type a command into", typeBox !== null);
+
+  const runButton = Array.from(panel()!.querySelectorAll("button")).find(
+    (b) => b.textContent?.trim() === "Run",
+  ) as HTMLButtonElement | undefined;
+  ok("and a Run button", runButton !== undefined);
+
+  await type(typeBox!, "receivables kholo");
+  await click(runButton!);
+
+  ok("the page was asked to move", pushed.includes("/receivables"), pushed);
+  ok(
+    "and the panel closed, so the page it opened is what you see",
+    panel() === null,
+    dom.window.document.body.innerHTML.length,
+  );
 
   console.log(`\n${checks - failures}/${checks} ui checks passed`);
   if (failures > 0) process.exitCode = 1;

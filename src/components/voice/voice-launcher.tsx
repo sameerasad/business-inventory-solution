@@ -69,7 +69,15 @@ export function VoiceLauncher({ whisperAvailable }: { whisperAvailable: boolean 
 
         {/* Mounted only while open, so the microphone hooks are not holding a
             stream open behind every page in the app. */}
-        {open ? <VoiceBar whisperAvailable={whisperAvailable} /> : null}
+        {open ? (
+          <VoiceBar
+            whisperAvailable={whisperAvailable}
+            embedded
+            // Close on a jump to another page, so the page it opened is what
+            // you end up looking at - which is also how you know it worked.
+            onNavigate={() => setOpen(false)}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   );
