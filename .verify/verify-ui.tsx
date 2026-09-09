@@ -403,6 +403,43 @@ async function main() {
   });
   ok("escape closes it again", panel() === null);
 
+  /* ---------------------------------------------------- room to scroll */
+  section("a panel taller than the screen can be scrolled");
+
+  // jsdom has no layout engine, so this cannot check that scrolling WORKS -
+  // nothing has a height to overflow. What it can check is that the rules are
+  // present, which is the whole of the bug: the panel had neither a height cap
+  // nor an overflow rule, so content taller than the screen hung off the
+  // bottom with the button you came to press out of reach. Remove either again
+  // and this fails.
+  await click(fab()!);
+  const content = panel() as HTMLElement | null;
+  ok(
+    "the panel is capped to the visible viewport",
+    content?.className.includes("max-h-[90dvh]") === true,
+    content?.className,
+  );
+  ok(
+    "in dvh, so a phone's address bar cannot make it taller than the screen",
+    content?.className.includes("dvh") === true && content?.className.includes("90vh") === false,
+    content?.className,
+  );
+  const scroller = content?.querySelector(".overflow-y-auto");
+  ok("and its body scrolls", scroller != null);
+  ok(
+    "the close button is outside that scrolling body, so it stays put",
+    Array.from(content?.querySelectorAll(".sr-only") ?? []).every(
+      (el) => el.closest(".overflow-y-auto") === null,
+    ),
+    content?.innerHTML.slice(0, 140),
+  );
+
+  await act(async () => {
+    dom.window.document.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
+
   /* --------------------------------------- a command that moves the page */
   section("navigating closes the panel");
 

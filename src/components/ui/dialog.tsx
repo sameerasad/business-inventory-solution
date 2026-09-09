@@ -34,13 +34,32 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 border bg-card p-6 shadow-lg sm:rounded-lg",
+        "fixed left-1/2 top-1/2 z-50 flex w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col",
+        "border bg-card p-4 shadow-lg sm:rounded-lg sm:p-6",
+        /**
+         * Height capped and the body scrolled, because without it a dialog
+         * taller than the screen simply hangs off the bottom of it: centred
+         * with -translate-y-1/2 and no overflow rule, the last thing in the
+         * panel - which is normally the button you came to press - is
+         * unreachable with no way to scroll to it. Every dialog in the app had
+         * this; the voice panel only showed it first, because a confirmation
+         * card grows with however many lines and warnings a command produced.
+         *
+         * dvh, not vh: on a phone vh counts the space behind the browser's own
+         * address bar, so a 90vh panel is taller than what you can actually
+         * see - which is the very bug this is fixing, just smaller.
+         */
+        "max-h-[90dvh]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className,
       )}
       {...props}
     >
-      {children}
+      {/* The scroll lives here rather than on the panel so the close button,
+          positioned against the panel, stays put while the body moves. The
+          grid and its gap are what the panel used to carry, kept so every
+          existing dialog spaces its children exactly as before. */}
+      <div className="grid gap-4 overflow-y-auto">{children}</div>
       <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>
