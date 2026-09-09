@@ -4,6 +4,7 @@ import { answerQuery, getVoiceCatalog, type VoiceAnswer } from "@/lib/voice/answ
 import { parseCommand, type VoiceCommand } from "@/lib/voice/parse";
 import { interpretWithLlm, llmConfigured, llmProvider } from "@/lib/voice/llm";
 import { buildPrompt, groqConfigured, transcribeWithGroq } from "@/lib/voice/transcribe";
+import { speechVocabulary } from "@/lib/voice/names";
 import { enrich } from "@/lib/voice/enrich";
 
 /**
@@ -170,24 +171,10 @@ export async function transcribeAndInterpretAction(
   // Fetched before transcribing: the names go to Whisper as context, which is
   // what lets it produce "Rakshani bazar" instead of something phonetic.
   const catalog = await getVoiceCatalog();
-  // Order matters more than length here, because buildPrompt takes what fits
-  // in a deliberately short budget and drops the rest.
-  //
-  // Shops used to come first, which spent the whole budget on the first eight
-  // or nine of them and never mentioned a product at all. That is a bad trade:
-  // one utterance needs ONE shop out of twenty-three, so listing nine of them
-  // is a lottery, while the six distinct flavour words are useful in almost
-  // every sentence and cost a fraction of the characters. Flavours first, then
-  // areas - there are few and they repeat - then shops and bookers with
-  // whatever room is left.
-  const vocabulary = [
-    ...new Set(catalog.products.map((p) => p.name)),
-    ...catalog.areas.flatMap((ar) => [ar.name, ar.voiceAlias ?? ""]),
-    ...catalog.shops.flatMap((sh) => [sh.name, sh.voiceAlias ?? ""]),
-    ...catalog.bookers.flatMap((b) => [b.name, b.voiceAlias ?? ""]),
-  ];
-
-  const prompt = buildPrompt(vocabulary);
+  // What Whisper is told to listen for. The order and the shortening both
+  // live in names.ts - see there for why a derived word beats a full name in a
+  // budget this small.
+  const prompt = buildPrompt(speechVocabulary(catalog));
 
   // Two passes, and only when the first one fails to mean anything.
   //

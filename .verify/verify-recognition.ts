@@ -518,6 +518,35 @@ async function main() {
     console.log("  SKIP  date ranges (no payments in this database)");
   }
 
+  /* --------------------------------------------- the catalog's own order */
+  section("the shops Whisper hears about are the ones you sell to");
+
+  // The pure tests next door prove that whoever is first in the list gets
+  // offered. This is the half that decides who that is - and it is a claim
+  // about a query, so it needs the database.
+  const { getVoiceCatalog } = await import("@/lib/voice/answer");
+  const voiceCatalog = await getVoiceCatalog();
+
+  const soldTo = await prisma.sale.groupBy({
+    by: ["shopId"],
+    where: { isDeleted: false, shopId: { not: null } },
+    _count: { _all: true },
+  });
+  const salesByShop = new Map(soldTo.map((row) => [row.shopId, row._count._all]));
+
+  if (salesByShop.size > 0 && voiceCatalog.shops.length > 1) {
+    const counts = voiceCatalog.shops.map((s) => salesByShop.get(s.id) ?? 0);
+    const descending = counts.every((n, i) => i === 0 || counts[i - 1]! >= n);
+    ok("shops come back busiest first", descending, counts);
+    ok(
+      "so the busiest shop is the one Whisper is told about first",
+      (counts[0] ?? 0) >= Math.max(...counts),
+      { first: counts[0], max: Math.max(...counts) },
+    );
+  } else {
+    console.log("  SKIP  shop ordering (needs both busy and idle shops)");
+  }
+
   console.log(`\n${checks - failures}/${checks} recognition checks passed`);
   if (failures > 0) process.exitCode = 1;
 }

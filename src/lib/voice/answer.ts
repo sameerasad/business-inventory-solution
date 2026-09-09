@@ -285,7 +285,21 @@ export async function getVoiceCatalog() {
     }),
     prisma.shop.findMany({
       where: { isDeleted: false },
-      orderBy: { name: "asc" },
+      /**
+       * Busiest first, not alphabetical.
+       *
+       * Whisper is told about as many shop names as fit a short budget, and it
+       * used to be handed them in name order - so the first eight of the
+       * alphabet were offered on every command and a shop starting with S
+       * never was. Shortening the names roughly doubled how many fit and still
+       * did not reach Saleem, because the cut-off was alphabetical rather than
+       * useful. The shops you sell to most are the ones worth spending that
+       * budget on.
+       *
+       * Order does not matter to the model that interprets the sentence: it is
+       * shown the whole list either way.
+       */
+      orderBy: [{ sales: { _count: "desc" } }, { name: "asc" }],
       select: { id: true, name: true, areaId: true, voiceAlias: true },
     }),
     prisma.booker.findMany({

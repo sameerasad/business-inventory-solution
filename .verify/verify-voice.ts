@@ -855,6 +855,154 @@ async function main() {
     quantityNotDate,
   );
 
+  /* --------------------------------------------- what Whisper is told */
+  section("the short name people actually say");
+
+  const { distinctiveName, speechVocabulary } = await import("@/lib/voice/names");
+
+  // Derived, not typed. The point is that a shop added tomorrow is covered
+  // without anybody configuring anything - so these are the real shapes of the
+  // names in this trade, not invented ones.
+  for (const [full, want] of [
+    ["Saleem General Store", "saleem"],
+    ["AJWA GENERAL STORE", "ajwa"],
+    ["Sajjad general store", "sajjad"],
+    ["irfan general store", "irfan"],
+    ["Anum bakery", "anum"],
+    ["Rajput Dairy", "rajput"],
+    ["Ghousia medical", "ghousia"],
+    ["Amir whole store", "amir"],
+    ["Rakshani bazar", "rakshani"],
+    ["Nazr e Ataar", "nazr"],
+  ] as const) {
+    const got = distinctiveName(full);
+    ok(`"${full}" -> "${want}"`, got === want, got);
+  }
+
+  // A name with nothing distinctive in it must not vanish from the prompt.
+  ok(
+    "an all-generic name falls back to itself rather than to nothing",
+    distinctiveName("General Store") === "general store",
+    distinctiveName("General Store"),
+  );
+  ok("an empty name yields nothing", distinctiveName("   ") === "");
+  ok(
+    "digits survive - 5G is the whole of that name",
+    distinctiveName("5G new Karachi") === "5g",
+    distinctiveName("5G new Karachi"),
+  );
+  ok(
+    "an Urdu-script name is left alone, being already what was said",
+    distinctiveName("انعم بیکری") === "انعم بیکری",
+    distinctiveName("انعم بیکری"),
+  );
+
+  /* ------------------------------------------------------ the whole list */
+  const vocabCatalog = {
+    products: [{ name: "Mango Juice" }, { name: "Mango Juice" }, { name: "Peach Juice" }],
+    areas: [{ name: "Khwaja ajmer nagri", voiceAlias: null }],
+    shops: [
+      { name: "Saleem General Store", voiceAlias: null },
+      { name: "Rajput Dairy", voiceAlias: "rajpoot" },
+    ],
+    bookers: [{ name: "Saifullah Khan", voiceAlias: null }],
+  };
+  const vocab = speechVocabulary(vocabCatalog);
+
+  ok(
+    "flavours come first, since one is needed in almost every order",
+    vocab[0] === "mango" && vocab[1] === "peach",
+    vocab.slice(0, 3),
+  );
+  ok(
+    "and are not repeated once per packaging",
+    vocab.filter((w) => w === "mango").length === 1,
+    vocab,
+  );
+  ok(
+    "a deliberate alias outranks a derived name",
+    vocab.indexOf("rajpoot") < vocab.indexOf("saleem"),
+    vocab,
+  );
+  ok("derived names are in the list", vocab.includes("saleem") && vocab.includes("khwaja"), vocab);
+  ok(
+    "full names are still there, last, for whatever room is left",
+    vocab.indexOf("Saleem General Store") > vocab.indexOf("saleem"),
+    vocab,
+  );
+  ok(
+    "nothing empty gets in",
+    vocab.every((w) => w.trim().length > 0),
+    vocab,
+  );
+
+  /* --------------------------------------------- the budget it was for */
+  const { buildPrompt } = await import("@/lib/voice/transcribe");
+  const realShops = [
+    "AJWA GENERAL STORE",
+    "Addul wahab",
+    "Ali ibrahim",
+    "Amir whole store",
+    "Anum bakery",
+    "Cabin chandio",
+    "Deen Muhammad Store",
+    "Ghousia medical",
+    "Grand Store",
+    "Hayatullah",
+    "Jalal store",
+    "Maaz store",
+    "Masha Allah store",
+    "Mashallah general store",
+    "Mohammadi store",
+    "Nazr e Ataar",
+    "Rajput Dairy",
+    "Rakshani bazar",
+    "Saleem General Store",
+    "Sajjad general store",
+    "Sikander store",
+    "Tayyab Trader",
+    "irfan general store",
+  ];
+  const countIn = (list: string[]) => {
+    const head = "Urdu or English. Transcribe only what is said. Names: ";
+    let used = head.length;
+    let n = 0;
+    for (const w of [...new Set(list)]) {
+      if (used + w.length + 2 > 180) break;
+      used += w.length + 2;
+      n += 1;
+    }
+    return n;
+  };
+  const fullCount = countIn(realShops);
+  const shortCount = countIn(realShops.map(distinctiveName));
+  ok(
+    `more names fit the prompt short than full (${shortCount} vs ${fullCount})`,
+    shortCount > fullCount * 1.5,
+    { shortCount, fullCount },
+  );
+  // Shortening alone was NOT enough, and saying so is the point of these two.
+  // A budget this small still cuts the list off somewhere, so WHICH names come
+  // first decides who is offered at all - and taking them in name order meant
+  // the front of the alphabet on every command and a shop starting with S
+  // never. The catalog now hands them over busiest first; these check that the
+  // order is what decides, not the length.
+  const firstOne = buildPrompt(["Saleem General Store", ...realShops].map(distinctiveName));
+  ok("a name at the front of the list is offered", firstOne.includes("saleem"), firstOne);
+
+  const lastOne = buildPrompt([...realShops, "Zzz Late Store"].map(distinctiveName));
+  ok("and one at the back is not, however short it is", !lastOne.includes("zzz"), lastOne);
+
+  // Product names go through the same shortening, which is worth a check
+  // because they are first in the list and were spending the budget on words
+  // Whisper already knows.
+  ok(
+    "a flavour is offered by its flavour, not by the word juice",
+    distinctiveName("Pomegranate Juice") === "pomegranate" &&
+      distinctiveName("Mango Juice") === "mango",
+    [distinctiveName("Pomegranate Juice"), distinctiveName("Mango Juice")],
+  );
+
   console.log(`\n${checks - failures}/${checks} voice checks passed`);
   if (failures > 0) process.exitCode = 1;
 }
