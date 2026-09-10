@@ -58,6 +58,17 @@ export function SearchableSelect({
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
+  /**
+   * Deferred, not debounced.
+   *
+   * This list is filtered in memory, so there is nothing to wait for - a
+   * debounce here would only add lag to something already instant. What a long
+   * list can do is make the keystroke itself feel heavy, because re-filtering
+   * happens before the character appears. useDeferredValue is the fix for
+   * that: the input updates immediately and the list catches up, without
+   * delaying anything.
+   */
+  const settledQuery = React.useDeferredValue(query);
   const [active, setActive] = React.useState(0);
 
   const wrapRef = React.useRef<HTMLDivElement>(null);
@@ -71,12 +82,12 @@ export function SearchableSelect({
   // keyboard never has to treat clearing the filter as a special case.
   const shown = React.useMemo(() => {
     const all: SelectOption[] = includeAll ? [{ value: ALL, label: allLabel }] : [];
-    const needle = query.trim().toLowerCase();
+    const needle = settledQuery.trim().toLowerCase();
     if (!needle) return all.concat(options);
     return all
       .concat(options)
       .filter((o) => o.value === ALL || o.label.toLowerCase().includes(needle));
-  }, [options, query, allLabel, includeAll]);
+  }, [options, settledQuery, allLabel, includeAll]);
 
   const chosen = options.find((o) => o.value === value);
   const selectedLabel = chosen
@@ -204,7 +215,7 @@ export function SearchableSelect({
                 result is not an empty list - without saying so, a search that
                 matched nothing looks identical to one that matched only "All".
                 Found by the test below this component, not by using it. */}
-            {query.trim() && !shown.some((o) => o.value !== ALL) ? (
+            {settledQuery.trim() && !shown.some((o) => o.value !== ALL) ? (
               <p className="px-2 py-1.5 text-sm text-muted-foreground">No match.</p>
             ) : null}
             {shown.length === 0 ? (

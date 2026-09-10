@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DateBox } from "@/components/filter-fields";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 
@@ -87,22 +87,16 @@ export function DashboardFilters({
           that silently does nothing. */}
       <div className="w-[160px] space-y-1.5">
         <Label htmlFor="filter-from">From</Label>
-        <Input
+        <DateBox
           id="filter-from"
-          type="date"
-          defaultValue={selected.from ?? ""}
-          onChange={(e) => setParam("from", e.target.value || null)}
+          value={selected.from ?? ""}
+          onCommit={(v) => setParam("from", v)}
         />
       </div>
 
       <div className="w-[160px] space-y-1.5">
         <Label htmlFor="filter-to">To</Label>
-        <Input
-          id="filter-to"
-          type="date"
-          defaultValue={selected.to ?? ""}
-          onChange={(e) => setParam("to", e.target.value || null)}
-        />
+        <DateBox id="filter-to" value={selected.to ?? ""} onCommit={(v) => setParam("to", v)} />
       </div>
 
       {hasRange ? (

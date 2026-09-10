@@ -403,6 +403,90 @@ async function main() {
   });
   ok("escape closes it again", panel() === null);
 
+  /* ------------------------------------------------------ debouncing */
+  section("a filter does not query per keystroke");
+
+  const { SearchBox, DateBox } = await import("@/components/filter-fields");
+
+  /** Every value the field has committed, in order. */
+  let commits: (string | null)[] = [];
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const settle = async (ms = 420) => {
+    await act(async () => {
+      await sleep(ms);
+    });
+  };
+
+  const fieldHost = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(fieldHost);
+  const fieldRoot = createRoot(fieldHost);
+
+  async function mountField(kind: "search" | "date", value = "") {
+    commits = [];
+    await act(async () => {
+      fieldRoot.render(
+        React.createElement(kind === "search" ? SearchBox : DateBox, {
+          key: kind + value + String((seq += 1)),
+          id: "f",
+          value,
+          onCommit: (v: string | null) => commits.push(v),
+        } as never),
+      );
+    });
+    return fieldHost.querySelector("input") as HTMLInputElement;
+  }
+
+  /* ------------------------------------------------------------ searching */
+  const box = await mountField("search");
+
+  // Five characters as fast as a person can type them. Committing per
+  // keystroke would be five queries for four results nobody waited to see.
+  for (const partial of ["s", "sa", "sal", "sale", "saleem"]) {
+    await type(box, partial);
+    await sleep(40);
+  }
+  ok("nothing is committed while the typing continues", commits.length === 0, commits);
+
+  await settle();
+  ok("one commit once it settles", commits.length === 1, commits);
+  ok("and it carries the whole word, not a prefix", commits[0] === "saleem", commits);
+
+  /* ------------------------------------------------- clearing is not waited on */
+  const filled = await mountField("search", "saleem");
+  await type(filled, "");
+  await settle(80);
+  ok(
+    "clearing commits at once - waiting to see everything again feels broken",
+    commits.length === 1 && commits[0] === null,
+    commits,
+  );
+
+  /* -------------------------------------------------------------- Enter */
+  const impatient = await mountField("search");
+  await type(impatient, "rajput");
+  await act(async () => {
+    impatient.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+  ok("Enter does not wait out the debounce", commits.includes("rajput"), commits);
+
+  /* --------------------------------------------------------------- dates */
+  const dateBox = await mountField("date");
+
+  // A date input is three values, and typing a year walks through complete
+  // valid dates on the way: each of these used to be its own query for a range
+  // nobody asked about.
+  for (const partial of ["0002-09-01", "0020-09-01", "0202-09-01", "2026-09-01"]) {
+    await type(dateBox, partial);
+    await sleep(40);
+  }
+  ok("typing a year does not query four times", commits.length === 0, commits);
+
+  await settle();
+  ok("just once, for the date that was meant", commits.length === 1, commits);
+  ok("and it is the finished date", commits[0] === "2026-09-01", commits);
+
   /* ---------------------------------------------------- room to scroll */
   section("a panel taller than the screen can be scrolled");
 
