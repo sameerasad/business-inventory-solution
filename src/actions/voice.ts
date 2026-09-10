@@ -194,6 +194,12 @@ export async function transcribeAndInterpretAction(
     return { ok: false, reason: "No audio was received.", retryable: false };
   }
   const langRaw = String(formData.get("language") ?? "ur");
+  // Which microphone settings recorded this. Carried in the engine field
+  // rather than a new column: "engine" already means "the thing that heard
+  // it", and a Clean/Raw switch nobody can measure is a switch nobody should
+  // trust - this was the cheapest way to make the comparison possible.
+  const captureRaw = String(formData.get("capture") ?? "");
+  const capture = captureRaw === "raw" ? "raw" : "clean";
   const language: "ur" | "en" = langRaw === "en" ? "en" : "ur";
 
   // Fetched before transcribing: the names go to Whisper as context, which is
@@ -240,7 +246,7 @@ export async function transcribeAndInterpretAction(
 
   const attemptId = await logVoiceAttempt({
     transcript: said,
-    engine: "whisper",
+    engine: `whisper:${capture}`,
     language,
     kind: command.kind,
     model: transcribed.model,

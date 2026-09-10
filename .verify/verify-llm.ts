@@ -243,6 +243,39 @@ async function main() {
   const ghostPage = toCommand(said({ kind: "navigate", href: "/admin/secrets" }), CATALOG, TODAY);
   ok("an invented page is refused", ghostPage.kind === "unknown", ghostPage);
 
+  // Filters on a real page are kept; anything not a filter this app reads is
+  // dropped rather than passed through to the browser.
+  const filtered = toCommand(
+    said({ kind: "navigate", href: "/sales?shop=21&q=mango" }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "a known page with known filters survives",
+    filtered.kind === "navigate" && filtered.href === "/sales?shop=21&q=mango",
+    filtered,
+  );
+  const smuggled = toCommand(
+    said({ kind: "navigate", href: "/sales?shop=21&redirect=http://elsewhere" }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "an unrecognised parameter is stripped, not forwarded",
+    smuggled.kind === "navigate" && smuggled.href === "/sales?shop=21",
+    smuggled,
+  );
+  const fakePathWithFilter = toCommand(
+    said({ kind: "navigate", href: "/admin/secrets?q=x" }),
+    CATALOG,
+    TODAY,
+  );
+  ok(
+    "and a filter cannot smuggle in a page that does not exist",
+    fakePathWithFilter.kind === "unknown",
+    fakePathWithFilter,
+  );
+
   const ghostProductInBatch = toCommand(
     said({ kind: "batch", productId: 555, quantity: 10, unitCost: 200 }),
     CATALOG,

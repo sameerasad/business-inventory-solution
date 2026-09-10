@@ -100,6 +100,26 @@ async function main() {
   for (const r of rows) byEngine.set(r.engine, (byEngine.get(r.engine) ?? 0) + 1);
   console.log(`  engines               ${[...byEngine].map(([e, n]) => `${e} ${n}`).join(", ")}`);
 
+  // Clean against Raw, which is the cheapest untried lever on the hearing
+  // half - and the one that has to be settled before paying for a model.
+  const captures = ["clean", "raw"] as const;
+  if (rows.some((r) => r.engine.includes(":"))) {
+    console.log(`
+${BOLD}Microphone settings${OFF}`);
+    for (const mode of captures) {
+      const group = rows.filter((r) => r.engine.endsWith(`:${mode}`));
+      if (group.length === 0) {
+        console.log(`  ${mode.padEnd(6)} ${DIM}not tried yet${OFF}`);
+        continue;
+      }
+      const got = group.filter((r) => r.kind !== "unknown").length;
+      console.log(
+        `  ${mode.padEnd(6)} ${String(group.length).padStart(3)} commands, ` +
+          `understood ${pct(got, group.length)}, saved ${group.filter((r) => r.saved).length}`,
+      );
+    }
+  }
+
   console.log(`\n${BOLD}Which script the transcript came back in${OFF}`);
   console.log(`${DIM}  Whisper mangles Urdu script far more than it mangles Roman, and the`);
   console.log(`  interpreting model reads Roman perfectly well - so this is the number`);

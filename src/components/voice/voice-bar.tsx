@@ -286,6 +286,7 @@ export function VoiceBar({
         const form = new FormData();
         form.append("audio", audio, "command.webm");
         form.append("language", lang === "ur-PK" ? "ur" : "en");
+        form.append("capture", capture);
         const outcome = await transcribeAndInterpretAction(form);
         if (!outcome.ok) {
           setWhisperError(outcome.reason);

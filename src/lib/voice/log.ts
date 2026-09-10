@@ -23,7 +23,14 @@ import { prisma } from "@/lib/db";
 
 export type VoiceAttemptRecord = {
   transcript: string;
-  engine: "whisper" | "browser";
+  /**
+   * What heard it: "browser" for the built-in recognition, or "whisper" with
+   * the microphone settings that recorded the clip - "whisper:raw" against
+   * "whisper:clean". The settings ride along here rather than in a column of
+   * their own, because a switch nobody can measure is a switch nobody should
+   * trust, and this needed no second migration against production.
+   */
+  engine: string;
   language: string;
   kind: string;
   model?: string | null;

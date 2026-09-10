@@ -733,11 +733,58 @@ function buildCommand(
 
   switch (extracted.kind) {
     case "navigate": {
-      const known = DESTINATIONS.find((d) => d.href === extracted.href);
+      /**
+       * A page, optionally with the filters that page already understands.
+       *
+       * Exact matching against the destination list threw away a good answer:
+       * asked to show one shop's sales, the model returned /sales?shop=7 -
+       * correct in every way except that it called it navigate rather than
+       * open - and this refused it as "not a page in this app". The kind it
+       * picked matters less than the href being sound, so the path is checked
+       * against the list and the query is checked key by key.
+       *
+       * Nothing is loosened by this. The path still has to be one of ours, and
+       * only these keys are allowed through - all of them filters the list
+       * pages read anyway, so the worst a wrong value can do is show an empty
+       * table. Anything else is dropped rather than passed along.
+       */
+      const FILTERS = new Set([
+        "q",
+        "area",
+        "shop",
+        "product",
+        "booker",
+        "category",
+        "status",
+        "kind",
+        "age",
+        "from",
+        "to",
+        "year",
+        "period",
+        "stock",
+        "packaging",
+      ]);
+
+      const raw = (extracted.href ?? "").trim();
+      const [path, search = ""] = raw.split("?");
+      const known = DESTINATIONS.find((d) => d.href === path);
       if (!known) {
         return { kind: "unknown", reason: "That did not match a page in this app." };
       }
-      return { kind: "navigate", href: known.href, label: known.label, confidence: "high" };
+
+      const kept = new URLSearchParams();
+      for (const [key, value] of new URLSearchParams(search)) {
+        if (FILTERS.has(key) && value.trim().length > 0) kept.set(key, value);
+      }
+      const query = kept.toString();
+
+      return {
+        kind: "navigate",
+        href: query ? `${known.href}?${query}` : known.href,
+        label: query ? `${known.label} (filtered)` : known.label,
+        confidence: "high",
+      };
     }
 
     case "query": {
