@@ -256,6 +256,13 @@ async function main() {
 
   section("known hallucinations are not passed on as commands");
   for (const junk of [
+    // Found in real use, not imagined: three of the first twenty spoken
+    // commands came back as the Urdu word for "music" and nothing else.
+    // Whisper's training data is full of music annotations and it reaches for
+    // them when speech is unclear - and this one was reaching the interpreter,
+    // which then had to make sense of a person saying "music" to a stock app.
+    "موسیقی",
+    "[Music]",
     "Thank you for watching!",
     "thanks for watching",
     "Please subscribe to my channel",

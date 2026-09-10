@@ -478,6 +478,11 @@ Choose exactly one kind:
   Prefer open over navigate whenever a shop, area, product or invoice is named alongside a
   page: "Rajput Dairy ki sales dikhao" should arrive already filtered to that shop, not on
   the whole sales list.
+  But open is for LOOKING. A selling word beats a shop name every time: "bech do", "bech
+  lo", "bhej do", "de do", "sell" mean an ORDER even when a shop is named and even when the
+  rest of the sentence is mangled. Two real commands were lost this way - a quantity, a
+  product and "raj poteedee ko bech lo" was read as a request to open a page, when the only
+  thing it could have been was an order.
 - area: adding a new AREA - a locality, not a shop inside one. Set newName only. Choose this
   when they say new area / naya area / naya ilaqa / نیا علاقہ. An area is a place a booker
   covers; a shop is a business inside an area. "naya area Sikander goth" is an area, while

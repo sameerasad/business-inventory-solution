@@ -52,6 +52,17 @@ async function main() {
     take: 200,
   });
 
+  /**
+   * Which language setting was used, and which script came back.
+   *
+   * These two were recorded from the start and not shown, which meant the most
+   * useful comparison in the whole table had to be done by hand against the
+   * database. The first twenty commands said Urdu-script transcripts were
+   * understood 47% of the time against 100% for Latin ones - the sort of thing
+   * this tool exists to make obvious.
+   */
+  const script = (text: string) => (/[\u0600-\u06FF]/.test(text) ? "urdu" : "latin");
+
   if (rows.length === 0) {
     console.log(
       `\nNothing recorded in the last ${days} days.\n` +
@@ -89,6 +100,21 @@ async function main() {
   for (const r of rows) byEngine.set(r.engine, (byEngine.get(r.engine) ?? 0) + 1);
   console.log(`  engines               ${[...byEngine].map(([e, n]) => `${e} ${n}`).join(", ")}`);
 
+  console.log(`\n${BOLD}Which script the transcript came back in${OFF}`);
+  console.log(`${DIM}  Whisper mangles Urdu script far more than it mangles Roman, and the`);
+  console.log(`  interpreting model reads Roman perfectly well - so this is the number`);
+  console.log(`  that decides which language the microphone should be set to.${OFF}`);
+  for (const which of ["latin", "urdu"] as const) {
+    const group = rows.filter((r) => script(r.transcript) === which);
+    if (group.length === 0) continue;
+    const got = group.filter((r) => r.kind !== "unknown").length;
+    const kept = group.filter((r) => r.saved).length;
+    console.log(
+      `  ${which.padEnd(6)} ${String(group.length).padStart(3)} commands, ` +
+        `understood ${pct(got, group.length).padStart(4)}, saved ${kept}`,
+    );
+  }
+
   const withProb = rows.filter((r) => r.noSpeechProb != null);
   if (withProb.length > 0) {
     const avg = withProb.reduce((s, r) => s + (r.noSpeechProb ?? 0), 0) / withProb.length;
@@ -109,7 +135,10 @@ async function main() {
           ? `${GREEN}${row.kind}, saved${OFF}`
           : `${YELLOW}${row.kind}${OFF}`;
     const prob = row.noSpeechProb != null ? ` ${DIM}nsp ${row.noSpeechProb.toFixed(2)}${OFF}` : "";
-    console.log(`  ${DIM}${when}${OFF}  ${verdict}${prob}`);
+    console.log(
+      `  ${DIM}${when}${OFF}  ${verdict}${prob}` +
+        ` ${DIM}[${row.language} -> ${script(row.transcript)}]${OFF}`,
+    );
     console.log(`      "${row.transcript}"`);
   }
 

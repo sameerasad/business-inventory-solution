@@ -108,6 +108,13 @@ const HALLUCINATIONS = [
   "www.",
   "subtitles by",
   "amara.org",
+  // Whisper's training data is full of music annotations, and it reaches for
+  // them when speech is unclear. Found in real use: three of the first twenty
+  // spoken commands came back as this and nothing else - somebody talking,
+  // transcribed as the word "music".
+  "موسیقی",
+  "[music]",
+  "(music)",
 ];
 
 export function isHallucination(text: string): boolean {

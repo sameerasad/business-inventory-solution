@@ -459,13 +459,26 @@ export function VoiceBar({
           </div>
         ) : null}
 
-        {/* One engine per language: neither engine can detect which is being
-            spoken, so both have to be told. */}
+        {/* Not "which language do you speak" - that is what the labels used to
+            imply, and it steered people to the worse option. Neither engine can
+            detect the language, so it has to be told; what it decides is which
+            SCRIPT the transcript comes back in, and for Urdu speech those two
+            are not equally good.
+
+            Measured on the first twenty real commands: transcripts that came
+            back in Urdu script were understood 47% of the time, Roman ones
+            100%, and the only command anybody went on to save was Roman. The
+            reason is that the interpreting model reads Roman Urdu perfectly
+            well, while Whisper writing Urdu script mangles exactly the shop
+            names the command depends on.
+
+            So the choice stays - a small sample is not a law - but the labels
+            now say what the buttons do. */}
         {micUsable ? (
           <div role="group" aria-label="Language" className="inline-flex rounded-md border p-0.5">
             {(
               [
-                ["en-PK", "English"],
+                ["en-PK", "Roman"],
                 ["ur-PK", "اردو"],
               ] as const
             ).map(([value, label]) => (
@@ -475,6 +488,11 @@ export function VoiceBar({
                 onClick={() => chooseLang(value)}
                 aria-pressed={lang === value}
                 disabled={listening}
+                title={
+                  value === "en-PK"
+                    ? "Speak Urdu or English; the transcript comes back in Roman letters. Measured as the more accurate of the two on real commands, because shop names survive better."
+                    : "The transcript comes back in Urdu script. Try it if Roman is mishearing you."
+                }
                 className={cn(
                   "rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
                   lang === value

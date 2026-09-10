@@ -655,8 +655,29 @@ async function main() {
      * is one person saying one sentence at a time, which never looks like
      * this. Spacing the calls keeps the test honest about what it is testing.
      */
+    /**
+     * A rate limit is Groq being busy, not a defect.
+     *
+     * Every live check here can hit it - one command costs about 4,600 tokens
+     * against 8,000 a minute and 200,000 a day - and a red suite for that
+     * reason teaches everyone to ignore red suites. So a rate-limited outcome
+     * skips, and only a real answer is judged.
+     */
+    const liveOk = (
+      label: string,
+      outcome: { ok: boolean; reason?: string },
+      cond: boolean,
+      detail?: unknown,
+    ) => {
+      if (!outcome.ok && (outcome.reason ?? "").toLowerCase().includes("rate limited")) {
+        skip(label, "the free tier is rate limited right now");
+        return;
+      }
+      ok(label, cond, detail);
+    };
+
     const spaced = async (transcript: string) => {
-      await new Promise((resolve) => setTimeout(resolve, 9000));
+      await new Promise((resolve) => setTimeout(resolve, 20000));
       return interpretWithLlm(transcript, CATALOG, TODAY);
     };
 
@@ -706,6 +727,29 @@ async function main() {
         "Roman Urdu with an area alias",
         urdu,
         (o) => o.ok && o.command.kind === "booking" && o.command.areaId === 12,
+      );
+
+      /* A regression found by reading the log of real commands.
+       *
+       * Preferring "open" whenever a shop is named alongside a page is right
+       * for "Rajput Dairy ki sales dikhao" and wrong for an order - and two
+       * real orders were lost to it, read as a request to open a page when the
+       * only thing they could have been was a sale. A selling word has to win.
+       */
+      const sellNotShow = await spaced("bees pack aam dhai sau ML bottle Rajput Dairy ko bech lo");
+      liveOk(
+        "a selling word beats a shop name: this is an order, not a page to open",
+        sellNotShow,
+        sellNotShow.ok && sellNotShow.command.kind === "booking",
+        sellNotShow.ok ? sellNotShow.command : sellNotShow,
+      );
+
+      const showNotSell = await spaced("Rajput Dairy ki sales dikhao");
+      liveOk(
+        "while asking to see a shop's sales still opens the filtered list",
+        showNotSell,
+        showNotSell.ok && showNotSell.command.kind === "open",
+        showNotSell.ok ? showNotSell.command : showNotSell,
       );
 
       const nav = await spaced("udhar dikhao");
