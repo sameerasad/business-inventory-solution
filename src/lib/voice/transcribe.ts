@@ -116,7 +116,14 @@ export function isHallucination(text: string): boolean {
 }
 
 export type TranscribeResult =
-  { ok: true; text: string; model: string } | { ok: false; reason: string; retryable: boolean };
+  | {
+      ok: true;
+      text: string;
+      model: string;
+      /** Whisper's own confidence that anybody spoke, when it reports one. */
+      noSpeechProb: number | null;
+    }
+  | { ok: false; reason: string; retryable: boolean };
 
 /**
  * Where transcription happens.
@@ -264,7 +271,12 @@ export async function transcribeWithGroq(
   form.append("file", audio, `command.${extension}`);
   form.append("model", model);
   form.append("language", options.language);
-  form.append("response_format", "json");
+  // verbose_json rather than json, for the per-segment numbers underneath the
+  // text. Without them a transcript of pure noise is indistinguishable from a
+  // sentence, and the noise gets handed to the model to make sense of - which
+  // ends with the person being told their sentence was not understood, when in
+  // truth it was never heard.
+  form.append("response_format", "verbose_json");
   // Zero temperature: a command is not creative writing, and a deterministic
   // transcript is what makes a misheard word reproducible enough to fix.
   form.append("temperature", "0");
@@ -320,11 +332,49 @@ export async function transcribeWithGroq(
   }
 
   let text: string;
+  let heardSpeech: number | null = null;
   try {
-    const body = (await response.json()) as { text?: unknown };
+    const body = (await response.json()) as {
+      text?: unknown;
+      segments?: { no_speech_prob?: unknown }[];
+    };
     text = typeof body.text === "string" ? body.text.trim() : "";
+
+    // Averaged across segments. Absent when the endpoint does not report it -
+    // a local Whisper server behind STT_BASE_URL returns text alone - and
+    // absent has to mean "no opinion" rather than "bad", or pointing this at
+    // your own machine would refuse everything.
+    const probs = (body.segments ?? [])
+      .map((seg) => (typeof seg.no_speech_prob === "number" ? seg.no_speech_prob : null))
+      .filter((p): p is number => p != null);
+    if (probs.length > 0) {
+      heardSpeech = probs.reduce((sum, p) => sum + p, 0) / probs.length;
+    }
   } catch {
     return { ok: false, reason: "The speech service sent an unreadable reply.", retryable: true };
+  }
+
+  /**
+   * Whisper's own opinion on whether anybody spoke.
+   *
+   * Measured against this service rather than picked from the docs:
+   *
+   *   real speech          no_speech_prob 0.036
+   *   near-silence         no_speech_prob 0.785   -> "Thank you."
+   *   loud broadband noise no_speech_prob 0.348   -> "Okay."
+   *
+   * 0.6 sits well clear of real speech and still catches the silence case,
+   * which is the one that produces confident nonsense. It does NOT catch a
+   * real sentence being misheard - that scores low, correctly, because
+   * somebody did speak. Different problem, different fix.
+   */
+  if (heardSpeech != null && heardSpeech > 0.6) {
+    console.error(`transcribe: no_speech_prob ${heardSpeech.toFixed(3)}, text "${text}"`);
+    return {
+      ok: false,
+      reason: "That did not sound like speech. Try again, a little closer to the microphone.",
+      retryable: true,
+    };
   }
 
   if (text.length === 0) {
@@ -344,5 +394,5 @@ export async function transcribeWithGroq(
       retryable: true,
     };
   }
-  return { ok: true, text, model };
+  return { ok: true, text, model, noSpeechProb: heardSpeech };
 }

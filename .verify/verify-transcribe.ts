@@ -209,9 +209,18 @@ async function main() {
     } else {
       // A quota refusal is not a broken setup, so it is reported as a skip.
       const quota = live.reason.toLowerCase().includes("quota");
+      const lower = live.reason.toLowerCase();
       if (quota) skip("real call", "rate limited right now");
-      else if (live.reason.toLowerCase().includes("nothing was heard")) {
+      else if (lower.includes("nothing was heard")) {
         ok("the key works - silence transcribed to nothing, as it should", true);
+      } else if (lower.includes("did not sound like speech")) {
+        // Better than the old pass, not a weaker one. The request still had to
+        // reach the service and come back with per-segment numbers for this
+        // refusal to be possible at all - so it proves the key, the endpoint,
+        // the model and the multipart shape exactly as before, AND proves the
+        // confidence gate works against the real API on the one input we can
+        // generate without a microphone.
+        ok("the key works, and silence is refused as not-speech", true);
       } else {
         ok(`the live call failed: ${live.reason}`, false, live);
       }

@@ -8,6 +8,7 @@ import { AlertTriangle, Check, Loader2, Mic, MicOff, Square, X } from "lucide-re
 import {
   interpretVoiceAction,
   transcribeAndInterpretAction,
+  markVoiceAttemptSavedAction,
   type VoiceResult,
 } from "@/actions/voice";
 import { createBookingAction } from "@/actions/bookings";
@@ -59,12 +60,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { speak, useSpeech, type SpeechLang } from "@/components/voice/use-speech";
-import { useRecorder } from "@/components/voice/use-recorder";
+import { useRecorder, type CaptureMode } from "@/components/voice/use-recorder";
 import { cn } from "@/lib/utils";
 
 const LANG_KEY = "voice-lang";
 const HANDS_FREE_KEY = "voice-hands-free";
 const ENGINE_KEY = "voice-engine";
+const CAPTURE_KEY = "voice-capture";
 
 /**
  * Which engine turns speech into text.
@@ -122,6 +124,16 @@ export function VoiceBar({
   const [thinking, setThinking] = useState(false);
   const [typed, setTyped] = useState("");
   const [engine, setEngine] = useState<Engine>("browser");
+  /**
+   * How the microphone is opened. "clean" is the browser's own processing,
+   * which is tuned for phone calls; "raw" turns off the noise suppression that
+   * removes the detail telling one consonant from another.
+   *
+   * Which wins depends on the microphone and the room, so it is a switch
+   * rather than a decision made here - and it stays on "clean" until somebody
+   * has heard the difference on the machine that matters.
+   */
+  const [capture, setCapture] = useState<CaptureMode>("clean");
   const [handsFree, setHandsFree] = useState(false);
   const [awaitingYes, setAwaitingYes] = useState(false);
   const [whisperError, setWhisperError] = useState<string | null>(null);
@@ -144,6 +156,8 @@ export function VoiceBar({
       setHandsFree(window.localStorage.getItem(HANDS_FREE_KEY) === "on");
       // Whisper is the better engine for Urdu, so it is the default when the
       // server has it - but a stored choice always wins.
+      const storedCapture = window.localStorage.getItem(CAPTURE_KEY);
+      if (storedCapture === "raw" || storedCapture === "clean") setCapture(storedCapture);
       const storedEngine = window.localStorage.getItem(ENGINE_KEY);
       if (storedEngine === "whisper" || storedEngine === "browser") {
         setEngine(whisperAvailable ? storedEngine : "browser");
@@ -159,6 +173,15 @@ export function VoiceBar({
     setEngine(next);
     try {
       window.localStorage.setItem(ENGINE_KEY, next);
+    } catch {
+      // Only affects the next visit.
+    }
+  };
+
+  const chooseCapture = (next: CaptureMode) => {
+    setCapture(next);
+    try {
+      window.localStorage.setItem(CAPTURE_KEY, next);
     } catch {
       // Only affects the next visit.
     }
@@ -185,13 +208,24 @@ export function VoiceBar({
     [],
   );
 
+  // runSave is memoised and cannot see the latest result through its closure.
+  const resultRef = useRef<VoiceResult | null>(null);
+  resultRef.current = result;
+
   const runSave = useCallback(
     async (command: WriteCommand) => {
       setSaving(true);
       try {
         const outcome = await ACTIONS[command.kind](emptyActionState, buildPayload(command));
         setSaveState(outcome);
-        if (outcome.ok) router.refresh();
+        if (outcome.ok) {
+          // Marked here rather than when the button was pressed: a proposal
+          // the server rejected is not evidence that it was understood right,
+          // and this figure is only worth keeping if it means that.
+          const attemptId = resultRef.current?.attemptId;
+          if (attemptId != null) void markVoiceAttemptSavedAction(attemptId);
+          router.refresh();
+        }
         return outcome;
       } finally {
         setSaving(false);
@@ -268,7 +302,7 @@ export function VoiceBar({
     [lang],
   );
 
-  const recorder = useRecorder({ onClip: handleClip });
+  const recorder = useRecorder({ onClip: handleClip, capture });
 
   startRef.current = engine === "whisper" ? recorder.start : start;
 
@@ -383,6 +417,38 @@ export function VoiceBar({
                 className={cn(
                   "rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
                   engine === value
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {usingWhisper ? (
+          <div role="group" aria-label="Microphone" className="inline-flex rounded-md border p-0.5">
+            {(
+              [
+                ["clean", "Clean"],
+                ["raw", "Raw"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => chooseCapture(value)}
+                aria-pressed={capture === value}
+                disabled={listening || thinking}
+                title={
+                  value === "clean"
+                    ? "The browser's own noise suppression. Tuned for phone calls."
+                    : "No noise suppression, mono, higher bitrate. Often clearer for transcription - try both and keep the one that hears you better."
+                }
+                className={cn(
+                  "rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
+                  capture === value
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:text-foreground",
                 )}

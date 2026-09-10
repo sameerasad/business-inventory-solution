@@ -581,6 +581,54 @@ async function main() {
     await prisma.shop.delete({ where: { id: freshShop.id } });
   }
 
+  /* --------------------------------------------------- the voice log */
+  section("what was said is written down");
+
+  const { logVoiceAttempt, markVoiceAttemptSaved } = await import("@/lib/voice/log");
+
+  const attemptId = await logVoiceAttempt({
+    transcript: "saleem ko bees aam ki chhoti bottle",
+    engine: "whisper",
+    language: "ur",
+    kind: "booking",
+    model: "whisper-large-v3",
+    noSpeechProb: 0.04,
+  });
+  ok("an attempt comes back with an id to attribute a save to", attemptId != null, attemptId);
+
+  const logged = await prisma.voiceAttempt.findUniqueOrThrow({ where: { id: attemptId! } });
+  ok("the transcript is kept exactly as heard", logged.transcript.includes("bees aam"), logged);
+  ok("with the engine that heard it", logged.engine === "whisper", logged.engine);
+  ok("and the confidence it reported", logged.noSpeechProb === 0.04, logged.noSpeechProb);
+  ok("not saved until something is actually written", logged.saved === false, logged.saved);
+
+  await markVoiceAttemptSaved(attemptId!);
+  const after = await prisma.voiceAttempt.findUniqueOrThrow({ where: { id: attemptId! } });
+  ok("marking it saved is what records the verdict", after.saved === true, after.saved);
+
+  // A runaway recording is not a command, and the column should not carry one.
+  const longId = await logVoiceAttempt({
+    transcript: "x".repeat(2000),
+    engine: "browser",
+    language: "unknown",
+    kind: "unknown",
+  });
+  const long = await prisma.voiceAttempt.findUniqueOrThrow({ where: { id: longId! } });
+  ok("a runaway transcript is capped", long.transcript.length === 500, long.transcript.length);
+
+  // The whole point of the try/catch in there: a command must not fail because
+  // the log did. Marking an id that does not exist is the cheapest way to
+  // provoke the failure path.
+  let threw = false;
+  try {
+    await markVoiceAttemptSaved(-1);
+  } catch {
+    threw = true;
+  }
+  ok("a log failure never becomes the command's failure", !threw);
+
+  await prisma.voiceAttempt.deleteMany({ where: { id: { in: [attemptId!, longId!] } } });
+
   console.log(`\n${checks - failures}/${checks} recognition checks passed`);
   if (failures > 0) process.exitCode = 1;
 }

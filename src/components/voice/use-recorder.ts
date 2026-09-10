@@ -62,7 +62,50 @@ function pickMimeType(): string {
   return "";
 }
 
-export function useRecorder({ onClip }: { onClip: (audio: Blob) => void }) {
+/**
+ * How the microphone is opened, and why there is a choice.
+ *
+ * The recorder used to ask for `{ audio: true }` and take whatever the browser
+ * gave it. Those defaults are tuned for a phone CALL, not for transcription,
+ * and two of them work against it: noise suppression removes the quiet detail
+ * that tells one consonant from another, and echo cancellation is solving a
+ * problem - a speaker feeding back into the mic - that does not exist when
+ * nobody is on the other end.
+ *
+ * "clean" is those defaults, unchanged, so nothing regresses for anyone it
+ * already suits. "raw" turns the processing off, keeps automatic gain (which
+ * genuinely helps a quiet mic), forces mono - Whisper listens to one channel
+ * either way - and asks for a higher bitrate so less of the voice is thrown
+ * away in the encoding.
+ *
+ * Which is better depends on the microphone and the room, and neither of those
+ * is something a test can tell us. Hence a switch, and hence "clean" stays the
+ * default until somebody has heard the difference on the machine that matters.
+ */
+export type CaptureMode = "clean" | "raw";
+
+const CAPTURE: Record<CaptureMode, { constraints: MediaTrackConstraints; bitrate?: number }> = {
+  clean: { constraints: {} },
+  raw: {
+    constraints: {
+      noiseSuppression: false,
+      echoCancellation: false,
+      autoGainControl: true,
+      channelCount: 1,
+    },
+    // Opus at 64 kbps for one voice channel is generous without being wasteful;
+    // the browser default can be well below this.
+    bitrate: 64000,
+  },
+};
+
+export function useRecorder({
+  onClip,
+  capture = "clean",
+}: {
+  onClip: (audio: Blob) => void;
+  capture?: CaptureMode;
+}) {
   const [supported, setSupported] = useState(false);
   const [state, setState] = useState<RecorderState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +171,12 @@ export function useRecorder({ onClip }: { onClip: (audio: Blob) => void }) {
 
     let media: MediaStream;
     try {
-      media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const { constraints } = CAPTURE[capture];
+      media = await navigator.mediaDevices.getUserMedia({
+        // An empty object still means "any microphone", so "clean" behaves
+        // exactly as { audio: true } did.
+        audio: Object.keys(constraints).length > 0 ? constraints : true,
+      });
     } catch (err) {
       const name = err instanceof DOMException ? err.name : "";
       if (name === "NotAllowedError" || name === "SecurityError") {
@@ -151,7 +199,11 @@ export function useRecorder({ onClip }: { onClip: (audio: Blob) => void }) {
 
     stream.current = media;
     const mimeType = pickMimeType();
-    const rec = new MediaRecorder(media, mimeType ? { mimeType } : undefined);
+    const { bitrate } = CAPTURE[capture];
+    const rec = new MediaRecorder(media, {
+      ...(mimeType ? { mimeType } : {}),
+      ...(bitrate ? { audioBitsPerSecond: bitrate } : {}),
+    });
     recorder.current = rec;
 
     rec.ondataavailable = (event) => {
@@ -226,7 +278,7 @@ export function useRecorder({ onClip }: { onClip: (audio: Blob) => void }) {
       // and the hard cap are the only limits left.
       heardSpeech.current = true;
     }
-  }, [cleanup, stop]);
+  }, [cleanup, stop, capture]);
 
   useEffect(
     () => () => {

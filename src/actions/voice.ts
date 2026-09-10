@@ -6,6 +6,7 @@ import { interpretWithLlm, llmConfigured, llmProvider } from "@/lib/voice/llm";
 import { buildPrompt, groqConfigured, transcribeWithGroq } from "@/lib/voice/transcribe";
 import { speechVocabulary } from "@/lib/voice/names";
 import { enrich } from "@/lib/voice/enrich";
+import { logVoiceAttempt, markVoiceAttemptSaved } from "@/lib/voice/log";
 
 /**
  * Interpret a spoken command.
@@ -26,6 +27,12 @@ export type VoiceResult = {
   answer: VoiceAnswer | null;
   /** One line describing what will happen, for the confirmation card. */
   summary: string;
+  /**
+   * The row this attempt was logged as, so saving it can be attributed back.
+   *
+   * Null when the log could not be written, which must never stop a command.
+   */
+  attemptId: number | null;
 };
 
 /**
@@ -60,18 +67,29 @@ export async function interpretVoiceAction(transcript: string): Promise<VoiceRes
       command: { kind: "unknown", reason: "Nothing was heard." },
       answer: null,
       summary: "Nothing was heard.",
+      attemptId: null,
     };
   }
 
   const catalog = await getVoiceCatalog();
   const command = await understand(said, catalog);
 
+  // Typed or spoken through the browser engine, the text arrived without
+  // Whisper - so there is no confidence figure to record.
+  const attemptId = await logVoiceAttempt({
+    transcript: said,
+    engine: "browser",
+    language: "unknown",
+    kind: command.kind,
+    model: llmConfigured() ? llmProvider() : "rules",
+  });
+
   if (command.kind === "query") {
     const answer = await answerQuery(command);
-    return { transcript: said, command, answer, summary: answer.speech };
+    return { transcript: said, command, answer, summary: answer.speech, attemptId };
   }
 
-  return { transcript: said, command, answer: null, summary: describe(command) };
+  return { transcript: said, command, answer: null, summary: describe(command), attemptId };
 }
 
 function describe(command: VoiceCommand): string {
@@ -131,6 +149,16 @@ function describe(command: VoiceCommand): string {
 }
 
 /** Whether the better engine is available, so the UI can offer it or not. */
+/**
+ * Record that a proposal was saved.
+ *
+ * Called after the write succeeds rather than when the button is pressed: a
+ * proposal the server rejected is not evidence that it was understood right.
+ */
+export async function markVoiceAttemptSavedAction(id: number): Promise<void> {
+  await markVoiceAttemptSaved(id);
+}
+
 export async function voiceEnginesAvailable(): Promise<{
   groq: boolean;
   llm: boolean;
@@ -210,19 +238,28 @@ export async function transcribeAndInterpretAction(
     return { ok: false, reason, retryable };
   }
 
+  const attemptId = await logVoiceAttempt({
+    transcript: said,
+    engine: "whisper",
+    language,
+    kind: command.kind,
+    model: transcribed.model,
+    noSpeechProb: transcribed.noSpeechProb,
+  });
+
   if (command.kind === "query") {
     const answer = await answerQuery(command);
     return {
       ok: true,
       model: transcribed.model,
-      result: { transcript: said, command, answer, summary: answer.speech },
+      result: { transcript: said, command, answer, summary: answer.speech, attemptId },
     };
   }
 
   return {
     ok: true,
     model: transcribed.model,
-    result: { transcript: said, command, answer: null, summary: describe(command) },
+    result: { transcript: said, command, answer: null, summary: describe(command), attemptId },
   };
 }
 

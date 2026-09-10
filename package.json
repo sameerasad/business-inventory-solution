@@ -40,7 +40,8 @@
     "verify:llm": "tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-llm.ts",
     "voice:try": "tsx scripts/try-voice.ts",
     "audit:sales": "tsx scripts/audit-sales.ts",
-    "verify:ui": "tsx --tsconfig .verify/tsconfig.dom.json .verify/verify-ui.tsx"
+    "verify:ui": "tsx --tsconfig .verify/tsconfig.dom.json .verify/verify-ui.tsx",
+    "voice:log": "tsx scripts/voice-log.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

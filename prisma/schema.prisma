@@ -33,42 +33,42 @@ model Category {
 }
 
 model Area {
-  id        Int       @id @default(autoincrement())
-  name      String    @unique
+  id         Int          @id @default(autoincrement())
+  name       String       @unique
   /// A short word to say out loud for this record, when its real name is hard
   /// for speech recognition to hear. Voice matches on the name OR this.
-  voiceAlias String?  @map("voice_alias")
-  isDeleted Boolean   @default(false) @map("is_deleted")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  shops     Shop[]
-  sales     Sale[]
-  bookings  Booking[]
-  bookers   BookerArea[]
+  voiceAlias String?      @map("voice_alias")
+  isDeleted  Boolean      @default(false) @map("is_deleted")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  shops      Shop[]
+  sales      Sale[]
+  bookings   Booking[]
+  bookers    BookerArea[]
 
   @@index([isDeleted])
   @@map("areas")
 }
 
 model Shop {
-  id        Int       @id @default(autoincrement())
-  areaId    Int       @map("area_id")
-  name      String
+  id         Int       @id @default(autoincrement())
+  areaId     Int       @map("area_id")
+  name       String
   /// A short word to say out loud for this record, when its real name is hard
   /// for speech recognition to hear. Voice matches on the name OR this.
-  voiceAlias String?  @map("voice_alias")
+  voiceAlias String?   @map("voice_alias")
   /// Optional delivery address. Entered once per shop and printed on every
   /// invoice for that shop, so a booker never retypes it.
-  address   String?
+  address    String?
   /// Optional WhatsApp / contact number for the shopkeeper. Used to pre-fill the
   /// "send this invoice on WhatsApp" dialog.
-  phone     String?
-  isDeleted Boolean   @default(false) @map("is_deleted")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  area      Area      @relation(fields: [areaId], references: [id], onDelete: Restrict)
-  sales     Sale[]
-  bookings  Booking[]
+  phone      String?
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  area       Area      @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  sales      Sale[]
+  bookings   Booking[]
 
   // One shop name per area. Also gives "add on the fly" a natural upsert target.
   @@unique([areaId, name])
@@ -251,23 +251,23 @@ model Payment {
 /// makes per-booker performance measurable at all - `created_by` was only ever a
 /// text label from an environment variable.
 model Booker {
-  id        Int       @id @default(autoincrement())
-  name      String    @unique
+  id         Int          @id @default(autoincrement())
+  name       String       @unique
   /// Optional short code / employee number used on paperwork.
-  code      String?
+  code       String?
   /// A short word to say out loud for this record, when its real name is hard
   /// for speech recognition to hear. Voice matches on the name OR this.
-  voiceAlias String?  @map("voice_alias")
-  phone     String?
-  notes     String?
+  voiceAlias String?      @map("voice_alias")
+  phone      String?
+  notes      String?
   /// Retired bookers keep all their history but drop out of the booking picker.
-  isActive  Boolean   @default(true) @map("is_active")
-  isDeleted Boolean   @default(false) @map("is_deleted")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  bookings  Booking[]
+  isActive   Boolean      @default(true) @map("is_active")
+  isDeleted  Boolean      @default(false) @map("is_deleted")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  bookings   Booking[]
   /// Territory: the areas this booker is responsible for.
-  areas     BookerArea[]
+  areas      BookerArea[]
 
   @@index([isDeleted, isActive])
   @@map("bookers")
@@ -289,4 +289,37 @@ model BookerArea {
   @@id([bookerId, areaId])
   @@index([areaId])
   @@map("booker_areas")
+}
+
+/// One spoken command, as it was heard and as it was understood.
+///
+/// Written so the hearing half can be judged on real use rather than on my
+/// guesses. Two things make it worth keeping: the transcript beside what was
+/// made of it shows WHERE a command failed, and whether the person went on to
+/// save it is the only honest signal of whether the understanding was right.
+/// A proposal that was abandoned was usually wrong.
+///
+/// Transcripts contain customer names and phone numbers, the same as the rest
+/// of this database.
+model VoiceAttempt {
+  id           Int      @id @default(autoincrement())
+  /// Exactly what the transcriber produced, before anything cleaned it up.
+  transcript   String
+  /// "whisper" or "browser" - which one heard it.
+  engine       String
+  /// The language the transcriber was told to expect.
+  language     String
+  /// The command kind it was understood as, "unknown" included.
+  kind         String
+  /// Which model interpreted it, when one did rather than the rule parser.
+  model        String?
+  /// Whisper own confidence that anybody spoke, when it reported one.
+  noSpeechProb Float?   @map("no_speech_prob")
+  /// Set once the person actually saved what was proposed.
+  saved        Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([kind, createdAt])
+  @@map("voice_attempts")
 }
