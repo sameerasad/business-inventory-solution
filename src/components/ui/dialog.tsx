@@ -47,7 +47,11 @@ const DialogContent = React.forwardRef<
         // passes in, and the "fix" did nothing at all. This one conflicts with
         // nothing, and with min-w-0 on the body below it is what makes long
         // text wrap rather than push.
-        "overflow-x-hidden",
+        // Both axes, deliberately. Hiding only x makes the browser compute y as
+        // auto, so the panel scrolls as well as the body inside it - two
+        // scrollbars for one list, and a header that slides away. Hidden here
+        // means the body below is the only thing that moves.
+        "overflow-hidden",
         "border bg-card p-4 shadow-lg sm:rounded-lg sm:p-6",
         /**
          * Height capped and the body scrolled, because without it a dialog
@@ -75,7 +79,13 @@ const DialogContent = React.forwardRef<
       {/* min-w-0 is what stops a long word widening the panel instead of
           wrapping inside it: a grid column is sized to its content until it is
           told it may be smaller. */}
-      <div className="grid min-w-0 gap-4 overflow-y-auto">{children}</div>
+      {/* min-w-0 AND min-h-0, for the same reason in both directions: a flex
+          child is sized to its own content until it is told it may be smaller.
+          Without min-h-0 this box simply grows as tall as the panel needs and
+          overflow-y-auto never has anything to scroll - which is why capping
+          the panel at 90dvh cut the bottom off instead of scrolling to it.
+          flex-1 gives it the space the header does not use. */}
+      <div className="grid min-h-0 w-full min-w-0 flex-1 gap-4 overflow-y-auto">{children}</div>
       <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>

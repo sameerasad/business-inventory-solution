@@ -525,8 +525,17 @@ async function main() {
   // check caught exactly that - the rule was in the source and not in the DOM.
   ok(
     "content that is too wide is contained rather than pushing the panel",
-    content?.className.includes("overflow-x-hidden") === true,
+    content?.className.includes("overflow-hidden") === true,
     content?.className,
+  );
+  // The vertical half of the same trap, and the one that was reported: a flex
+  // child is as tall as its content until told otherwise, so without min-h-0
+  // there is nothing for overflow-y-auto to scroll and a capped panel simply
+  // cuts its bottom off.
+  ok(
+    "and the body may be shorter than its contents, which is what lets it scroll",
+    (scroller as HTMLElement | null)?.className.includes("min-h-0") === true,
+    (scroller as HTMLElement | null)?.className,
   );
   ok(
     "and its scrolling body may be narrower than its contents",
