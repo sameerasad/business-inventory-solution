@@ -499,6 +499,13 @@ Rules that matter:
 - ONLY use ids from the catalog. Never invent one. If nothing matches, leave the id null.
 - Speech recognition mangles names. "Rajpur Daily" is very likely "Rajput Dairy"; resolve
   to the catalog entry that was plainly meant, and add a warning saying which you chose.
+- You may be given SEVERAL transcripts of the same recording, heard different ways. They are
+  not different sentences: they are one sentence, misheard differently each time. Read them
+  together and work out what was actually said - a word mangled in one is often clear in
+  another, and where they agree they are probably right. "bees pack aam bottle dhai sau ML
+  raajput dairy ko bech do" is recoverable from three bad attempts at it even though no
+  single one is readable. Where they disagree about a NUMBER, prefer the reading that makes
+  sense for this business, and warn about it.
 - A transcript may be mostly noise with a few real words in it. Do not give up on the whole
   sentence for that. Use only the fragments that clearly match something in the catalog,
   leave every other field null, and warn that the audio was unclear. A half-filled form
@@ -582,7 +589,7 @@ async function askAnthropic(transcript: string, context: string): Promise<Transp
       messages: [
         {
           role: "user",
-          content: `Transcript: ${transcript}\n\nCall ${TOOL_NAME} exactly once.`,
+          content: `${transcript}\n\nCall ${TOOL_NAME} exactly once.`,
         },
       ],
     });
@@ -617,22 +624,50 @@ async function askAnthropic(transcript: string, context: string): Promise<Transp
  * engine cannot loosen what reaches the database.
  */
 export async function interpretWithLlm(
-  transcript: string,
+  /**
+   * What was heard - one transcript, or several of the same recording.
+   *
+   * Several is the interesting case. Transcribing costs a request against an
+   * allowance barely touched (2,000 a day, of which this app uses under a
+   * hundred), while interpreting costs tokens against one that runs out. So
+   * the recording is heard more than once and the readings are handed over
+   * together, which spends the plentiful thing to save the scarce one: the
+   * whole set costs one interpretation, a few dozen tokens more than one
+   * reading would.
+   */
+  transcript: string | string[],
   catalog: VoiceCatalog,
   today = new Date(),
 ): Promise<LlmOutcome> {
   const provider = llmProvider();
   if (provider === "none") return { ok: false, reason: "No language model is configured." };
 
+  // Identical readings say nothing extra, so they collapse - two engines
+  // agreeing is already reflected in there being one line.
+  const heard = [
+    ...new Set(
+      (Array.isArray(transcript) ? transcript : [transcript])
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0),
+    ),
+  ];
+  if (heard.length === 0) return { ok: false, reason: "Nothing was heard." };
+
+  const said =
+    heard.length === 1
+      ? `Transcript: ${heard[0]}`
+      : `The same recording, heard ${heard.length} ways. One sentence, misheard differently each time:\n` +
+        heard.map((t, i) => `  ${i + 1}. ${t}`).join("\n");
+
   const context = `Today is ${today.toISOString().slice(0, 10)}.\n\n${catalogForPrompt(catalog)}`;
 
   const answer =
     provider === "anthropic"
-      ? await askAnthropic(transcript, context)
+      ? await askAnthropic(said, context)
       : await askOpenAiCompatible({
           system: SYSTEM,
           context,
-          transcript,
+          transcript: said,
           toolName: TOOL_NAME,
           schema: RELAXED_COMMAND_SCHEMA,
           // Someone is standing there waiting to say the next order. Better to

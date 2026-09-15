@@ -47,16 +47,28 @@ export type VoiceResult = {
  * limit degrades the feature instead of breaking it.
  */
 async function understand(
-  transcript: string,
+  /** One reading of the recording, or several of the same one. */
+  transcript: string | string[],
   catalog: Awaited<ReturnType<typeof getVoiceCatalog>>,
 ): Promise<VoiceCommand> {
+  const readings = (Array.isArray(transcript) ? transcript : [transcript]).filter(
+    (t) => t.trim().length > 0,
+  );
+
   if (llmConfigured()) {
-    const outcome = await interpretWithLlm(transcript, catalog);
+    const outcome = await interpretWithLlm(readings, catalog);
     if (outcome.ok) return enrich(outcome.command);
     // Worth a log: silently falling back hides an expired key for weeks.
     console.error("voice: falling back to the rule parser -", outcome.reason);
   }
-  return enrich(parseCommand(transcript, catalog));
+
+  // The rules read one sentence at a time and cannot weigh two against each
+  // other, so they get each in turn and the first that means something wins.
+  for (const reading of readings) {
+    const parsed = parseCommand(reading, catalog);
+    if (parsed.kind !== "unknown") return enrich(parsed);
+  }
+  return enrich(parseCommand(readings[0] ?? "", catalog));
 }
 
 export async function interpretVoiceAction(transcript: string): Promise<VoiceResult> {
@@ -218,34 +230,55 @@ export async function transcribeAndInterpretAction(
   // first, and if the result parses to nothing, the other one is tried before
   // giving up. The second call only happens on failure, so the normal path
   // stays one round trip.
+  /**
+   * Heard twice, on purpose, and both readings are kept.
+   *
+   * Whisper has to be told which language to expect, and on a short
+   * code-switched command that choice changes the answer completely: the same
+   * sentence comes back as Roman one way and Urdu script the other, mangled in
+   * different places. It used to try the chosen language, check whether
+   * anything could be made of it, and only then try the other - two round
+   * trips end to end, and the loser thrown away.
+   *
+   * Both now run at once, so this is no slower than one, and both are handed
+   * to the interpreter together. That is the trade worth making: transcribing
+   * spends a request against an allowance of two thousand a day that this app
+   * barely touches, while interpreting spends tokens against one that runs
+   * out - and two bad readings of the same sentence are often enough between
+   * them, because they are mangled in different places.
+   */
   const other: "ur" | "en" = language === "ur" ? "en" : "ur";
-  let transcribed = await transcribeWithGroq(audio, { language, prompt });
-  let said = transcribed.ok ? transcribed.text.slice(0, 400) : "";
-  let command = transcribed.ok ? await understand(said, catalog) : null;
+  const [chosen, alternate] = await Promise.all([
+    transcribeWithGroq(audio, { language, prompt }),
+    transcribeWithGroq(audio, { language: other, prompt }),
+  ]);
 
-  if (!transcribed.ok || command?.kind === "unknown") {
-    const retry = await transcribeWithGroq(audio, { language: other, prompt });
-    if (retry.ok) {
-      const retrySaid = retry.text.slice(0, 400);
-      const retryCommand = await understand(retrySaid, catalog);
-      // Only prefer the retry if it actually understood something - otherwise
-      // the first transcript is the more honest thing to show.
-      if (retryCommand.kind !== "unknown" || !transcribed.ok) {
-        transcribed = retry;
-        said = retrySaid;
-        command = retryCommand;
-      }
-    }
+  // Both refused means the recording itself was the problem - no speech, a
+  // rejected key, no quota - and that is what to report.
+  if (!chosen.ok && !alternate.ok) {
+    return { ok: false, reason: chosen.reason, retryable: chosen.retryable };
   }
 
-  if (!transcribed.ok || command == null) {
-    const reason = transcribed.ok ? "Nothing recognisable was heard." : transcribed.reason;
-    const retryable = transcribed.ok ? true : transcribed.retryable;
-    return { ok: false, reason, retryable };
+  // Narrowed once and reused: a ternary over the two leaves TypeScript with
+  // the union, and the model name and confidence live only on the ok side.
+  const heard = [chosen, alternate].filter((r): r is Extract<typeof r, { ok: true }> => r.ok);
+  const readings = heard.map((r) => r.text.slice(0, 400)).filter((text) => text.length > 0);
+
+  if (readings.length === 0) {
+    return { ok: false, reason: "Nothing recognisable was heard.", retryable: true };
   }
+
+  const transcribed = heard[0]!;
+  const command = await understand(readings, catalog);
+
+  // What to show in the box: the reading in the script the person chose, since
+  // that is the one they can read and correct.
+  const said = (chosen.ok ? chosen.text : alternate.ok ? alternate.text : "").slice(0, 400);
 
   const attemptId = await logVoiceAttempt({
-    transcript: said,
+    // Every reading, not just the one on screen. Two manglings of the same
+    // sentence side by side are what make it obvious where hearing failed.
+    transcript: readings.length > 1 ? readings.join("  |  ") : (readings[0] ?? said),
     engine: `whisper:${capture}`,
     language,
     kind: command.kind,

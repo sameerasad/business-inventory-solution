@@ -785,6 +785,76 @@ async function main() {
         showNotSell.ok ? showNotSell.command : showNotSell,
       );
 
+      /* Several readings of one recording, from the real log.
+       *
+       * Transcribing costs a request against an allowance this app barely
+       * touches; interpreting costs tokens against one that runs out. So the
+       * recording is heard twice and both readings are handed over together.
+       *
+       * These two each failed on their own - one could not pin the size, the
+       * other was called garbled - and the pair is what makes the shop and the
+       * quantity recoverable. The size stays blank, correctly: neither reading
+       * contains it, and this must not start inventing one to look clever.
+       */
+      await new Promise((resolve) => setTimeout(resolve, 20000));
+      const bothBad = await interpretWithLlm(
+        [
+          "بیس پیک آم بٹل ڈائی سا ایمیل راجپوٹیری کو بیج دو",
+          "Peace back up, bottle dice, I am in Rajput dairy, go beach, go.",
+        ],
+        CATALOG,
+        TODAY,
+      );
+      liveOk(
+        "two unreadable transcripts together recover the shop",
+        bothBad,
+        bothBad.ok && bothBad.command.kind === "booking" && bothBad.command.shopId === 21,
+        bothBad.ok ? bothBad.command : bothBad,
+      );
+      liveOk(
+        "and the quantity, which only one of them carried legibly",
+        bothBad,
+        bothBad.ok &&
+          bothBad.command.kind === "booking" &&
+          bothBad.command.lines[0]?.quantity === 20,
+        bothBad.ok ? bothBad.command : bothBad,
+      );
+
+      /* What must never happen: a size nobody said.
+       *
+       * My first two attempts at this check were both wrong, and instructively
+       * so. The catalog above holds one mango bottle, so filling it in was
+       * right. Then with three to choose from it still picked 250ml - also
+       * right, because "ڈائی سا ایمیل" and "bottle dice" are both manglings of
+       * "dhai sau ML", which IS two hundred and fifty. Reading that through
+       * the noise is the behaviour we want, not a fault.
+       *
+       * So the invariant has to be tested on transcripts that genuinely carry
+       * no size at all.
+       */
+      await new Promise((resolve) => setTimeout(resolve, 20000));
+      const manySizes = {
+        ...CATALOG,
+        products: [
+          ...CATALOG.products,
+          { ...CATALOG.products[0]!, id: 91, sku: "MNG-BTL-500", variantValue: "500ml" },
+          { ...CATALOG.products[0]!, id: 92, sku: "MNG-BTL-1000", variantValue: "1000ml" },
+        ],
+      };
+      const noSize = await interpretWithLlm(
+        ["بیس پیک آم بٹل راجپوٹیری کو بیج دو", "20 pack aam bottle Rajput dairy ko bech do"],
+        manySizes,
+        TODAY,
+      );
+      liveOk(
+        "with three mango bottles and no size said, the size is left for a person",
+        noSize,
+        noSize.ok &&
+          noSize.command.kind === "booking" &&
+          noSize.command.missing.includes("product"),
+        noSize.ok ? noSize.command : noSize,
+      );
+
       const nav = await spaced("udhar dikhao");
       judge(
         "Urdu navigation",

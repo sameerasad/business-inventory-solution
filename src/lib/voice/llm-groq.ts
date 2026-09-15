@@ -153,7 +153,7 @@ export async function askOpenAiCompatible(args: {
           { role: "system", content: `${args.system}\n\n${args.context}` },
           {
             role: "user",
-            content: `Transcript: ${args.transcript}\n\nCall ${args.toolName} once.`,
+            content: `${args.transcript}\n\nCall ${args.toolName} once.`,
           },
         ],
         tools: [
