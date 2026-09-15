@@ -375,7 +375,7 @@ export function VoiceBar({
             }
             disabled={thinking}
             variant={listening ? "destructive" : "default"}
-            className="h-11 min-w-[150px]"
+            className="h-11 min-w-0 flex-1 sm:min-w-[150px] sm:flex-none"
           >
             {listening ? (
               <>
@@ -529,7 +529,7 @@ export function VoiceBar({
 
       {/* What was heard, on its own line with the whole width to itself. */}
       <div className="flex items-start gap-2 px-4 pb-4 pt-3">
-        <p aria-live="polite" className="min-w-0 flex-1 text-sm leading-relaxed">
+        <p aria-live="polite" className="min-w-0 flex-1 break-words text-sm leading-relaxed">
           {listening ? (
             <span className="text-muted-foreground">{transcript || "Listening..."}</span>
           ) : result ? (
@@ -1026,7 +1026,7 @@ function ConfirmWrite({
         </dl>
 
         {command.warnings.length > 0 ? (
-          <ul className="mt-2 space-y-0.5 border-t pt-2 text-xs text-muted-foreground">
+          <ul className="mt-2 space-y-0.5 break-words border-t pt-2 text-xs text-muted-foreground">
             {command.warnings.map((w) => (
               <li key={w}>· {w}</li>
             ))}
@@ -1092,9 +1092,12 @@ const KIND_LABEL = {
 
 function Row({ label, value, missing }: { label: string; value: string; missing?: boolean }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 sm:justify-start">
+    // Stacked on a phone, side by side from sm up. A shop name and a product
+    // description do not fit beside their labels on 390px, and squeezing them
+    // there is what turned a long value into a panel wider than the screen.
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-start sm:gap-3">
       <dt className="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className={cn("font-medium", missing && "text-destructive")}>
+      <dd className={cn("min-w-0 break-words font-medium", missing && "text-destructive")}>
         {missing ? (
           <span className="flex items-center gap-1">
             <MicOff className="h-3.5 w-3.5" />

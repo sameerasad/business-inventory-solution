@@ -846,12 +846,30 @@ async function main() {
         manySizes,
         TODAY,
       );
+      /* The invariant is that a guess is never SILENT, not which of its two
+       * shapes it takes.
+       *
+       * Asked for "aam bottle" with three sizes to choose from, the model
+       * sometimes leaves the product blank and sometimes picks one and says
+       * "Assumed product Mango Juice Bottle 250ml based on 'aam bottle'". Both
+       * are acceptable, and both reach a person before anything is saved. An
+       * earlier version of this demanded the first and failed on the second,
+       * which made it flaky rather than strict - and a flaky check is worse
+       * than none, because it teaches everyone to re-run until it is green.
+       */
       liveOk(
-        "with three mango bottles and no size said, the size is left for a person",
+        "an unsaid size is either left blank or declared as an assumption",
         noSize,
         noSize.ok &&
           noSize.command.kind === "booking" &&
-          noSize.command.missing.includes("product"),
+          (noSize.command.missing.includes("product") ||
+            noSize.command.warnings.some((w) => /assum/i.test(w))),
+        noSize.ok ? noSize.command : noSize,
+      );
+      liveOk(
+        "and never at high confidence, so the card asks to be read",
+        noSize,
+        noSize.ok && noSize.command.kind === "booking" && noSize.command.confidence === "low",
         noSize.ok ? noSize.command : noSize,
       );
 

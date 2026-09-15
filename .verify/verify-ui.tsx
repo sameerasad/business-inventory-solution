@@ -510,6 +510,29 @@ async function main() {
   );
   const scroller = content?.querySelector(".overflow-y-auto");
   ok("and its body scrolls", scroller != null);
+
+  /* --------------------------------------------- narrow enough for a phone
+   *
+   * jsdom has no layout, so this cannot prove nothing overflows - it can only
+   * check the rules without which it does. Both are the same CSS trap: a flex
+   * or grid child is sized to its own content until it is told it may be
+   * smaller, so on a 390px screen one long transcript pushed the whole panel
+   * sideways off the edge rather than wrapping inside it.
+   */
+  // Asserted on overflow-x-hidden rather than a max-width, because a max-width
+  // here loses to the one the caller passes: cn() is tailwind-merge and keeps
+  // only the last class setting a given property. The first version of this
+  // check caught exactly that - the rule was in the source and not in the DOM.
+  ok(
+    "content that is too wide is contained rather than pushing the panel",
+    content?.className.includes("overflow-x-hidden") === true,
+    content?.className,
+  );
+  ok(
+    "and its scrolling body may be narrower than its contents",
+    (scroller as HTMLElement | null)?.className.includes("min-w-0") === true,
+    (scroller as HTMLElement | null)?.className,
+  );
   ok(
     "the close button is outside that scrolling body, so it stays put",
     Array.from(content?.querySelectorAll(".sr-only") ?? []).every(
