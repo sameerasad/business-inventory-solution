@@ -42,7 +42,8 @@
     "audit:sales": "tsx scripts/audit-sales.ts",
     "verify:ui": "tsx --tsconfig .verify/tsconfig.dom.json .verify/verify-ui.tsx",
     "voice:log": "tsx scripts/voice-log.ts",
-    "verify:layout": "node .verify/verify-layout.mjs"
+    "verify:layout": "node .verify/verify-layout.mjs",
+    "voice:learn": "tsx scripts/voice-learn.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
