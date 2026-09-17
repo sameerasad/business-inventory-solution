@@ -208,6 +208,22 @@ export function VoiceBar({
     [],
   );
 
+  /**
+   * What a spoken answer to "Save?" does - in ONE place.
+   *
+   * It used to live inside the browser engine's handler, and the Whisper path
+   * never went through that handler. So with Whisper on - which is the default
+   * - saying "haan" was treated as a brand new command, went to the model, came
+   * back as nothing anyone could act on, and the booking just sat there. The
+   * real log says it plainly: "haan" or "nahi" spoken eight times, understood
+   * zero times, and one save out of eighteen proposed bookings.
+   *
+   * Two engines cannot each carry their own copy of a rule about when to write
+   * to the database. Both now call this.
+   */
+  const answerTheQuestionRef = useRef<(said: string) => Promise<void>>(async () => {});
+  const answerTheQuestion = useCallback((said: string) => answerTheQuestionRef.current(said), []);
+
   // runSave is memoised and cannot see the latest result through its closure.
   const resultRef = useRef<VoiceResult | null>(null);
   resultRef.current = result;
@@ -243,17 +259,7 @@ export function VoiceBar({
       // still talking all cancel, because the alternative is writing a record
       // nobody agreed to.
       if (modeRef.current === "confirm") {
-        modeRef.current = "command";
-        const pending = pendingRef.current;
-        if (parseConfirmation(said) === "confirm" && pending) {
-          const outcome = await runSave(pending);
-          speak(outcome.ok ? "Saved." : "That did not save.", lang);
-        } else {
-          setAwaitingYes(false);
-          pendingRef.current = null;
-          setSaveState({ ok: false, message: "Not saved - nothing was changed.", fieldErrors: {} });
-          speak("Cancelled.", lang);
-        }
+        await answerTheQuestion(said);
         return;
       }
 
@@ -293,6 +299,19 @@ export function VoiceBar({
           return;
         }
         setWhisperError(null);
+
+        // The clip is the answer to "Save?", not a new command. Without this
+        // the answer went off to be interpreted as an order, which is how a
+        // spoken "haan" managed never to save anything.
+        //
+        // The interpreting round trip above is wasted on a one-word answer and
+        // is not free - it spends a full catalogue prompt out of a daily
+        // allowance that runs out. Worth removing later with a transcribe-only
+        // path; not worth holding up a fix for something that has never worked.
+        if (modeRef.current === "confirm") {
+          await answerTheQuestion(outcome.result.transcript);
+          return;
+        }
         await applyResult(outcome.result);
       } finally {
         setThinking(false);
@@ -306,6 +325,24 @@ export function VoiceBar({
   const recorder = useRecorder({ onClip: handleClip, capture });
 
   startRef.current = engine === "whisper" ? recorder.start : start;
+
+  answerTheQuestionRef.current = async (said: string) => {
+    modeRef.current = "command";
+    const pending = pendingRef.current;
+    // Only an unmistakable yes writes. A no, a mumble, or somebody still
+    // talking all cancel - parseConfirmation is deliberately strict, because a
+    // false no costs one repeated sentence and a false yes costs a record
+    // nobody agreed to.
+    if (parseConfirmation(said) === "confirm" && pending) {
+      const outcome = await runSave(pending);
+      speak(outcome.ok ? "Saved." : "That did not save.", lang);
+      return;
+    }
+    setAwaitingYes(false);
+    pendingRef.current = null;
+    setSaveState({ ok: false, message: "Not saved - nothing was changed.", fieldErrors: {} });
+    speak("Cancelled.", lang);
+  };
 
   applyResultRef.current = async (interpreted: VoiceResult) => {
     setResult(interpreted);

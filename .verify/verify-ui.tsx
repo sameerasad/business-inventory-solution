@@ -12,6 +12,7 @@
  *
  * So: mount it, open it, type in it, and check what comes back.
  */
+import fs from "node:fs";
 import path from "node:path";
 
 import { JSDOM } from "jsdom";
@@ -581,6 +582,49 @@ async function main() {
     "and the panel closed, so the page it opened is what you see",
     panel() === null,
     dom.window.document.body.innerHTML.length,
+  );
+
+  /* ------------------------------------------------------------------------ */
+  section("a spoken yes reaches the same place from both engines");
+
+  /**
+   * This one reads the source rather than driving the component, and that is a
+   * deliberate, stated limit: firing a real clip needs a MediaRecorder that
+   * emits events and an AudioContext analyser that reports speech, neither of
+   * which jsdom has. So this proves the wiring, not the behaviour.
+   *
+   * It is still worth having, because the wiring IS what broke. The rule for
+   * what a spoken "haan" does lived inside the browser engine's handler, and
+   * the Whisper path - the default - never called that handler. Saying "haan"
+   * was therefore interpreted as a fresh order and saved nothing. The log over
+   * two weeks: eight confirmations spoken, none understood, one save out of
+   * eighteen proposed bookings.
+   *
+   * The invariant is that neither engine keeps its own copy of a rule about
+   * when to write to the database.
+   */
+  const barSrc = fs.readFileSync(path.resolve("src/components/voice/voice-bar.tsx"), "utf8");
+  const browserPath = barSrc.slice(barSrc.indexOf("const handleFinal"), barSrc.indexOf("const handleClip"));
+  const whisperPath = barSrc.slice(barSrc.indexOf("const handleClip"), barSrc.indexOf("const recorder ="));
+
+  ok(
+    "the browser path hands a confirmation to the shared answer",
+    /modeRef\.current === "confirm"/.test(browserPath) && /answerTheQuestion\(/.test(browserPath),
+  );
+  ok(
+    "the Whisper path hands a confirmation to the shared answer",
+    /modeRef\.current === "confirm"/.test(whisperPath) && /answerTheQuestion\(/.test(whisperPath),
+  );
+  ok(
+    "and neither decides for itself whether to save",
+    !/parseConfirmation\(/.test(browserPath) && !/parseConfirmation\(/.test(whisperPath),
+    "parseConfirmation belongs in one place only",
+  );
+  ok(
+    "which is the shared answer itself",
+    /answerTheQuestionRef\.current = async/.test(barSrc) &&
+      (barSrc.match(/parseConfirmation\(/g) ?? []).length === 1,
+    (barSrc.match(/parseConfirmation\(/g) ?? []).length,
   );
 
   console.log(`\n${checks - failures}/${checks} ui checks passed`);
