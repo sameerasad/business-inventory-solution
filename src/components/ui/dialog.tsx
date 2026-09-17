@@ -81,11 +81,23 @@ const DialogContent = React.forwardRef<
           told it may be smaller. */}
       {/* min-w-0 AND min-h-0, for the same reason in both directions: a flex
           child is sized to its own content until it is told it may be smaller.
-          Without min-h-0 this box simply grows as tall as the panel needs and
-          overflow-y-auto never has anything to scroll - which is why capping
-          the panel at 90dvh cut the bottom off instead of scrolling to it.
-          flex-1 gives it the space the header does not use. */}
-      <div className="grid min-h-0 w-full min-w-0 flex-1 gap-4 overflow-y-auto">{children}</div>
+          flex-1 gives it the space the header does not use.
+          --
+          auto-rows-max is the one that actually made this scroll, and it took a
+          browser to find. A grid row normally refuses to shrink below its
+          content - EXCEPT when the item in it has overflow other than visible,
+          which drops that floor to zero. The voice panel's card carries
+          overflow-hidden (it clips its own rounded corners), so the grid was
+          free to squeeze a 940px card into 392px; the card then quietly cut off
+          everything past the fold, this box never overflowed, and
+          overflow-y-auto had nothing to scroll. Measured, not guessed:
+          verify:layout reported grid-template-rows "62px 392px" against a card
+          whose scrollHeight was 940, with the Save button sitting at y=1008 on
+          a 560px screen. grid-auto-rows: max-content restores the floor, so a
+          tall child stays tall and this box is what scrolls. */}
+      <div className="grid min-h-0 w-full min-w-0 flex-1 auto-rows-max gap-4 overflow-y-auto">
+        {children}
+      </div>
       <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>
