@@ -24,6 +24,8 @@
  *                                          useful rows in the table.
  */
 import { prisma } from "@/lib/db";
+import { CONFIRM_WORDS, CANCEL_WORDS } from "@/lib/voice/lexicon";
+import { tokenise } from "@/lib/voice/normalise";
 
 const DIM = "[2m";
 const BOLD = "[1m";
@@ -63,6 +65,30 @@ async function main() {
    */
   const script = (text: string) => (/[\u0600-\u06FF]/.test(text) ? "urdu" : "latin");
 
+  /**
+   * Was this an answer to "Save?" rather than a command?
+   *
+   * These have to be counted apart, because the interpreting model is never
+   * asked to make sense of them and quite reasonably returns "unknown" - so
+   * every spoken "haan" was landing in the not-understood column and dragging
+   * the headline figure down. Ten of them made the difference between a
+   * reported 59% and an actual 81%, which is the sort of error that sends the
+   * next month of work at the wrong half of the problem.
+   *
+   * A row carries every reading of one recording, so it counts as an answer if
+   * ANY reading is one: "haan" heard as Urdu and as "Huh." in English is still
+   * somebody saying yes.
+   */
+  const isAnswer = (transcript: string) =>
+    transcript.split("|").some((reading) => {
+      const tokens = tokenise(reading);
+      return (
+        tokens.length > 0 &&
+        tokens.length <= 2 &&
+        tokens.every((t) => CONFIRM_WORDS.has(t) || CANCEL_WORDS.has(t))
+      );
+    });
+
   if (rows.length === 0) {
     console.log(
       `\nNothing recorded in the last ${days} days.\n` +
@@ -73,13 +99,17 @@ async function main() {
   }
 
   /* ------------------------------------------------------------ the summary */
-  const total = rows.length;
-  const unknown = rows.filter((r) => r.kind === "unknown").length;
+  // Answers to "Save?" are not commands and are not judged as ones.
+  const answers = rows.filter((r) => isAnswer(r.transcript));
+  const commands = rows.filter((r) => !isAnswer(r.transcript));
+
+  const total = commands.length;
+  const unknown = commands.filter((r) => r.kind === "unknown").length;
   const understood = total - unknown;
   const saved = rows.filter((r) => r.saved).length;
   // Only writes can be saved, so a question or a navigation is not a failure
   // for never having been.
-  const writable = rows.filter(
+  const writable = commands.filter(
     (r) => !["unknown", "query", "navigate", "open"].includes(r.kind),
   ).length;
 
@@ -94,6 +124,15 @@ async function main() {
         `${DIM}(${pct(saved, writable)})${OFF}`,
     );
     console.log(`${DIM}  A write proposed and then abandoned was usually understood wrong.${OFF}`);
+  }
+  if (answers.length > 0) {
+    // Listed, not scored. The model is never asked to interpret these, so
+    // "understood" means nothing for them - what matters is whether the write
+    // they answered went on to be saved, and that shows against the write.
+    console.log(
+      `  answers to "Save?"    ${answers.length}  ` +
+        `${DIM}(counted apart - these are yes or no, not commands)${OFF}`,
+    );
   }
 
   const byEngine = new Map<string, number>();
@@ -121,11 +160,12 @@ ${BOLD}Microphone settings${OFF}`);
   }
 
   console.log(`\n${BOLD}Which script the transcript came back in${OFF}`);
-  console.log(`${DIM}  Whisper mangles Urdu script far more than it mangles Roman, and the`);
-  console.log(`  interpreting model reads Roman perfectly well - so this is the number`);
-  console.log(`  that decides which language the microphone should be set to.${OFF}`);
+  console.log(`${DIM}  This used to claim Roman was the clear winner and that the microphone`);
+  console.log(`  should be set to match. On twenty commands it looked that way. It is not`);
+  console.log(`  what the numbers say now, so read them rather than that sentence - and if`);
+  console.log(`  the two are close, the choice is not worth spending effort on.${OFF}`);
   for (const which of ["latin", "urdu"] as const) {
-    const group = rows.filter((r) => script(r.transcript) === which);
+    const group = commands.filter((r) => script(r.transcript) === which);
     if (group.length === 0) continue;
     const got = group.filter((r) => r.kind !== "unknown").length;
     const kept = group.filter((r) => r.saved).length;
@@ -148,8 +188,9 @@ ${BOLD}Microphone settings${OFF}`);
   console.log(`\n${BOLD}What was said${OFF}`);
   for (const row of rows) {
     const when = row.createdAt.toISOString().slice(5, 16).replace("T", " ");
-    const verdict =
-      row.kind === "unknown"
+    const verdict = isAnswer(row.transcript)
+      ? `${DIM}answered${OFF}`
+      : row.kind === "unknown"
         ? `${RED}not understood${OFF}`
         : row.saved
           ? `${GREEN}${row.kind}, saved${OFF}`
