@@ -103,8 +103,23 @@ const days = (() => {
   return Number.isInteger(n) && n > 0 ? n : 30;
 })();
 
-/** Close enough to be the same word misheard. Deliberately under the live one. */
-const FLOOR = 0.55;
+/**
+ * How many letters may differ, as a share of how long the word is.
+ *
+ * A flat similarity score was the first attempt and it does not work, because
+ * edit distance stops meaning anything on short words. "goth" against "north"
+ * is two edits out of five letters, which scores 0.60 - the same as a genuine
+ * mishearing of a long name - and so the report confidently offered to teach
+ * the app that North Nazimabad is called "goth", that Saleem General Store is
+ * called "sales", and that Bashir chowk is called "basti". Every one of those
+ * is a different word that happens to be two letters away from a short form of
+ * the name.
+ *
+ * Two edits in twelve letters is the same word misheard. Two edits in five is
+ * a different word. So the budget grows with the word: one edit per five
+ * letters, and never fewer than one.
+ */
+const editsAllowed = (word: string) => Math.max(1, Math.floor(word.length / 5));
 /** At or above this it is not a mishearing, it is the name. Nothing to teach. */
 const ALREADY_FINE = 0.9;
 /** How far ahead of the runner-up row the winner must be to count as clear. */
@@ -182,26 +197,35 @@ async function main() {
         // splits them - "راج پوٹیری" and "راجپوٹیری" are the same miss.
         for (let n = 1; n <= 3 && i + n <= tokens.length; n += 1) {
           const gram = tokens.slice(i, i + n).join(" ");
-          if (gram.length >= 4 && couldBeAName(gram)) grams.add(gram);
+          if (gram.length >= 5 && couldBeAName(gram)) grams.add(gram);
         }
       }
     }
 
     for (const gram of grams) {
       // Best and runner-up ACROSS ROWS, so a gram near two shops is dropped.
-      let best: { target: Target; score: number } | null = null;
+      let best: { target: Target; score: number; form: string } | null = null;
       let second = 0;
       for (const target of targets) {
-        const score = Math.max(...formsOf(target).map((f) => similarity(gram, f)));
+        let score = 0;
+        let form = "";
+        for (const f of formsOf(target)) {
+          const v = similarity(gram, f);
+          if (v > score) { score = v; form = f; }
+        }
         if (!best || score > best.score) {
           if (best) second = Math.max(second, best.score);
-          best = { target, score };
+          best = { target, score, form };
         } else if (score > second) {
           second = score;
         }
       }
       if (!best) continue;
-      if (best.score < FLOOR || best.score >= ALREADY_FINE) continue;
+      if (best.score >= ALREADY_FINE) continue;
+      // Edits rather than a ratio: see editsAllowed.
+      const longest = Math.max(gram.length, best.form.length);
+      const edits = Math.round((1 - best.score) * longest);
+      if (edits > editsAllowed(gram)) continue;
       if (best.score - second < CLEAR_BY) continue;
 
       const perTarget = seen.get(gram) ?? new Map();
