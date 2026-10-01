@@ -10,6 +10,7 @@ import { Pagination } from "@/components/pagination";
 import { SoftDeleteButton } from "@/components/forms/soft-delete-button";
 import { WhatsAppShareDialog } from "@/components/bookings/whatsapp-share-dialog";
 import { PaymentDialog, PaymentStatusBadge } from "@/components/bookings/payment-dialog";
+import { BulkClearDialog } from "@/components/bookings/bulk-clear-dialog";
 import { softDeleteBookingAction } from "@/actions/bookings";
 import { EditBookingDialog } from "@/components/bookings/edit-booking-dialog";
 import { Alert } from "@/components/ui/alert";
@@ -164,9 +165,12 @@ export default async function BookingsPage({
         title="Bookings"
         description="Orders taken by a booker. Each one recorded its own sales and drew stock down automatically, so these figures are the same ones the dashboard uses."
         action={
-          <Button asChild>
-            <Link href="/bookings/new">New booking</Link>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <BulkClearDialog />
+            <Button asChild>
+              <Link href="/bookings/new">New booking</Link>
+            </Button>
+          </div>
         }
       />
 

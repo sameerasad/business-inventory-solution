@@ -19,7 +19,7 @@
     "verify": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify.ts\"",
     "verify:migrations": "node .verify/migrate-check.mjs && node .verify/drift-check.mjs",
     "verify:pages": "node .verify/smoke.mjs",
-    "verify:all": "npm run typecheck && npm run verify:whatsapp && npm run verify:voice && npm run verify:transcribe && npm run verify:llm && npm run verify:ui && npm run verify:layout && npm run verify && npm run verify:bookings && npm run verify:bookers && npm run verify:edits && npm run verify:payments && npm run verify:recognition && npm run verify:dump && npm run verify:repair && npm run verify:migrations && npm run verify:pages",
+    "verify:all": "npm run typecheck && npm run verify:whatsapp && npm run verify:voice && npm run verify:transcribe && npm run verify:llm && npm run verify:ui && npm run verify:layout && npm run verify && npm run verify:bookings && npm run verify:bookers && npm run verify:edits && npm run verify:payments && npm run verify:bulkpay && npm run verify:recognition && npm run verify:dump && npm run verify:repair && npm run verify:migrations && npm run verify:pages",
     "db:repair": "prisma db push --skip-generate && prisma db execute --schema prisma/schema.prisma --file prisma/repair/restore-constraints.sql && prisma db seed",
     "verify:bookings": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-bookings.ts\"",
     "verify:repair": "node .verify/repair-rehearsal.mjs",
@@ -43,7 +43,8 @@
     "verify:ui": "tsx --tsconfig .verify/tsconfig.dom.json .verify/verify-ui.tsx",
     "voice:log": "tsx scripts/voice-log.ts",
     "verify:layout": "node .verify/verify-layout.mjs",
-    "voice:learn": "tsx scripts/voice-learn.ts"
+    "voice:learn": "tsx scripts/voice-learn.ts",
+    "verify:bulkpay": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-bulk-payments.ts\""
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

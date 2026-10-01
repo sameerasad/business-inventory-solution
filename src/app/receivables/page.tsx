@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { FilterBarSkeleton } from "@/components/filter-bar-skeleton";
 import { ListFilters, type FilterSpec } from "@/components/list-filters";
 import { PaymentDialog } from "@/components/bookings/payment-dialog";
+import { BulkClearDialog } from "@/components/bookings/bulk-clear-dialog";
 import { WhatsAppShareDialog } from "@/components/bookings/whatsapp-share-dialog";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -122,6 +123,7 @@ export default async function ReceivablesPage({
       <PageHeader
         title="Receivables"
         description="Money owed on delivered orders, oldest first. The goods have gone out and the revenue is already counted - this is only the cash still to arrive."
+        action={<BulkClearDialog />}
       />
 
       <Suspense
