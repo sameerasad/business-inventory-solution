@@ -11,6 +11,7 @@ import { BreakdownBar } from "@/components/charts/breakdown-bar";
 import { CategoryDonut } from "@/components/charts/category-donut";
 import { RevenueProfitBars } from "@/components/charts/revenue-profit-bars";
 import { StockCoverTable } from "@/components/dashboard/stock-cover-table";
+import { barRowsHeight } from "@/components/charts/theme";
 import { RevenueProfitTrend } from "@/components/charts/revenue-profit-trend";
 import { CHART } from "@/components/charts/theme";
 import { Alert } from "@/components/ui/alert";
@@ -315,9 +316,11 @@ export default async function DashboardPage({
               </div>
             }
             isEmpty={byArea.length === 0}
-            height={290}
+            height={barRowsHeight(byArea.length)}
           >
-            <RevenueProfitBars data={byArea} labelWidth={112} />
+            {/* Wider labels than the other two: area names here run to three
+                words, and a name that wraps needs the row to be taller still. */}
+            <RevenueProfitBars data={byArea} labelWidth={150} />
           </ChartShell>
 
           <ChartShell
@@ -325,7 +328,7 @@ export default async function DashboardPage({
             description={`Whose orders the money came from, ${year}. Counted when it was paid, so a booker who sells hard and collects slowly sits lower here than on the Bookers page.`}
             action={<ChartLegend items={trendLegend} />}
             isEmpty={byBooker.length === 0}
-            height={290}
+            height={barRowsHeight(byBooker.length)}
           >
             <RevenueProfitBars data={byBooker} labelWidth={128} />
           </ChartShell>
@@ -334,7 +337,7 @@ export default async function DashboardPage({
             title={selectedAreaName ? `Top shops in ${selectedAreaName}` : "Top shops by profit"}
             description={`Most profitable first, ${geoLabel}. Both bars are shown because they disagree: the biggest seller is not always the biggest earner. Direct sales with no shop are their own row.`}
             isEmpty={byShop.length === 0}
-            height={290}
+            height={barRowsHeight(byShop.length)}
           >
             <RevenueProfitBars data={byShop} labelWidth={140} />
           </ChartShell>

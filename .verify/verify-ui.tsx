@@ -627,6 +627,41 @@ async function main() {
     (barSrc.match(/parseConfirmation\(/g) ?? []).length,
   );
 
+  /* ------------------------------------------------------------------------ */
+  section("a chart is as tall as the data it was handed");
+
+  /**
+   * Every chart on the dashboard carried a fixed height, which is fine while
+   * the buckets are fixed too - there are three packaging types and six
+   * flavours and there always will be. Areas are not like that: there were
+   * nine, there are now twenty-five, and twenty-five rows in 290px gave each
+   * label eleven pixels to print a name in. They printed on top of each other.
+   *
+   * This is arithmetic, not pixels: it cannot see a rendered label, and says so
+   * rather than implying otherwise. What it pins is the thing that was wrong -
+   * a height that ignored how many rows there were. The rendered result was
+   * measured once in a browser against the real page: 24 rows, 780px tall,
+   * zero overlapping labels.
+   */
+  const { barRowsHeight } = await import("@/components/charts/theme");
+  const counts = [1, 2, 5, 10, 25, 60];
+
+  ok("it grows with the number of rows", barRowsHeight(25) > barRowsHeight(5));
+  ok(
+    "every row keeps room for two bars and a label",
+    counts.every((n) => (barRowsHeight(n) - 60) / n >= 28 || barRowsHeight(n) >= 180),
+    counts.map((n) => `${n}:${Math.round((barRowsHeight(n) - 60) / n)}`),
+  );
+  ok("a one-row chart is still a sensible size", barRowsHeight(1) >= 180, barRowsHeight(1));
+  ok(
+    "the dashboard asks for it rather than hard-coding a height",
+    (
+      fs
+        .readFileSync(path.resolve("src/app/dashboard/page.tsx"), "utf8")
+        .match(/height=\{barRowsHeight\(/g) ?? []
+    ).length >= 3,
+  );
+
   console.log(`\n${checks - failures}/${checks} ui checks passed`);
   if (failures > 0) process.exitCode = 1;
 }

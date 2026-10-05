@@ -38,3 +38,24 @@ export const RADIUS_VERTICAL: [number, number, number, number] = [4, 4, 0, 0];
 export const RADIUS_HORIZONTAL: [number, number, number, number] = [0, 4, 4, 0];
 
 export const MARGIN = { top: 8, right: 16, bottom: 4, left: 4 } as const;
+
+/**
+ * How tall a horizontal bar chart has to be to fit the rows it was given.
+ *
+ * Every chart here used a fixed height, which is fine while the buckets are
+ * fixed too - there are three packaging types and six flavours and there always
+ * will be. Areas are not like that: there were nine, there are now twenty-five,
+ * and twenty-five labels in 290px gave each row eleven pixels to print a name
+ * in. They printed on top of each other.
+ *
+ * So height is a function of the data, not a constant beside it. A row has to
+ * hold two 14px bars with a gap between them and a label that may wrap to a
+ * second line, which is where 30 comes from; the rest is the x-axis and the
+ * chart's own margins.
+ */
+export function barRowsHeight(
+  count: number,
+  { row = 30, chrome = 60, min = 200 }: { row?: number; chrome?: number; min?: number } = {},
+): number {
+  return Math.max(min, count * row + chrome);
+}
