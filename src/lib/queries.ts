@@ -449,3 +449,142 @@ export async function getAvailableBatchesForProduct(productId: number) {
   }));
 }
 export type AvailableBatch = Awaited<ReturnType<typeof getAvailableBatchesForProduct>>[number];
+
+/* ------------------------------------------- 9. How long the stock will last */
+
+export type StockCoverRow = {
+  productId: number;
+  sku: string;
+  name: string;
+  packagingType: string;
+  variantValue: string;
+  unit: string;
+  currentStock: number;
+  /** Units sold inside the window. */
+  unitsSold: number;
+  /**
+   * Days this product could actually have been selling in.
+   *
+   * Not simply the window length. A product first sold five days ago has been
+   * on sale for five days, and dividing its sales by thirty would report a
+   * rate a sixth of the truth - which, for the newest and most interesting
+   * lines, is exactly when a reorder is most likely to be missed.
+   */
+  activeDays: number;
+  unitsPerDay: number;
+  /**
+   * Days of stock left at the current rate. Null when nothing has sold, which
+   * is a different thing from zero and must not be sorted alongside it.
+   */
+  daysOfCover: number | null;
+};
+
+/**
+ * What is running out, and how soon.
+ *
+ * The stock table answers "how many are left"; this answers "is that enough",
+ * which is the question somebody standing in front of the shelf actually has.
+ * Two hundred units is a lot of one line and a day and a half of another.
+ *
+ * Deliberately not a reorder QUANTITY. That depends on how often the supplier
+ * comes, the minimum order, and what cash is free this week - none of which
+ * this database knows. It reports the rate and the cover and leaves the order
+ * to the person who knows the rest.
+ */
+export async function getStockCover(
+  windowDays = 30,
+  today = new Date(),
+): Promise<{ rows: StockCoverRow[]; windowDays: number; from: Date; dataDays: number }> {
+  // Midnight, for the same reason the day arithmetic below is: sale dates are
+  // stored as dates, so a window edge carrying an afternoon timestamp silently
+  // drops every sale made on its own first day.
+  const from = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - windowDays),
+  );
+
+  /**
+   * Whole days only.
+   *
+   * Sale dates are stored as dates - midnight - while "today" carries whatever
+   * time it happens to be, so subtracting the two raw gives half days and
+   * rounds them unpredictably. A line first sold five days ago measured as six
+   * reports a rate a sixth too low, and the same report run in the morning and
+   * the afternoon would disagree with itself.
+   */
+  const dayOf = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+
+  /**
+   * As a plain date string, compared against a date.
+   *
+   * sale_date is a DATE and the database runs on Etc/GMT-5, so handing Postgres
+   * a timestamp to compare it against makes it read 2026-05-01 as 19:00 on the
+   * 30th of April in UTC - just under a window edge of midnight, which silently
+   * dropped every sale made on the first day of the window. Date against date
+   * has no timezone in it to get wrong.
+   */
+  const fromDate = from.toISOString().slice(0, 10);
+
+  const sold = await prisma.$queryRaw<
+    { productId: number; unitsSold: number; firstSale: Date | null }[]
+  >(Prisma.sql`
+    SELECT
+      p.id AS "productId",
+      COALESCE(SUM(CASE WHEN s.sale_date >= ${fromDate}::date THEN s.quantity ELSE 0 END), 0)::int
+        AS "unitsSold",
+      MIN(s.sale_date) AS "firstSale"
+    FROM products p
+    LEFT JOIN sales s ON s.product_id = p.id AND s.is_deleted = false
+    GROUP BY p.id
+  `);
+
+  // How much history actually exists, so a report built on nine days of data
+  // can say so rather than implying thirty.
+  const earliest = sold.reduce<Date | null>(
+    (min, r) => (r.firstSale && (!min || r.firstSale < min) ? r.firstSale : min),
+    null,
+  );
+  const dataDays = earliest
+    ? Math.min(windowDays, Math.max(1, Math.round((dayOf(today) - dayOf(earliest)) / 86400000)))
+    : 0;
+
+  const byProduct = new Map(sold.map((r) => [r.productId, r]));
+  const stock = await getStockLevels();
+
+  const rows = stock
+    .filter((s) => s.isActive)
+    .map<StockCoverRow>((s) => {
+      const hit = byProduct.get(s.productId);
+      const unitsSold = hit?.unitsSold ?? 0;
+      const since = hit?.firstSale && hit.firstSale > from ? hit.firstSale : from;
+      const activeDays = Math.min(
+        windowDays,
+        Math.max(1, Math.round((dayOf(today) - dayOf(since)) / 86400000)),
+      );
+      const unitsPerDay = unitsSold / activeDays;
+      return {
+        productId: s.productId,
+        sku: s.sku,
+        name: s.name,
+        packagingType: s.packagingType,
+        variantValue: s.variantValue,
+        unit: s.unit,
+        currentStock: s.currentStock,
+        unitsSold,
+        activeDays,
+        unitsPerDay,
+        daysOfCover: unitsPerDay > 0 ? s.currentStock / unitsPerDay : null,
+      };
+    });
+
+  // Most urgent first: anything selling, soonest to run out. Lines that have
+  // not sold at all go last - they are a different problem, and putting them
+  // among the urgent rows would bury the rows worth acting on.
+  rows.sort((a, b) => {
+    if (a.daysOfCover == null && b.daysOfCover == null) return b.currentStock - a.currentStock;
+    if (a.daysOfCover == null) return 1;
+    if (b.daysOfCover == null) return -1;
+    return a.daysOfCover - b.daysOfCover;
+  });
+
+  return { rows, windowDays, from, dataDays };
+}

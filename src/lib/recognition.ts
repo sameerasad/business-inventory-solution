@@ -360,6 +360,15 @@ async function breakdown(
   groupExpr: Prisma.Sql,
   extraJoins?: Prisma.Sql,
   limit?: number,
+  /**
+   * Which column ranks the rows, and therefore which ones a LIMIT keeps.
+   *
+   * Revenue by default because that is what every chart here has always shown.
+   * Profit matters where the question is which row EARNS most rather than which
+   * turns over most - the shop buying the cheapest line in volume can top a
+   * revenue chart and be nearly the last row by profit.
+   */
+  order: "revenue" | "profit" = "revenue",
 ): Promise<Breakdown[]> {
   const rows = await prisma.$queryRaw<
     { bucket: string | null; revenue: number; profit: number }[]
@@ -373,7 +382,7 @@ async function breakdown(
     ${extraJoins ?? Prisma.empty}
     ${where(scope)}
     GROUP BY 1
-    ORDER BY revenue DESC
+    ORDER BY ${order === "profit" ? Prisma.sql`profit` : Prisma.sql`revenue`} DESC
     ${limit ? Prisma.sql`LIMIT ${limit}` : Prisma.empty}
   `);
   return rows.map<Breakdown>((r) => ({
@@ -422,12 +431,17 @@ export function getCashByArea(scope: CashScope) {
   return breakdown(scope, Prisma.sql`a.name`, Prisma.sql`JOIN areas a ON a.id = r.area_id`);
 }
 
-export function getCashByShop(scope: CashScope, limit = 10) {
+export function getCashByShop(
+  scope: CashScope,
+  limit = 10,
+  order: "revenue" | "profit" = "revenue",
+) {
   return breakdown(
     scope,
     Prisma.sql`COALESCE(sh.name, ${"Direct Sale (no shop)"})`,
     Prisma.sql`LEFT JOIN shops sh ON sh.id = r.shop_id`,
     limit,
+    order,
   );
 }
 

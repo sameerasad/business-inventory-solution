@@ -10,12 +10,13 @@ import { ChartLegend, ChartShell } from "@/components/charts/chart-shell";
 import { BreakdownBar } from "@/components/charts/breakdown-bar";
 import { CategoryDonut } from "@/components/charts/category-donut";
 import { RevenueProfitBars } from "@/components/charts/revenue-profit-bars";
+import { StockCoverTable } from "@/components/dashboard/stock-cover-table";
 import { RevenueProfitTrend } from "@/components/charts/revenue-profit-trend";
 import { CHART } from "@/components/charts/theme";
 import { Alert } from "@/components/ui/alert";
 import { money, MONTH_LABELS } from "@/lib/format";
 import { currentMonthIndex0, currentYear, monthRange, yearRange } from "@/lib/dates";
-import { getCategories } from "@/lib/queries";
+import { getCategories, getStockCover } from "@/lib/queries";
 import { isDateOnly } from "@/lib/dates";
 import { dateOnly } from "@/lib/format";
 import type { CashScope } from "@/lib/recognition";
@@ -147,6 +148,7 @@ export default async function DashboardPage({
     byArea,
     byShop,
     byCategory,
+    cover,
     byBooker,
     rangeTotals,
   ] = await Promise.all([
@@ -156,8 +158,14 @@ export default async function DashboardPage({
     getCashByVariant(yearScope),
     getCashByProductName(flavorScope),
     getCashByArea(geoScope),
-    getCashByShop(geoScope, 10),
+    // Ranked by PROFIT, not revenue. The question this chart is here to answer
+    // is which shopkeeper earns the most, and the shop that buys the cheapest
+    // line in volume can lead on revenue while sitting well down on profit.
+    getCashByShop(geoScope, 10, "profit"),
     getCashByCategory(yearScope),
+    // Not scoped to the dashboard filters: what is running out is a fact about
+    // the warehouse, not about the slice of history being looked at.
+    getStockCover(),
     // Unfiltered by booker on purpose: a chart comparing bookers is useless
     // when narrowed to one, so it always shows the whole field.
     getCashByBooker({ ...yearScope, bookerId: null }),
@@ -323,13 +331,17 @@ export default async function DashboardPage({
           </ChartShell>
 
           <ChartShell
-            title={selectedAreaName ? `Top shops in ${selectedAreaName}` : "Top shops"}
-            description={`Highest revenue first, ${geoLabel}. Direct sales with no shop are shown as their own row.`}
+            title={selectedAreaName ? `Top shops in ${selectedAreaName}` : "Top shops by profit"}
+            description={`Most profitable first, ${geoLabel}. Both bars are shown because they disagree: the biggest seller is not always the biggest earner. Direct sales with no shop are their own row.`}
             isEmpty={byShop.length === 0}
             height={290}
           >
-            <BreakdownBar data={byShop} orientation="horizontal" labelWidth={140} />
+            <RevenueProfitBars data={byShop} labelWidth={140} />
           </ChartShell>
+        </div>
+
+        <div className="mt-4">
+          <StockCoverTable rows={cover.rows} dataDays={cover.dataDays} />
         </div>
       </div>
     </div>
