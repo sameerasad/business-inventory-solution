@@ -1,5 +1,6 @@
 "use server";
 
+import { prisma } from "@/lib/db";
 import { answerQuery, getVoiceCatalog, type VoiceAnswer } from "@/lib/voice/answer";
 import { parseCommand, type VoiceCommand } from "@/lib/voice/parse";
 import { interpretWithLlm, llmConfigured, llmProvider } from "@/lib/voice/llm";
@@ -334,4 +335,67 @@ export async function transcribeOnlyAction(
     prompt: buildPrompt(vocabulary),
   });
   return result.ok ? { ok: true, text: result.text } : { ok: false, reason: result.reason };
+}
+
+/* ------------------------------------------- the lists the edit panel needs */
+
+export type VoiceEditOptions = {
+  products: { id: number; label: string; price: number }[];
+  areas: { id: number; name: string }[];
+  /** areaId so the shop list can narrow to the area that was chosen. */
+  shops: { id: number; name: string; areaId: number }[];
+  bookers: { id: number; name: string }[];
+};
+
+/**
+ * Everything the confirmation card needs to let somebody correct it by hand.
+ *
+ * Fetched when the panel is opened for editing rather than handed down with the
+ * page, because the voice button sits on every page in the app and almost every
+ * command is either right or not a write at all. Loading the whole catalogue
+ * into every page in case somebody edits one order is a cost paid constantly
+ * for something that happens occasionally.
+ *
+ * Read-only, like every other voice action except the ones that save.
+ */
+export async function getVoiceEditOptions(): Promise<VoiceEditOptions> {
+  const [products, areas, shops, bookers] = await Promise.all([
+    prisma.product.findMany({
+      where: { isActive: true },
+      orderBy: [{ name: "asc" }, { packagingType: "asc" }, { variantValue: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        packagingType: true,
+        variantValue: true,
+        defaultSalePrice: true,
+      },
+    }),
+    prisma.area.findMany({
+      where: { isDeleted: false },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.shop.findMany({
+      where: { isDeleted: false },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, areaId: true },
+    }),
+    prisma.booker.findMany({
+      where: { isDeleted: false, isActive: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
+
+  return {
+    products: products.map((p) => ({
+      id: p.id,
+      label: `${p.name} ${p.packagingType} ${p.variantValue}`,
+      price: Number(p.defaultSalePrice),
+    })),
+    areas,
+    shops,
+    bookers,
+  };
 }

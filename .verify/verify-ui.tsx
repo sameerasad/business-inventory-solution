@@ -320,16 +320,63 @@ async function main() {
     filename: actionsPath,
     loaded: true,
     exports: {
-      interpretVoiceAction: async (said: string) => ({
-        transcript: said,
-        command: {
-          kind: "navigate" as const,
-          href: "/receivables",
-          label: "Receivables",
-          confidence: "high" as const,
-        },
-        answer: null,
-        summary: "Open Receivables.",
+      interpretVoiceAction: async (said: string) =>
+        /order/i.test(said)
+          ? {
+              transcript: said,
+              // An order heard with no quantity: the single most common way a
+              // spoken booking arrives incomplete.
+              command: {
+                kind: "booking" as const,
+                lines: [
+                  {
+                    productId: 1,
+                    sku: "MNG-BTL-250",
+                    label: "Mango Juice Bottle 250ml",
+                    quantity: 0,
+                    unitPrice: 450,
+                  },
+                ],
+                areaId: 2,
+                areaName: "KHUDA KI BASTI",
+                shopId: null,
+                shopName: null,
+                bookerId: null,
+                bookerName: null,
+                customerPhone: null,
+                date: "2026-10-05",
+                missing: ["quantity"],
+                warnings: [],
+                confidence: "low" as const,
+              },
+              answer: null,
+              summary: "An order for Mango Juice.",
+            }
+          : {
+              transcript: said,
+              command: {
+                kind: "navigate" as const,
+                href: "/receivables",
+                label: "Receivables",
+                confidence: "high" as const,
+              },
+              answer: null,
+              summary: "Open Receivables.",
+            },
+      getVoiceEditOptions: async () => ({
+        products: [
+          { id: 1, label: "Mango Juice Bottle 250ml", price: 450 },
+          { id: 2, label: "Apple Juice Bottle 250ml", price: 450 },
+        ],
+        areas: [
+          { id: 1, name: "Downtown" },
+          { id: 2, name: "KHUDA KI BASTI" },
+        ],
+        shops: [
+          { id: 7, name: "Saleem General Store", areaId: 2 },
+          { id: 9, name: "Central Mart", areaId: 1 },
+        ],
+        bookers: [{ id: 3, name: "Saifullah Khan" }],
       }),
       transcribeAndInterpretAction: async () => ({ ok: false as const, reason: "not used" }),
       transcribeOnlyAction: async () => ({ ok: false as const, reason: "not used" }),
@@ -626,6 +673,60 @@ async function main() {
       (barSrc.match(/parseConfirmation\(/g) ?? []).length === 1,
     (barSrc.match(/parseConfirmation\(/g) ?? []).length,
   );
+
+  /* ------------------------------------------------------------------------ */
+  section("an incomplete order can be finished by hand");
+
+  /**
+   * The gap this closes: the confirmation card used to be read-only, so one
+   * quantity the microphone did not catch meant cancelling and saying the whole
+   * sentence again - which generally produced a different set of mistakes
+   * rather than the same one fixed.
+   */
+  await click(fab()!);
+  ok("the panel reopens", panel() != null);
+  // Same reason as above: that input carries no type attribute.
+  const typeBox2 = panel()?.querySelector("input:not([type=checkbox])") as HTMLInputElement | null;
+  ok(
+    "with a box to type a command into",
+    typeBox2 != null,
+    [...(panel()?.querySelectorAll("input") ?? [])].map((i) => i.type),
+  );
+  const runButton2 = [...(panel()?.querySelectorAll("button") ?? [])].find(
+    (b) => b.textContent?.trim() === "Run",
+  );
+  ok("and a Run button", runButton2 != null);
+  await type(typeBox2!, "order mango");
+  await click(runButton2!);
+
+  const panelText = () => panel()?.textContent ?? "";
+  ok("the order came back", panelText().includes("Mango Juice"), panelText().slice(0, 120));
+  ok(
+    "it says what is still needed rather than refusing outright",
+    /quantity is still needed/i.test(panelText()),
+    panelText().slice(0, 300),
+  );
+  ok(
+    "and it does not send anyone to another page to fix it",
+    !/New Booking/i.test(panelText()),
+  );
+
+  const qtyBox = () => panel()?.querySelector("#vq-0") as HTMLInputElement | null;
+  ok("the editor opened by itself, because something was missing", qtyBox() != null);
+
+  const saveButton = () =>
+    [...(panel()?.querySelectorAll("button") ?? [])].find((b) =>
+      /Save this order/i.test(b.textContent ?? ""),
+    );
+  ok("and there is nothing to save yet", saveButton() == null);
+
+  await type(qtyBox()!, "20");
+  ok(
+    "typing the quantity clears the warning",
+    !/quantity is still needed/i.test(panelText()),
+    panelText().slice(0, 300),
+  );
+  ok("and the order becomes saveable", saveButton() != null);
 
   /* ------------------------------------------------------------------------ */
   section("a chart is as tall as the data it was handed");

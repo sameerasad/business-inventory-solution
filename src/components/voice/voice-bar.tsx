@@ -3,14 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, Check, Loader2, Mic, MicOff, Square, X } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Mic, MicOff, Pencil, Square, X } from "lucide-react";
 
 import {
+  getVoiceEditOptions,
   interpretVoiceAction,
   transcribeAndInterpretAction,
   markVoiceAttemptSavedAction,
+  type VoiceEditOptions,
   type VoiceResult,
 } from "@/actions/voice";
+import { BookingEditor, bookingGaps } from "@/components/voice/booking-editor";
 import { createBookingAction } from "@/actions/bookings";
 import { recordPaymentAction } from "@/actions/payments";
 import { createBatchAction } from "@/actions/batches";
@@ -121,6 +124,15 @@ export function VoiceBar({
   const router = useRouter();
   const [lang, setLang] = useState<SpeechLang>("en-PK");
   const [result, setResult] = useState<VoiceResult | null>(null);
+  /**
+   * The order as it stands on screen, which is not always the order that was
+   * heard - it can be corrected by hand before it is saved.
+   *
+   * Kept here rather than inside the card so that a spoken "haan" saves what is
+   * on screen too. A draft hidden inside the card would leave the voice path
+   * saving the original while the person was looking at their corrections.
+   */
+  const [draft, setDraft] = useState<WriteCommand | null>(null);
   const [thinking, setThinking] = useState(false);
   const [typed, setTyped] = useState("");
   const [engine, setEngine] = useState<Engine>("browser");
@@ -346,6 +358,7 @@ export function VoiceBar({
 
   applyResultRef.current = async (interpreted: VoiceResult) => {
     setResult(interpreted);
+    setDraft(null);
     const command = interpreted.command;
 
     // Safe to act on at once: neither changes anything.
@@ -696,11 +709,17 @@ export function VoiceBar({
           command.kind === "toggle" ||
           command.kind === "assign" ? (
             <ConfirmWrite
-              command={command}
+              command={draft ?? command}
               saving={saving}
               saveState={saveState}
               onSave={async () => {
-                await runSave(command);
+                await runSave(draft ?? command);
+              }}
+              onEdit={(next) => {
+                setDraft(next);
+                // If hands-free is waiting for a yes, the yes must save THIS,
+                // not what was heard a moment ago.
+                if (pendingRef.current) pendingRef.current = next;
               }}
             />
           ) : null}
@@ -868,13 +887,49 @@ function ConfirmWrite({
   saving,
   saveState,
   onSave,
+  onEdit,
 }: {
   command: WriteCommand;
   saving: boolean;
   saveState: ActionState | null;
   onSave: (formData: FormData) => Promise<void>;
+  /** Present only for the kinds that can be corrected here. */
+  onEdit?: (next: WriteCommand) => void;
 }) {
-  const blocked = command.missing.length > 0;
+  const [editing, setEditing] = useState(false);
+  const [options, setOptions] = useState<VoiceEditOptions | null>(null);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+
+  const order = command.kind === "booking" ? command : null;
+  const canEdit = order != null && onEdit != null;
+
+  /**
+   * What is missing, from what is ON SCREEN.
+   *
+   * command.missing is a statement about the recording and cannot know that a
+   * shop has since been picked by hand, so for an order being edited the gaps
+   * are recomputed from the draft. Without that the Save button stays locked
+   * against a field that was filled in a moment ago.
+   */
+  const gaps = order ? bookingGaps(order) : command.missing;
+  const blocked = gaps.length > 0;
+
+  const openEditor = () => {
+    setEditing(true);
+    if (options || loadingOptions) return;
+    setLoadingOptions(true);
+    void getVoiceEditOptions()
+      .then(setOptions)
+      .finally(() => setLoadingOptions(false));
+  };
+
+  // An order with a hole in it is going to need the editor, so it opens itself
+  // rather than making somebody find the button first.
+  useEffect(() => {
+    if (canEdit && command.missing.length > 0) openEditor();
+    // Only when a new command arrives, not on every keystroke of the draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [command.kind]);
 
   const submit = () => void onSave(buildPayload(command));
 
@@ -1071,22 +1126,53 @@ function ConfirmWrite({
         ) : null}
       </div>
 
+      {/* ------------------------------------------------ correcting it here */}
+      {canEdit && !editing ? (
+        <Button type="button" variant="outline" size="sm" onClick={openEditor} disabled={saving}>
+          <Pencil className="h-3.5 w-3.5" />
+          Change something
+        </Button>
+      ) : null}
+
+      {canEdit && editing ? (
+        loadingOptions && options === null ? (
+          <p className="text-sm text-muted-foreground">Loading the lists...</p>
+        ) : options ? (
+          <BookingEditor
+            order={order}
+            options={options}
+            disabled={saving || saveState?.ok === true}
+            onChange={onEdit}
+          />
+        ) : null
+      ) : null}
+
       {saveState?.message ? (
         <Alert tone={saveState.ok ? "success" : "error"}>{saveState.message}</Alert>
       ) : null}
 
       {blocked ? (
-        <Alert tone="info">
-          {command.missing.join(" and ")} {command.missing.length === 1 ? "is" : "are"} missing, so
-          this cannot be saved from here. Say it again in full, or use the{" "}
-          <Link
-            href={command.kind === "booking" ? "/bookings/new" : "/bookings"}
-            className="font-medium underline"
-          >
-            {command.kind === "booking" ? "New Booking" : "Bookings"}
-          </Link>{" "}
-          page.
-        </Alert>
+        canEdit ? (
+          // Fillable rather than a dead end. Before this, one unheard quantity
+          // meant cancelling and saying the whole sentence again - which
+          // usually produced a different set of mistakes.
+          <Alert tone="info">
+            {gaps.join(" and ")} {gaps.length === 1 ? "is" : "are"} still needed. Fill{" "}
+            {gaps.length === 1 ? "it" : "them"} in above and this will save.
+          </Alert>
+        ) : (
+          <Alert tone="info">
+            {command.missing.join(" and ")} {command.missing.length === 1 ? "is" : "are"} missing, so
+            this cannot be saved from here. Say it again in full, or use the{" "}
+            <Link
+              href={command.kind === "booking" ? "/bookings/new" : "/bookings"}
+              className="font-medium underline"
+            >
+              {command.kind === "booking" ? "New Booking" : "Bookings"}
+            </Link>{" "}
+            page.
+          </Alert>
+        )
       ) : (
         <div className="flex items-center gap-2">
           <Button type="button" onClick={submit} disabled={saving || saveState?.ok === true}>
