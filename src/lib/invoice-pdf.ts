@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 
-import type { Invoice } from "@/lib/bookings";
+import { paymentStatus, type Invoice } from "@/lib/bookings";
 import { dateOnly, money, qty } from "@/lib/format";
 import { business } from "@/lib/business";
 
@@ -49,6 +49,20 @@ const MUTED = rgb(0.42, 0.42, 0.4);
 const RULE = rgb(0.85, 0.85, 0.82);
 const BAND = rgb(0.957, 0.961, 0.965);
 const ACCENT = rgb(0.165, 0.471, 0.839);
+
+/**
+ * How the three payment states are drawn.
+ *
+ * Taken from paymentStatus rather than recomputed from paid and balance, so a
+ * customer-facing document can never disagree with the Bookings list about
+ * whether their money arrived. Zero-value orders read as settled there, and
+ * must read the same here.
+ */
+const PAYMENT_LOOK = {
+  paid: { label: "PAID", ink: rgb(1, 1, 1), fill: rgb(0, 0.42, 0.21) },
+  partial: { label: "PARTIALLY PAID", ink: rgb(1, 1, 1), fill: rgb(0.72, 0.45, 0.02) },
+  unpaid: { label: "UNPAID", ink: rgb(1, 1, 1), fill: rgb(0.8, 0.21, 0.21) },
+} as const;
 
 type Ctx = {
   doc: PDFDocument;
@@ -183,6 +197,38 @@ export async function renderInvoicePdf(invoice: Invoice): Promise<Uint8Array> {
     metaY -= 13;
   }
 
+  /* ------------------------------------------- payment status, up front */
+  /**
+   * The question a customer opens this to answer is usually "do I still owe
+   * anything", and the document used to answer it only in a line inside the
+   * totals - a line that was skipped entirely when nothing had been paid. So an
+   * unpaid invoice said nothing at all about being unpaid.
+   *
+   * Drawn beside the invoice number, where the eye already goes.
+   */
+  const status = paymentStatus(invoice.subtotal, invoice.paid);
+  const look = PAYMENT_LOOK[status];
+  {
+    const size = 10;
+    const padX = 10;
+    const width = bold.widthOfTextAtSize(look.label, size) + padX * 2;
+    const height = 20;
+    ctx.page.drawRectangle({
+      x: MARGIN + COL.total - width,
+      y: metaY - 4,
+      width,
+      height,
+      color: look.fill,
+    });
+    text(ctx, look.label, COL.total - padX, metaY + 2, {
+      size,
+      bold: true,
+      color: look.ink,
+      align: "right",
+    });
+    metaY -= height + 6;
+  }
+
   ctx.y = Math.min(ctx.y, metaY) - 10;
   rule(ctx, ctx.y);
   ctx.y -= 20;
@@ -282,30 +328,44 @@ export async function renderInvoicePdf(invoice: Invoice): Promise<Uint8Array> {
 
   ctx.y -= 62;
 
-  // Paid / Balance Due, but only when something has actually been paid - a
-  // fully unpaid invoice does not need a "Paid: Rs 0" line.
-  if (invoice.paid > 0.005) {
+  /**
+   * Paid and Balance Due - always, not only once something has been paid.
+   *
+   * This block used to be skipped entirely on an unpaid invoice, on the
+   * reasoning that nobody needs a "Paid: Rs 0" line. True of that line, and
+   * exactly wrong about the one under it: the invoice that most needs to say
+   * BALANCE DUE in red is the one nothing has been paid against, and that was
+   * the only one saying nothing at all.
+   *
+   * The "Paid" row is still conditional. The balance row is not.
+   */
+  {
+    const hasPaid = invoice.paid > 0.005;
+    const settled = status === "paid";
+    const tone = settled ? rgb(0, 0.42, 0.21) : rgb(0.82, 0.23, 0.23);
+
     ctx.page.drawRectangle({
       x: MARGIN + totalsLeft,
       y: ctx.y - 26,
       width: 200,
-      height: 44,
+      height: hasPaid ? 44 : 30,
       color: BAND,
     });
-    text(ctx, "Paid", totalsLeft + 12, ctx.y + 4, { size: 9, color: MUTED });
-    text(ctx, money(invoice.paid), COL.total - 12, ctx.y + 4, { size: 9, align: "right" });
+    if (hasPaid) {
+      text(ctx, "Paid", totalsLeft + 12, ctx.y + 4, { size: 9, color: MUTED });
+      text(ctx, money(invoice.paid), COL.total - 12, ctx.y + 4, { size: 9, align: "right" });
+    }
 
-    const settled = invoice.balance <= 0.005;
     text(ctx, settled ? "PAID IN FULL" : "BALANCE DUE", totalsLeft + 12, ctx.y - 16, {
       size: 10,
       bold: true,
-      color: settled ? rgb(0, 0.39, 0) : rgb(0.82, 0.23, 0.23),
+      color: tone,
     });
     text(ctx, money(invoice.balance), COL.total - 12, ctx.y - 16, {
       size: 11,
       bold: true,
       align: "right",
-      color: settled ? rgb(0, 0.39, 0) : rgb(0.82, 0.23, 0.23),
+      color: tone,
     });
     ctx.y -= 46;
   }

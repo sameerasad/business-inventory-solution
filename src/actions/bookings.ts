@@ -327,6 +327,8 @@ export async function getInvoiceShareData(bookingId: number): Promise<
       lines: { description: string; quantity: number; unitPrice: number; lineTotal: number }[];
       total: number;
       totalUnits: number;
+      paid: number;
+      balance: number;
     }
   | null
 > {
@@ -351,6 +353,8 @@ export async function getInvoiceShareData(bookingId: number): Promise<
     })),
     total: invoice.subtotal,
     totalUnits: invoice.totalUnits,
+    paid: invoice.paid,
+    balance: invoice.balance,
   };
 }
 

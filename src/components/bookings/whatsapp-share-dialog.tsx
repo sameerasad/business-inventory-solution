@@ -82,6 +82,8 @@ export function WhatsAppShareDialog({
       lines: data.lines,
       total: data.total,
       totalUnits: data.totalUnits,
+      paid: data.paid,
+      balance: data.balance,
       pdfUrl: `${origin}/api/invoices/share/${data.token}`,
     });
   }, [data]);

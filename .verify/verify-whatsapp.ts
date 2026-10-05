@@ -77,6 +77,8 @@ const msg = buildInvoiceMessage({
   lines,
   total: 72300,
   totalUnits: 190,
+  paid: 0,
+  balance: 72300,
   pdfUrl: "https://example.vercel.app/api/invoices/share/abc123",
 });
 ok("names the business", msg.includes("Asad and Sons Beverages"), msg);
@@ -105,6 +107,8 @@ const walkIn = buildInvoiceMessage({
   lines: [lines[0]],
   total: 67500,
   totalUnits: 150,
+  paid: 0,
+  balance: 67500,
   pdfUrl: "https://x/y",
 });
 ok("uses the shop name", walkIn.includes("Central Mart"), walkIn);
@@ -117,9 +121,48 @@ const anon = buildInvoiceMessage({
   lines: [lines[0]],
   total: 1,
   totalUnits: 1,
+  paid: 0,
+  balance: 1,
   pdfUrl: "https://x/y",
 });
 ok("omits the To: line entirely when neither is known", !anon.includes("To:"), anon);
+
+section("where the money stands, in the message itself");
+
+/**
+ * Most people read the WhatsApp and never open the attachment, so a status that
+ * lives only inside the PDF is a status most customers never see.
+ */
+const states = (paid: number, balance: number) =>
+  buildInvoiceMessage({
+    invoiceNo: "INV-2026-00009",
+    businessName: "Asad and Sons Beverages",
+    bookingDate: "2026-04-10",
+    customerName: "Someone",
+    shopName: null,
+    lines: [lines[0]],
+    total: 1000,
+    totalUnits: 10,
+    paid,
+    balance,
+    pdfUrl: "https://x/y",
+  });
+
+const settledMsg = states(1000, 0);
+ok("a settled invoice says PAID", /Status: \*PAID\*/.test(settledMsg), settledMsg);
+ok("and does not ask for money", !/Balance due/i.test(settledMsg), settledMsg);
+
+const partMsg = states(400, 600);
+ok("a part-paid invoice shows what was received", partMsg.includes("Received:"), partMsg);
+ok("and what is still owed", /\*Balance due: .*600/.test(partMsg), partMsg);
+
+const noneMsg = states(0, 1000);
+ok("an unpaid invoice states the balance", /\*Balance due: .*1,?000/.test(noneMsg), noneMsg);
+ok("without a Received line it has no business showing", !noneMsg.includes("Received:"), noneMsg);
+ok(
+  "and none of the three leak cost or profit",
+  [settledMsg, partMsg, noneMsg].every((m) => !/\b(cost|profit|margin)\b/i.test(m)),
+);
 
 section("long orders are summarised, not truncated mid-URL");
 const many = Array.from({ length: 26 }, (_, i) => ({
@@ -137,6 +180,8 @@ const bigMsg = buildInvoiceMessage({
   lines: many,
   total: 1950000,
   totalUnits: 2600,
+  paid: 0,
+  balance: 1950000,
   pdfUrl: "https://example.vercel.app/api/invoices/share/abc123",
 });
 ok(

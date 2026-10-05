@@ -5,7 +5,7 @@
 import { prisma } from "@/lib/db";
 import { emptyActionState } from "@/lib/validations";
 import { createBatchAction } from "@/actions/batches";
-import { createBookingAction } from "@/actions/bookings";
+import { createBookingAction, softDeleteBookingAction } from "@/actions/bookings";
 import { deletePaymentAction, getPaymentDetails, recordPaymentAction } from "@/actions/payments";
 import {
   getBookingBalance,
@@ -298,6 +298,46 @@ async function main() {
     partPdf.includes("BALANCE DUE"),
     partPdf.slice(0, 200),
   );
+  ok('and states it is "PARTIALLY PAID"', partPdf.includes("PARTIALLY PAID"), partPdf.slice(0, 200));
+
+  /**
+   * The state the document used to be silent about.
+   *
+   * Paid and Balance Due were drawn only when something had been paid, on the
+   * reasoning that nobody needs a "Paid: Rs 0" line - which was true of that
+   * line and exactly wrong about the one under it. An invoice nothing had been
+   * paid against said nothing at all about money being owed, which is the one
+   * invoice that most needs to.
+   */
+  section("an invoice nothing has been paid against");
+  const untouched = await createBookingAction(
+    emptyActionState,
+    fd({
+      customerName: "Owes Everything",
+      areaId: String(area.id),
+      shopId: String(shop.id),
+      bookingDate: DATE,
+      lines: JSON.stringify([{ productId: product.id, quantity: 10, unitPrice: 450 }]),
+      idempotencyKey: "pay-unpaid-booking",
+    }),
+  );
+  ok("booking created", untouched.ok, untouched);
+  const owing = await getInvoice(
+    (await prisma.booking.findFirstOrThrow({ where: { idempotencyKey: "pay-unpaid-booking" } })).id,
+  );
+  const owingPdf = pdfText(await renderInvoicePdf(owing!));
+  ok('it says "UNPAID"', owingPdf.includes("UNPAID"), owingPdf.slice(0, 200));
+  ok('and still shows "BALANCE DUE"', owingPdf.includes("BALANCE DUE"), owingPdf.slice(0, 200));
+  ok("and does not claim to be paid in full", !owingPdf.includes("PAID IN FULL"));
+  ok("still no cost or profit wording", !/\b(cost|profit|margin)\b/i.test(owingPdf));
+
+  // Cancelled once it has served its purpose. Later sections of this suite
+  // assert that receivables is empty, and a second unpaid order left standing
+  // makes them fail for a reason that has nothing to do with what they test.
+  await softDeleteBookingAction(
+    emptyActionState,
+    fd({ id: String(owing!.id), reason: "fixture for the unpaid-invoice check" }),
+  );
 
   section("bookings list carries the money picture");
   const list = await getBookingList({
@@ -367,7 +407,6 @@ async function main() {
   ok("anomaly clears once the sales are back", (await getReceivables()).anomalies.length === 0);
 
   section("cancelling a booking reverses its payments");
-  const { softDeleteBookingAction } = await import("@/actions/bookings");
   const beforeCancelPaid = (await getBookingBalance(booking.id))!.paid;
   ok("it had money against it", beforeCancelPaid > 0, beforeCancelPaid);
   const cancelled = await softDeleteBookingAction(emptyActionState, fd({ id: String(booking.id) }));

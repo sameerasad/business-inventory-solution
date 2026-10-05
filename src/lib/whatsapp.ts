@@ -67,6 +67,9 @@ export type InvoiceMessageInput = {
   lines: { description: string; quantity: number; unitPrice: number; lineTotal: number }[];
   total: number;
   totalUnits: number;
+  /** What has been received against it, so the message can say where it stands. */
+  paid: number;
+  balance: number;
   /** Absolute URL the customer taps to download the PDF. */
   pdfUrl: string;
 };
@@ -100,6 +103,21 @@ export function buildInvoiceMessage(input: InvoiceMessageInput): string {
 
   parts.push("");
   parts.push(`*Total: ${money(input.total)}*  (${qty(input.totalUnits)} packs)`);
+
+  /**
+   * Where it stands, in the message as well as on the PDF.
+   *
+   * Most people read the WhatsApp and never open the attachment, so a status
+   * that lives only inside the PDF is a status most customers never see.
+   */
+  if (input.balance <= 0.005) {
+    parts.push("Status: *PAID* - thank you.");
+  } else if (input.paid > 0.005) {
+    parts.push(`Received: ${money(input.paid)}`);
+    parts.push(`*Balance due: ${money(input.balance)}*`);
+  } else {
+    parts.push(`*Balance due: ${money(input.balance)}*`);
+  }
   parts.push("");
   parts.push("Download the invoice PDF:");
   parts.push(input.pdfUrl);
