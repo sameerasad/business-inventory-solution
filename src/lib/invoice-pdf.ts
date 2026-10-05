@@ -178,7 +178,25 @@ export async function renderInvoicePdf(invoice: Invoice): Promise<Uint8Array> {
   text(ctx, "INVOICE", COL.total, ctx.y - 2, { size: 20, bold: true, color: ACCENT, align: "right" });
   ctx.y -= 22;
 
-  for (const line of [biz.address, biz.phone, biz.email, biz.taxId].filter(Boolean)) {
+  /**
+   * Contact details, with the WhatsApp number named.
+   *
+   * The point of printing it is that a customer who replies reaches the
+   * business and not whichever booker's phone the message happened to be sent
+   * from - so it has to be labelled rather than left as one more number in a
+   * list. When it is the same number as the phone, which it usually is, the two
+   * share one line instead of printing twice.
+   */
+  const sameNumber = biz.whatsapp !== "" && biz.whatsapp === biz.phone;
+  const contact = [
+    biz.address,
+    biz.phone ? (sameNumber ? `Phone / WhatsApp: ${biz.phone}` : `Phone: ${biz.phone}`) : "",
+    !sameNumber && biz.whatsapp ? `WhatsApp: ${biz.whatsapp}` : "",
+    biz.email,
+    biz.taxId,
+  ];
+
+  for (const line of contact.filter(Boolean)) {
     for (const wrapped of wrap(regular, line, 8.5, 260)) {
       text(ctx, wrapped, 0, ctx.y, { size: 8.5, color: MUTED });
       ctx.y -= 11;

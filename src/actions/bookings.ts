@@ -329,6 +329,7 @@ export async function getInvoiceShareData(bookingId: number): Promise<
       totalUnits: number;
       paid: number;
       balance: number;
+      companyWhatsApp: string;
     }
   | null
 > {
@@ -355,6 +356,7 @@ export async function getInvoiceShareData(bookingId: number): Promise<
     totalUnits: invoice.totalUnits,
     paid: invoice.paid,
     balance: invoice.balance,
+    companyWhatsApp: business().whatsapp,
   };
 }
 

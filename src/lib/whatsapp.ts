@@ -67,7 +67,17 @@ export type InvoiceMessageInput = {
   lines: { description: string; quantity: number; unitPrice: number; lineTotal: number }[];
   total: number;
   totalUnits: number;
+  /**
+   * The company number a customer should reply to.
+   *
+   * A wa.me link opens whichever WhatsApp is on the device that presses it, so
+   * the app cannot decide which account a message is sent FROM. Naming the
+   * company number inside the message is what it can do, and it gets the
+   * customer to the business rather than to a booker's personal phone.
+   */
+  companyWhatsApp: string;
   /** What has been received against it, so the message can say where it stands. */
+
   paid: number;
   balance: number;
   /** Absolute URL the customer taps to download the PDF. */
@@ -121,6 +131,11 @@ export function buildInvoiceMessage(input: InvoiceMessageInput): string {
   parts.push("");
   parts.push("Download the invoice PDF:");
   parts.push(input.pdfUrl);
+
+  if (input.companyWhatsApp) {
+    parts.push("");
+    parts.push(`Questions? WhatsApp us on ${input.companyWhatsApp}`);
+  }
 
   return parts.join("\n");
 }

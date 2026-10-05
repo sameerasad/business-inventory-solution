@@ -79,6 +79,7 @@ const msg = buildInvoiceMessage({
   totalUnits: 190,
   paid: 0,
   balance: 72300,
+  companyWhatsApp: "0300-1234567",
   pdfUrl: "https://example.vercel.app/api/invoices/share/abc123",
 });
 ok("names the business", msg.includes("Asad and Sons Beverages"), msg);
@@ -109,6 +110,7 @@ const walkIn = buildInvoiceMessage({
   totalUnits: 150,
   paid: 0,
   balance: 67500,
+  companyWhatsApp: "0300-1234567",
   pdfUrl: "https://x/y",
 });
 ok("uses the shop name", walkIn.includes("Central Mart"), walkIn);
@@ -123,6 +125,7 @@ const anon = buildInvoiceMessage({
   totalUnits: 1,
   paid: 0,
   balance: 1,
+  companyWhatsApp: "0300-1234567",
   pdfUrl: "https://x/y",
 });
 ok("omits the To: line entirely when neither is known", !anon.includes("To:"), anon);
@@ -145,6 +148,7 @@ const states = (paid: number, balance: number) =>
     totalUnits: 10,
     paid,
     balance,
+    companyWhatsApp: "0300-1234567",
     pdfUrl: "https://x/y",
   });
 
@@ -164,6 +168,21 @@ ok(
   [settledMsg, partMsg, noneMsg].every((m) => !/\b(cost|profit|margin)\b/i.test(m)),
 );
 
+/**
+ * The company's own number, in every message.
+ *
+ * A wa.me link opens whichever WhatsApp is on the device that presses it, so
+ * nothing here can decide which account a message is sent FROM. What it can do
+ * is make sure a customer who replies reaches the business rather than the
+ * personal phone of whoever happened to send it.
+ */
+ok(
+  "every message names the company number to reply to",
+  [settledMsg, partMsg, noneMsg].every((m) => m.includes("0300-1234567")),
+  noneMsg,
+);
+ok("and says what the number is for, not just the digits", /WhatsApp us on/.test(noneMsg), noneMsg);
+
 section("long orders are summarised, not truncated mid-URL");
 const many = Array.from({ length: 26 }, (_, i) => ({
   description: `Some Product With A Fairly Long Name Number ${i + 1} - Bottle 1000ml`,
@@ -182,6 +201,7 @@ const bigMsg = buildInvoiceMessage({
   totalUnits: 2600,
   paid: 0,
   balance: 1950000,
+  companyWhatsApp: "0300-1234567",
   pdfUrl: "https://example.vercel.app/api/invoices/share/abc123",
 });
 ok(

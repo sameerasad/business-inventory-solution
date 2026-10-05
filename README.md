@@ -434,6 +434,7 @@ Put your own details on it via `.env`:
 BUSINESS_NAME="Your Business Name"
 BUSINESS_ADDRESS="Street, City, Postcode"
 BUSINESS_PHONE="+92 ..."
+BUSINESS_WHATSAPP="+92 ..."   # replies go here; blank reuses BUSINESS_PHONE
 BUSINESS_EMAIL="orders@example.com"
 BUSINESS_TAX_ID="NTN ..."
 ```

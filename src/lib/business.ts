@@ -11,6 +11,19 @@ export type BusinessDetails = {
   name: string;
   address: string;
   phone: string;
+  /**
+   * The one number a customer should reply to.
+   *
+   * Separate from phone because a wa.me link can only pre-fill a message in
+   * whoever's WhatsApp is on the device that opens it - the app cannot choose
+   * which account sends. What it CAN do is make sure every invoice and every
+   * message names one company number, so a customer who replies always reaches
+   * the business rather than whichever booker happened to press the button.
+   *
+   * Falls back to phone, because for most small distributors they are the same
+   * number and there is nothing to be gained by making that be typed twice.
+   */
+  whatsapp: string;
   email: string;
   taxId: string;
 };
@@ -21,6 +34,7 @@ export function business(): BusinessDetails {
     name: process.env.BUSINESS_NAME?.trim() || "Your Business Name",
     address: process.env.BUSINESS_ADDRESS?.trim() || "",
     phone: process.env.BUSINESS_PHONE?.trim() || "",
+    whatsapp: process.env.BUSINESS_WHATSAPP?.trim() || process.env.BUSINESS_PHONE?.trim() || "",
     email: process.env.BUSINESS_EMAIL?.trim() || "",
     taxId: process.env.BUSINESS_TAX_ID?.trim() || "",
   };
