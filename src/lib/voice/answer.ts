@@ -9,7 +9,7 @@
 
 import { prisma } from "@/lib/db";
 import { currentYear } from "@/lib/dates";
-import { money, qty } from "@/lib/format";
+import { dateOnly, money, qty } from "@/lib/format";
 import { getCashKpis } from "@/lib/recognition";
 import { getReceivables } from "@/lib/bookings";
 import { getStockLevels } from "@/lib/queries";
@@ -30,9 +30,30 @@ export type VoiceAnswer = {
 
 const PERIOD_LABEL: Record<QueryPeriod, string> = {
   today: "today",
+  yesterday: "yesterday",
+  week: "this week",
+  last_week: "last week",
   month: "this month",
+  last_month: "last month",
   year: "this year",
+  // Replaced with the dates themselves; a range that says "for that range"
+  // tells nobody which range was understood.
+  range: "for those dates",
 };
+
+/**
+ * What the answer calls the period it is about.
+ *
+ * Every spoken answer names this, and that matters more than it looks: it is
+ * the one thing standing between a misread question and somebody acting on a
+ * number from the wrong month. For a range it has to be the actual dates.
+ */
+function whenLabel(q: Question): string {
+  if (q.period === "range" && q.from && q.to) {
+    return q.from === q.to ? `on ${dateOnly(q.from)}` : `from ${dateOnly(q.from)} to ${dateOnly(q.to)}`;
+  }
+  return PERIOD_LABEL[q.period];
+}
 
 export async function answerQuery(question: Question): Promise<VoiceAnswer> {
   const { metric, period } = question;
@@ -43,7 +64,7 @@ export async function answerQuery(question: Question): Promise<VoiceAnswer> {
   }
 
   if (metric === "orders") {
-    const { start, end } = periodRange(period);
+    const { start, end } = periodRange(question);
     const rows = await prisma.$queryRaw<{ orders: number; value: number }[]>`
       SELECT
         COUNT(DISTINCT b.id)::int         AS "orders",
@@ -145,20 +166,57 @@ export async function answerQuery(question: Question): Promise<VoiceAnswer> {
 }
 
 /** The date window a spoken period refers to, as day strings. */
-function periodRange(period: QueryPeriod): { start: string; end: string } {
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  if (period === "today") {
-    const start = new Date(Date.UTC(year, now.getUTCMonth(), now.getUTCDate()));
-    const end = new Date(Date.UTC(year, now.getUTCMonth(), now.getUTCDate() + 1));
-    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+/**
+ * The half-open window a question covers: start included, end excluded.
+ *
+ * Takes the whole question rather than just the period, because a range
+ * carries its own dates and nothing about today can produce them.
+ *
+ * Weeks run Monday to Sunday. Not an arbitrary choice: the booker's round is
+ * organised by weekday, so a week that began yesterday would answer "is hafte
+ * ki sale" with half of one round and half of another.
+ *
+ * "now" is a parameter so the arithmetic can be tested against fixed days.
+ * Month ends and the Sunday-to-Monday turn are where this kind of code is
+ * wrong, and neither can be checked at all if the clock is read inside.
+ */
+export function periodRange(q: Question, now = new Date()): { start: string; end: string } {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  const iso = (dt: Date) => dt.toISOString().slice(0, 10);
+  const day = (offset: number) => new Date(Date.UTC(y, m, d + offset));
+
+  switch (q.period) {
+    case "today":
+      return { start: iso(day(0)), end: iso(day(1)) };
+    case "yesterday":
+      return { start: iso(day(-1)), end: iso(day(0)) };
+    case "week":
+    case "last_week": {
+      // getUTCDay is 0 for Sunday, so Monday is six days back from it.
+      const since = (now.getUTCDay() + 6) % 7;
+      const shift = q.period === "week" ? 0 : -7;
+      return { start: iso(day(-since + shift)), end: iso(day(-since + shift + 7)) };
+    }
+    case "month":
+      return { start: iso(new Date(Date.UTC(y, m, 1))), end: iso(new Date(Date.UTC(y, m + 1, 1))) };
+    case "last_month":
+      return { start: iso(new Date(Date.UTC(y, m - 1, 1))), end: iso(new Date(Date.UTC(y, m, 1))) };
+    case "range": {
+      // Spoken both ways round often enough to be worth sorting, and the end
+      // is inclusive to a person: "pehli se dus tak" means the tenth counts.
+      const a = q.from!;
+      const b = q.to!;
+      const lo = a <= b ? a : b;
+      const hi = a <= b ? b : a;
+      const after = new Date(hi + "T00:00:00Z");
+      after.setUTCDate(after.getUTCDate() + 1);
+      return { start: lo, end: iso(after) };
+    }
+    default:
+      return { start: `${y}-01-01`, end: `${y + 1}-01-01` };
   }
-  if (period === "month") {
-    const start = new Date(Date.UTC(year, now.getUTCMonth(), 1));
-    const end = new Date(Date.UTC(year, now.getUTCMonth() + 1, 1));
-    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
-  }
-  return { start: `${year}-01-01`, end: `${year + 1}-01-01` };
 }
 
 /**

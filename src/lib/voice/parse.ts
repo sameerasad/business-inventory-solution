@@ -82,6 +82,13 @@ export type VoiceCommand =
       kind: "query";
       metric: QueryMetric;
       period: QueryPeriod;
+      /**
+       * Only for period "range", and both set together. Carried on the command
+       * rather than worked out from today, which is the whole reason a question
+       * about two specific dates can be asked at all.
+       */
+      from: string | null;
+      to: string | null;
       /** Set when the question was about one product ("mango ka stock"). */
       productId: number | null;
       productLabel: string | null;
@@ -594,10 +601,28 @@ function matchMetric(tokens: string[]): QueryMetric | null {
   return match ? match.row.metric : null;
 }
 
+/** Words that turn "this month" into "last month" when they sit in front of it. */
+const PREVIOUS = new Set(["pichle", "pichla", "pichli", "last", "guzishta", "گزشتہ", "پچھلے", "پچھلا"]);
+
 function matchPeriod(tokens: string[]): QueryPeriod | null {
   const rows = PERIOD_WORDS.flatMap((p) => p.words.map((w) => ({ period: p.period, word: w })));
   const match = bestMatch(tokens, rows, (r) => r.word, 0.85);
-  return match ? match.row.period : null;
+  if (!match) return null;
+
+  /**
+   * "pichle mahine" is two tokens, and matching one of them finds "mahine" -
+   * this month, the wrong answer to the question that was asked. So the word
+   * before the period word is checked for a "previous" marker.
+   *
+   * Looked for anywhere rather than strictly adjacent: "pichle poore mahine"
+   * puts a word between them, and nobody says "pichle" in a question about a
+   * period they mean to be the current one.
+   */
+  const previous = tokens.some((t) => PREVIOUS.has(t));
+  if (!previous) return match.row.period;
+  if (match.row.period === "month") return "last_month";
+  if (match.row.period === "week") return "last_week";
+  return match.row.period;
 }
 
 function parseQuery(tokens: string[], catalog: VoiceCatalog): VoiceCommand {
@@ -631,6 +656,9 @@ function parseQuery(tokens: string[], catalog: VoiceCatalog): VoiceCommand {
   return {
     kind: "query",
     metric,
+    // The rules read a period WORD; two spoken dates are the model's job.
+    from: null,
+    to: null,
     period: matchPeriod(tokens) ?? "month",
     productId: metric === "stock" && product ? product.row.id : null,
     productLabel:

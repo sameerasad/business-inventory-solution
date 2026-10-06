@@ -110,7 +110,12 @@ const Extracted = z.object({
   metric: z
     .enum(["revenue", "profit", "outstanding", "collected", "stock", "units", "orders", "balance"])
     .nullable(),
-  period: z.enum(["today", "month", "year"]).nullable(),
+  period: z
+    .enum(["today", "yesterday", "week", "last_week", "month", "last_month", "year", "range"])
+    .nullable(),
+  /** Only with period "range", as YYYY-MM-DD. */
+  from: z.string().nullable(),
+  to: z.string().nullable(),
   /** yyyy-mm-dd. Null when no date was said. */
   date: z.string().nullable(),
   areaId: z.number().nullable(),
@@ -240,7 +245,12 @@ const COMMAND_SCHEMA = {
         null,
       ],
     },
-    period: { type: ["string", "null"], enum: ["today", "month", "year", null] },
+    period: {
+      type: ["string", "null"],
+      enum: ["today", "yesterday", "week", "last_week", "month", "last_month", "year", "range", null],
+    },
+    from: { type: ["string", "null"], description: "YYYY-MM-DD, only with period range" },
+    to: { type: ["string", "null"], description: "YYYY-MM-DD, only with period range" },
     date: { type: ["string", "null"], description: "yyyy-mm-dd, or null if none was said." },
     areaId: { type: ["integer", "null"] },
     shopId: { type: ["integer", "null"] },
@@ -448,6 +458,11 @@ and the sentence has been through speech recognition, so words may be misheard.
 Choose exactly one kind:
 - navigate: they want to open a page. Set href.
 - query: they are asking for a figure. Set metric and period.
+  Periods: today, yesterday (kal), week (is hafte), last_week (pichle hafte), month,
+  last_month (pichle mahine), year, or range. "kal" is yesterday, never today.
+  For two named dates - "pehli se dus tareekh tak", "1 October se 10 October" - use
+  period "range" and set from and to as YYYY-MM-DD, both of them. The end is the last
+  day they said and counts as included. Never set range with only one date.
 - booking: an order for a shop, on credit. Set areaId or shopId, and set lines with at
   least one entry. NEVER return a booking with lines null: if you worked out which product
   was meant, its id goes in lines[].productId with the quantity beside it. Explaining the
@@ -824,10 +839,26 @@ function buildCommand(
 
     case "query": {
       const product = catalog.products.find((p) => p.id === extracted.productId) ?? null;
+
+      /**
+       * A range needs both ends to mean anything.
+       *
+       * One date without the other is a half-understood question, and the
+       * honest thing is to fall back to a period that names itself clearly
+       * rather than invent the missing end. Every answer says which period it
+       * used, so "this month" at least tells the person it did not hear their
+       * dates.
+       */
+      const isDate = (d: string | null | undefined) => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
+      const ranged =
+        extracted.period === "range" && isDate(extracted.from) && isDate(extracted.to);
+
       return {
         kind: "query",
         metric: (extracted.metric ?? "revenue") as QueryMetric,
-        period: (extracted.period ?? "month") as QueryPeriod,
+        period: (ranged ? "range" : extracted.period === "range" ? "month" : (extracted.period ?? "month")) as QueryPeriod,
+        from: ranged ? extracted.from! : null,
+        to: ranged ? extracted.to! : null,
         productId: product?.id ?? null,
         productLabel: product
           ? `${product.name} ${product.packagingType} ${product.variantValue}`

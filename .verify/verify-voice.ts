@@ -18,6 +18,7 @@ import {
 } from "@/lib/voice/parse";
 import { allNumbers, nameScore, readNumber, tokenise } from "@/lib/voice/normalise";
 import { readSpokenDate } from "@/lib/voice/dates";
+import { periodRange } from "@/lib/voice/answer";
 
 let checks = 0;
 let failures = 0;
@@ -232,6 +233,41 @@ async function main() {
   );
 
   /* ---------------------------------------------------------------- questions */
+  section("the window a question covers");
+
+  /**
+   * Date arithmetic against fixed days, because month ends and the
+   * Sunday-to-Monday turn are exactly where this is wrong and neither can be
+   * seen from a passing glance at the output.
+   *
+   * Ranges are half-open: start included, end excluded.
+   */
+  const asQuery = (period: string, from: string | null = null, to: string | null = null) =>
+    ({ kind: "query", period, from, to } as never);
+  const covers = (period: string, now: string, from: string | null = null, to: string | null = null) =>
+    periodRange(asQuery(period, from, to), new Date(now + "T09:30:00Z"));
+
+  // A Wednesday.
+  const wed = "2026-10-07";
+  ok("today is one day", JSON.stringify(covers("today", wed)) === JSON.stringify({ start: "2026-10-07", end: "2026-10-08" }), covers("today", wed));
+  ok("yesterday is the day before", JSON.stringify(covers("yesterday", wed)) === JSON.stringify({ start: "2026-10-06", end: "2026-10-07" }), covers("yesterday", wed));
+  ok("the week starts on Monday", covers("week", wed).start === "2026-10-05", covers("week", wed));
+  ok("and runs seven days", covers("week", wed).end === "2026-10-12", covers("week", wed));
+  ok("last week is the seven before that", JSON.stringify(covers("last_week", wed)) === JSON.stringify({ start: "2026-09-28", end: "2026-10-05" }), covers("last_week", wed));
+
+  // Sunday is the end of its week, not the start of the next one.
+  const sun = "2026-10-11";
+  ok("Sunday still belongs to the week that began on Monday", covers("week", sun).start === "2026-10-05", covers("week", sun));
+
+  ok("this month is the calendar month", JSON.stringify(covers("month", wed)) === JSON.stringify({ start: "2026-10-01", end: "2026-11-01" }), covers("month", wed));
+  ok("last month is the one before", JSON.stringify(covers("last_month", wed)) === JSON.stringify({ start: "2026-09-01", end: "2026-10-01" }), covers("last_month", wed));
+  // January asking for last month has to cross the year.
+  ok("and crosses the year end", JSON.stringify(covers("last_month", "2026-01-14")) === JSON.stringify({ start: "2025-12-01", end: "2026-01-01" }), covers("last_month", "2026-01-14"));
+
+  ok("a range includes the last day said", JSON.stringify(covers("range", wed, "2026-10-01", "2026-10-10")) === JSON.stringify({ start: "2026-10-01", end: "2026-10-11" }), covers("range", wed, "2026-10-01", "2026-10-10"));
+  ok("said backwards it still works", JSON.stringify(covers("range", wed, "2026-10-10", "2026-10-01")) === JSON.stringify({ start: "2026-10-01", end: "2026-10-11" }), covers("range", wed, "2026-10-10", "2026-10-01"));
+  ok("one day named twice is that day", JSON.stringify(covers("range", wed, "2026-10-03", "2026-10-03")) === JSON.stringify({ start: "2026-10-03", end: "2026-10-04" }), covers("range", wed, "2026-10-03", "2026-10-03"));
+
   section("questions");
   const cases: [string, string, string][] = [
     ["how much profit today", "profit", "today"],
@@ -243,6 +279,17 @@ async function main() {
     ["saal ka profit batao", "profit", "year"],
     ["stock kitna hai", "stock", "month"],
     ["آج کا منافع کتنا ہے", "profit", "today"],
+    // The commonest question in this business, and for a long time it was
+    // answered with the whole year because there were only three periods to
+    // choose from and none of them was yesterday.
+    ["kal ki sale kitni thi", "revenue", "yesterday"],
+    ["کل کا منافع کتنا تھا", "profit", "yesterday"],
+    ["is hafte ki sale kitni hai", "revenue", "week"],
+    // "pichle mahine" is two tokens and the second one is "mahine" - matching
+    // that alone answers about THIS month, which is a different question.
+    ["pichle mahine ka profit kitna tha", "profit", "last_month"],
+    ["pichle hafte ki sale kitni thi", "revenue", "last_week"],
+    ["pichle poore mahine ka munafa", "profit", "last_month"],
   ];
   for (const [text, metric, period] of cases) {
     const c = parse(text);

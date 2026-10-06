@@ -1094,10 +1094,52 @@ export const METRIC_WORDS: { metric: QueryMetric; words: string[] }[] = [
   },
 ];
 
-/** The period a question is about. */
-export type QueryPeriod = "today" | "month" | "year";
+/**
+ * The period a question is about.
+ *
+ * There were three - today, this month, this year - and the commonest question
+ * in this business was not among them. "kal kitni sale hui" is what somebody
+ * asks first thing in the morning, and with only three buckets to choose from
+ * both the rules and the model had to force it into one of them: the answer
+ * came back about the whole year. Audible rather than silent, because every
+ * answer names its own period - but still the wrong question answered.
+ *
+ * "range" carries its own dates on the command rather than being computed from
+ * today, which is what makes "pehli se dus tareekh tak" expressible at all.
+ */
+export type QueryPeriod =
+  | "today"
+  | "yesterday"
+  | "week"
+  | "last_week"
+  | "month"
+  | "last_month"
+  | "year"
+  | "range";
 
+/**
+ * Ordered longest-phrase-first, because "pichle mahine" contains "mahine".
+ * Matching on the shorter word first would read every "last month" as "this
+ * month" - the same answer to a different question, which is the failure this
+ * whole change exists to stop.
+ */
 export const PERIOD_WORDS: { period: QueryPeriod; words: string[] }[] = [
+  {
+    period: "last_month",
+    words: ["lastmonth", "pichlemahine", "pichlamahina", "guzishtamah", "گزشتہماہ", "پچھلےمہینے"],
+  },
+  {
+    period: "last_week",
+    words: ["lastweek", "pichlehafte", "pichlahafta", "guzishtahafta", "پچھلےہفتے", "گزشتہہفتہ"],
+  },
+  {
+    period: "yesterday",
+    words: ["yesterday", "kal", "kl", "guzishta", "کل", "گزشتہ"],
+  },
+  {
+    period: "week",
+    words: ["week", "weekly", "hafta", "hafte", "haftay", "ہفتہ", "ہفتے"],
+  },
   { period: "today", words: ["today", "aaj", "aj", "آج"] },
   {
     period: "month",
