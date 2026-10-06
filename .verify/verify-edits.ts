@@ -7,6 +7,7 @@
  * correcting a cost has to re-cost every sale that came from that batch.
  */
 import { prisma } from "@/lib/db";
+import { saveShopPhoneAction } from "@/actions/areas";
 import { emptyActionState } from "@/lib/validations";
 import {
   createCategoryAction,
@@ -703,6 +704,51 @@ async function main() {
       )
     ).ok,
   );
+  /* ---------------------------------------------------------------------- */
+  section("remembering a phone number against a shop");
+
+  /**
+   * The WhatsApp dialog had nothing to fill in: of sixty-five shops in the real
+   * database, not one carried a number, so every invoice meant typing it again.
+   * This is the write that fixes that - one shop, one number, on a tick.
+   */
+  const phoneShop = await prisma.shop.findFirstOrThrow({ where: { isDeleted: false } });
+  await prisma.shop.update({ where: { id: phoneShop.id }, data: { phone: null } });
+
+  const saved = await saveShopPhoneAction(
+    emptyActionState,
+    fd({ shopId: String(phoneShop.id), phone: "+923001234567" }),
+  );
+  ok("the number is saved", saved.ok, saved);
+  ok(
+    "and it is on the shop",
+    (await prisma.shop.findUniqueOrThrow({ where: { id: phoneShop.id } })).phone ===
+      "+923001234567",
+  );
+  ok(
+    "it is audited, because it changed a customer-facing record",
+    (await prisma.auditLog.count({
+      where: { entityType: "shop", entityId: phoneShop.id, action: "shop.phone_saved" },
+    })) === 1,
+  );
+
+  const tooShort = await saveShopPhoneAction(
+    emptyActionState,
+    fd({ shopId: String(phoneShop.id), phone: "123" }),
+  );
+  ok("something that is not a number is refused", !tooShort.ok, tooShort);
+  ok(
+    "and the stored number is left alone",
+    (await prisma.shop.findUniqueOrThrow({ where: { id: phoneShop.id } })).phone ===
+      "+923001234567",
+  );
+
+  const noShop = await saveShopPhoneAction(
+    emptyActionState,
+    fd({ shopId: "999999", phone: "+923001234567" }),
+  );
+  ok("a shop that does not exist is refused", !noShop.ok, noShop);
+
   ok("stock reconciles at the end", await stockReconciles());
 
   console.log(`\n${checks - failures}/${checks} edit checks passed`);

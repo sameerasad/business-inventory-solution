@@ -330,6 +330,10 @@ export async function getInvoiceShareData(bookingId: number): Promise<
       paid: number;
       balance: number;
       companyWhatsApp: string;
+      /** So an unknown number can be kept against the shop it belongs to. */
+      shopId: number | null;
+      shopPhone: string | null;
+      customerPhone: string | null;
     }
   | null
 > {
@@ -338,6 +342,12 @@ export async function getInvoiceShareData(bookingId: number): Promise<
 
   const invoice = await getInvoice(bookingId);
   if (!invoice) return null;
+
+  // The shop itself, so the dialog can offer to remember a number against it.
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { shopId: true, shop: { select: { phone: true } } },
+  });
 
   return {
     token,
@@ -357,6 +367,9 @@ export async function getInvoiceShareData(bookingId: number): Promise<
     paid: invoice.paid,
     balance: invoice.balance,
     companyWhatsApp: business().whatsapp,
+    shopId: booking?.shopId ?? null,
+    shopPhone: booking?.shop?.phone ?? null,
+    customerPhone: invoice.customerPhone,
   };
 }
 

@@ -326,3 +326,49 @@ export async function deleteShopAction(
   revalidateGeography();
   return success(`Shop "${shop.name}" removed.`);
 }
+
+/**
+ * Keep a phone number against the shop it belongs to.
+ *
+ * Exists because the WhatsApp dialog could not fill anything in: of sixty-five
+ * shops, not one had a number stored, so every invoice meant typing it again.
+ * The numbers were being typed - forty-eight orders carry one - they were just
+ * being typed onto the order and then forgotten.
+ *
+ * Deliberately NOT done automatically from those orders. The same number
+ * appears against ten different shops in the existing data, which is what a
+ * test number or the owner's own phone looks like, and copying it onto ten
+ * shops would be worse than leaving them empty: an autofilled wrong number
+ * sends somebody's invoice to a stranger. So a person ticks the box.
+ */
+export async function saveShopPhoneAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = Number.parseInt(String(formData.get("shopId") ?? ""), 10);
+  const phone = String(formData.get("phone") ?? "").trim();
+
+  if (!Number.isInteger(id)) return failure("No shop to save this against.");
+  if (phone.length < 7) return failure("That does not look like a phone number.");
+
+  const shop = await prisma.shop.findUnique({ where: { id }, select: { name: true } });
+  if (!shop) return failure("Shop not found.");
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.shop.update({ where: { id }, data: { phone } });
+      await writeAudit(tx, {
+        entityType: "shop",
+        entityId: id,
+        action: "shop.phone_saved",
+        payload: { phone },
+      });
+    });
+  } catch (error) {
+    console.error("saveShopPhoneAction failed", error);
+    return failure("Could not save the number.");
+  }
+
+  revalidateGeography();
+  return success(`Saved. ${shop.name} will fill in next time.`);
+}

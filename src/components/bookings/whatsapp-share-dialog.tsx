@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { MessageCircle } from "lucide-react";
 
 import { getInvoiceShareData } from "@/actions/bookings";
+import { saveShopPhoneAction } from "@/actions/areas";
+import { emptyActionState } from "@/lib/validations";
 import {
   buildInvoiceMessage,
   buildWhatsAppUrl,
@@ -68,6 +70,35 @@ export function WhatsAppShareDialog({
 
   const parsedPhone = useMemo(() => normalisePhone(phone), [phone]);
 
+  /**
+   * Remembering the number against the shop.
+   *
+   * Of sixty-five shops not one had a number stored, so this dialog had nothing
+   * to fill in and every invoice meant typing it again. The numbers were being
+   * typed - forty-eight orders carry one - and then forgotten on the order.
+   *
+   * Not done automatically from those orders, and the data says why: the same
+   * number sits against ten different shops, which is what a test number or the
+   * owner's own phone looks like. Copying that onto ten shops would send
+   * somebody's invoice to a stranger. So it is a tick, not a rule.
+   */
+  const [remember, setRemember] = useState(false);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+
+  // Filled from the server copy as well as the row, so a page that forgets to
+  // pass the numbers still gets them.
+  useEffect(() => {
+    if (!data) return;
+    setPhone((current) => current.trim() || data.customerPhone || data.shopPhone || "");
+  }, [data]);
+
+  const shopAlreadyHasIt = (() => {
+    if (!data?.shopPhone || !parsedPhone.ok) return false;
+    const stored = normalisePhone(data.shopPhone);
+    return stored.ok && stored.e164 === parsedPhone.e164;
+  })();
+  const canRemember = Boolean(data?.shopId) && parsedPhone.ok && !shopAlreadyHasIt;
+
   const message = useMemo(() => {
     if (!data) return "";
     // window.location.origin is whatever host the user is actually on, so this
@@ -95,8 +126,19 @@ export function WhatsAppShareDialog({
 
   const send = () => {
     if (!canSend) return;
-    // A new tab, so the app stays put if WhatsApp Web opens.
+
+    // Opened first and awaited after. A browser only allows window.open from
+    // the click that caused it, so putting a round trip in front of it gets the
+    // new tab blocked as a popup - and the person loses the message to save a
+    // number they did not ask to save.
     window.open(waUrl, "_blank", "noopener,noreferrer");
+
+    if (remember && canRemember && data?.shopId) {
+      const form = new FormData();
+      form.set("shopId", String(data.shopId));
+      form.set("phone", parsedPhone.e164);
+      void saveShopPhoneAction(emptyActionState, form).then((r) => setSaveNote(r.message));
+    }
     setOpen(false);
   };
 
@@ -148,6 +190,28 @@ export function WhatsAppShareDialog({
             autoFocus
           />
         </Field>
+
+        {canRemember ? (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            <span>
+              Remember this number for{" "}
+              <span className="font-medium">{data?.shopName ?? "this shop"}</span>
+              <span className="block text-xs text-muted-foreground">
+                {data?.shopPhone
+                  ? "Replaces the number saved against the shop."
+                  : "Nothing is saved against the shop yet, so the next invoice would need it typed again."}
+              </span>
+            </span>
+          </label>
+        ) : null}
+
+        {saveNote ? <Alert tone="success">{saveNote}</Alert> : null}
 
         <div className="space-y-1.5">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
