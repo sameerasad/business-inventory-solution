@@ -5,7 +5,7 @@ import { Plus, Trash2 } from "lucide-react";
 
 import type { VoiceCommand } from "@/lib/voice/parse";
 import type { VoiceEditOptions } from "@/actions/voice";
-import { createShop } from "@/actions/areas";
+import { createArea, createShop } from "@/actions/areas";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -61,9 +61,10 @@ export function BookingEditor({
    * invisible on screen, which is the worst of both.
    */
   const [added, setAdded] = useState<VoiceEditOptions["shops"]>([]);
+  const [addedAreas, setAddedAreas] = useState<VoiceEditOptions["areas"]>([]);
 
   const productOptions = options.products.map((p) => ({ value: String(p.id), label: p.label }));
-  const areaOptions = options.areas.map((a) => ({ value: String(a.id), label: a.name }));
+  const areaOptions = [...options.areas, ...addedAreas].map((a) => ({ value: String(a.id), label: a.name }));
   // Only shops in the chosen area: a shop belongs to one area, and offering all
   // fifty is how the wrong one gets picked.
   const shopOptions = [...options.shops, ...added]
@@ -182,7 +183,7 @@ export function BookingEditor({
             disabled={disabled}
             onChange={(v) => {
               const areaId = Number.parseInt(v, 10);
-              const area = options.areas.find((a) => a.id === areaId);
+              const area = [...options.areas, ...addedAreas].find((a) => a.id === areaId);
               // The shop goes with the area. Keeping a shop from the old area
               // would save an order against a shop that is not in the area it
               // claims to be in.
@@ -216,13 +217,23 @@ export function BookingEditor({
                 ...(shop
                   ? {
                       areaId: shop.areaId,
-                      areaName: options.areas.find((a) => a.id === shop.areaId)?.name ?? null,
+                      areaName: [...options.areas, ...addedAreas].find((a) => a.id === shop.areaId)?.name ?? null,
                     }
                   : {}),
               });
             }}
           />
         </Field>
+
+        <NewAreaField
+          disabled={disabled}
+          onCreated={(area) => {
+            setAddedAreas((list) => [...list, area]);
+            // A new area has no shops yet, so any shop still on the order
+            // belongs to a different one and has to go with it.
+            onChange({ ...order, areaId: area.id, areaName: area.name, shopId: null, shopName: null });
+          }}
+        />
 
         <NewShopField
           areaId={order.areaId}
@@ -385,6 +396,134 @@ function NewShopField({
           onClick={() => void add(false)}
         >
           {busy ? "Adding..." : "Add shop"}
+        </Button>
+        {needsConfirm ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={disabled || busy}
+            onClick={() => void add(true)}
+          >
+            Add it anyway
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          onClick={() => {
+            setOpen(false);
+            setProblem(null);
+            setNeedsConfirm(false);
+          }}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Adding an area that is not in the list yet.
+ *
+ * Held back for a while on the reasoning that a new area should be a
+ * deliberate act, not something that falls out of an order. The data says
+ * otherwise: there is already a spoken "naya area add karo" with no guard on
+ * it at all, and it has put "yousaf goth" and "yousuf goth" in the database
+ * with six sales and one. Refusing to add areas here would not have prevented
+ * any of that - it would only have sent people back to the door that has no
+ * lock on it.
+ *
+ * So it is allowed, behind the same check, and with one thing the shop version
+ * does not need: the near-matches arrive carrying their sales counts. Six sales
+ * against one is how a person tells which spelling the orders actually went to.
+ */
+function NewAreaField({
+  disabled,
+  onCreated,
+}: {
+  disabled?: boolean;
+  onCreated: (area: { id: number; name: string }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+
+  const add = async (confirmSimilar: boolean) => {
+    if (!name.trim()) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      const result = await createArea({ name: name.trim(), confirmSimilar });
+      if (result.ok) {
+        // "existing" is a success here, not an error: the name folded onto an
+        // area that is already there, and that is the area they meant.
+        onCreated({ id: result.areaId, name: result.name });
+        setOpen(false);
+        setName("");
+        setNeedsConfirm(false);
+        return;
+      }
+      setProblem(result.message);
+      setNeedsConfirm((result.similar ?? []).length > 0);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div className="sm:col-span-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={() => setOpen(true)}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Area not in the list?
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-card p-2.5 sm:col-span-2">
+      <Field
+        label="New area"
+        htmlFor="v-newarea"
+        hint="Every shop and every figure for this round will hang off this name, so check the spelling."
+      >
+        <Input
+          id="v-newarea"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setNeedsConfirm(false);
+            setProblem(null);
+          }}
+          placeholder="Area name"
+          disabled={disabled || busy}
+          autoFocus
+        />
+      </Field>
+
+      {problem ? <p className="text-xs font-medium text-destructive">{problem}</p> : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          disabled={disabled || busy || !name.trim()}
+          onClick={() => void add(false)}
+        >
+          {busy ? "Adding..." : "Add area"}
         </Button>
         {needsConfirm ? (
           <Button

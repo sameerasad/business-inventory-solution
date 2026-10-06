@@ -396,6 +396,7 @@ async function main() {
    */
   const areasPath = path.resolve("src/actions/areas.ts");
   const created: { areaId: number; name: string; confirmSimilar?: boolean }[] = [];
+  const createdAreas: { name: string; confirmSimilar?: boolean }[] = [];
   require.cache[areasPath] = {
     id: areasPath,
     filename: areasPath,
@@ -412,6 +413,17 @@ async function main() {
           };
         }
         return { ok: true as const, shopId: 900 + created.length, name: input.name, address: null, phone: null };
+      },
+      createArea: async (input: { name: string; confirmSimilar?: boolean }) => {
+        createdAreas.push(input);
+        if (/yousuf/i.test(input.name) && !input.confirmSimilar) {
+          return {
+            ok: false as const,
+            message: 'There is already "yousaf goth" (6 sales).',
+            similar: [{ id: 4, name: "yousaf goth", sales: 6 }],
+          };
+        }
+        return { ok: true as const, areaId: 800 + createdAreas.length, name: input.name, status: "created" as const };
       },
       saveShopPhoneAction: async () => ({ ok: true, message: "", fieldErrors: {} }),
     },
@@ -799,6 +811,42 @@ async function main() {
   ok(
     "and the order now names the shop",
     panelText().includes("Saleem General Store"),
+    panelText().slice(0, 300),
+  );
+
+  /* ------------------------------------------------------------------------ */
+  section("an area nobody has delivered to before");
+
+  /**
+   * Held back for a while on the reasoning that a new area should be a
+   * deliberate act. The data said otherwise: the spoken "naya area add karo"
+   * has no guard on it and has already put "yousaf goth" and "yousuf goth" in
+   * the database with six sales and one. Refusing here would only have sent
+   * people back to the door with no lock on it.
+   */
+  const addAreaToggle = byText(/Area not in the list/i);
+  ok("the order offers to add one", addAreaToggle != null);
+  await click(addAreaToggle!);
+
+  const areaNameBox = () => panel()?.querySelector("#v-newarea") as HTMLInputElement | null;
+  ok("there is a box for the name", areaNameBox() != null);
+
+  await type(areaNameBox()!, "Yousuf Goth");
+  await click(byText(/^\s*Add area\s*$/i)!);
+  ok(
+    "a near-match is held back, with the sales count that tells them apart",
+    /already "yousaf goth" \(6 sales\)/i.test(panelText()),
+    panelText().slice(0, 400),
+  );
+
+  await click(byText(/Add it anyway/i)!);
+  ok("it is created on the second press", createdAreas.length === 2, createdAreas);
+  ok("and only the second press confirmed", createdAreas[1]?.confirmSimilar === true, createdAreas);
+  ok("the form closes", areaNameBox() == null);
+  ok("the order moves to the new area", panelText().includes("Yousuf Goth"), panelText().slice(0, 300));
+  ok(
+    "and the shop from the old area is dropped, not carried across",
+    !panelText().includes("Saleem General Store"),
     panelText().slice(0, 300),
   );
 

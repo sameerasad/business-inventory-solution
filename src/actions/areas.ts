@@ -29,56 +29,120 @@ function revalidateGeography() {
 
 /* --------------------------------------------------------------------- areas */
 
+/**
+ * Areas whose name is near enough to be this one misspelt.
+ *
+ * The sales count comes back with them because it is the tell. "yousaf goth"
+ * with six sales beside "yousuf goth" with one is not two localities - it is
+ * one, entered twice, and the six is where the orders really went. A person
+ * deciding between them needs that number more than they need the spelling.
+ */
+export async function findLookalikeAreas(name: string): Promise<Lookalike[]> {
+  const wanted = fold(name);
+  if (wanted.length < 3) return [];
+  const areas = await prisma.area.findMany({
+    where: { isDeleted: false },
+    select: { id: true, name: true, _count: { select: { sales: true } } },
+  });
+  return areas
+    .map((ar) => ({ ar, score: similarity(wanted, fold(ar.name)) }))
+    .filter((x) => x.score >= 0.72 && fold(x.ar.name) !== wanted)
+    .sort((x, y) => y.score - x.score)
+    .map((x) => ({ id: x.ar.id, name: x.ar.name, sales: x.ar._count.sales }));
+}
+
+/**
+ * Add an area, or recognise the one that is already there.
+ *
+ * Pulled out of the action because the order editor needs the id back, and
+ * because areas had none of the protection shops have - the name column is
+ * @unique and compares exactly, so "gulshan e saeed" and "Gulshan Saeed" are
+ * both in the database today, one sale on each. A duplicate area is worse than
+ * a duplicate shop: it splits a whole route, and the dashboard reports it as
+ * two.
+ */
+export async function createArea(input: { name: string; confirmSimilar?: boolean }): Promise<
+  | { ok: true; areaId: number; name: string; status: "created" | "restored" | "existing" }
+  | { ok: false; message: string; similar?: Lookalike[] }
+> {
+  const parsed = areaSchema.safeParse({ name: input.name });
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid area." };
+  }
+  const { name } = parsed.data;
+
+  // Folded, not exact: the case-sensitive unique index is how the existing
+  // pair got in.
+  const all = await prisma.area.findMany({ select: { id: true, name: true, isDeleted: true } });
+  const existing = all.find((ar) => fold(ar.name) === fold(name));
+
+  if (existing?.isDeleted) {
+    await prisma.$transaction(async (tx) => {
+      await tx.area.update({ where: { id: existing.id }, data: { isDeleted: false } });
+      await writeAudit(tx, { entityType: "area", entityId: existing.id, action: "area.restored" });
+    });
+    revalidateGeography();
+    return { ok: true, areaId: existing.id, name: existing.name, status: "restored" };
+  }
+  if (existing) {
+    return { ok: true, areaId: existing.id, name: existing.name, status: "existing" };
+  }
+
+  if (!input.confirmSimilar) {
+    const similar = await findLookalikeAreas(name);
+    if (similar.length > 0) {
+      return {
+        ok: false,
+        message:
+          `There is already ${similar.map((x) => `"${x.name}" (${x.sales} sales)`).join(" and ")}. ` +
+          `Add "${name}" as a separate area only if it really is one.`,
+        similar,
+      };
+    }
+  }
+
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.area.create({ data: { name }, select: { id: true } });
+      await writeAudit(tx, { entityType: "area", entityId: row.id, action: "area.created", payload: { name } });
+      return row;
+    });
+    revalidateGeography();
+    return { ok: true, areaId: created.id, name, status: "created" };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return { ok: false, message: `Area "${name}" already exists.` };
+    }
+    console.error("createArea failed", error);
+    return { ok: false, message: "Could not add the area. Please try again." };
+  }
+}
+
 export async function createAreaAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const parsed = areaSchema.safeParse({ name: formData.get("name") ?? "" });
-  if (!parsed.success)
-    return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
-  const { name } = parsed.data;
+  const name = String(formData.get("name") ?? "");
+  const confirmSimilar = String(formData.get("confirmSimilar") ?? "") === "true";
+  const result = await createArea({ name, confirmSimilar });
 
-  try {
-    // A previously removed area with the same name is restored rather than
-    // duplicated, since the unique index on name would reject the insert anyway.
-    const existing = await prisma.area.findUnique({
-      where: { name },
-      select: { id: true, isDeleted: true },
+  if (!result.ok) {
+    return failure(result.message, {
+      name: result.message,
+      ...(result.similar?.length ? { similar: "1" } : {}),
     });
-    if (existing?.isDeleted) {
-      await prisma.$transaction(async (tx) => {
-        await tx.area.update({ where: { id: existing.id }, data: { isDeleted: false } });
-        await writeAudit(tx, {
-          entityType: "area",
-          entityId: existing.id,
-          action: "area.restored",
-        });
-      });
-      revalidateGeography();
-      return success(`Area "${name}" restored.`);
-    }
-    if (existing) return failure(`Area "${name}" already exists.`, { name: "Already exists" });
-
-    const area = await prisma.$transaction(async (tx) => {
-      const created = await tx.area.create({ data: { name }, select: { id: true } });
-      await writeAudit(tx, {
-        entityType: "area",
-        entityId: created.id,
-        action: "area.created",
-        payload: { name },
-      });
-      return created;
-    });
-
-    revalidateGeography();
-    return success(`Area "${name}" added.`);
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      return failure(`Area "${name}" already exists.`, { name: "Already exists" });
-    }
-    console.error("createAreaAction failed", error);
-    return failure("Could not add the area. Please try again.");
   }
+  // Typing a name that is already there is a mistake worth reporting on this
+  // page, even though the order editor treats the same answer as "that is the
+  // area you meant" and just selects it.
+  if (result.status === "existing") {
+    return failure(`Area "${result.name}" already exists.`, { name: "Already exists" });
+  }
+  return success(
+    result.status === "restored"
+      ? `Area "${result.name}" restored.`
+      : `Area "${result.name}" added.`,
+  );
 }
 
 export async function renameAreaAction(

@@ -7,7 +7,7 @@
  * correcting a cost has to re-cost every sale that came from that batch.
  */
 import { prisma } from "@/lib/db";
-import { createShop, saveShopPhoneAction } from "@/actions/areas";
+import { createArea, createShop, saveShopPhoneAction } from "@/actions/areas";
 import { emptyActionState } from "@/lib/validations";
 import {
   createCategoryAction,
@@ -704,6 +704,48 @@ async function main() {
       )
     ).ok,
   );
+  /* ---------------------------------------------------------------------- */
+  section("two spellings of one area are one area");
+
+  /**
+   * Worse than the shop case, and already done. The real database has "yousaf
+   * goth" with six sales beside "yousuf goth" with one, and "gulshan e saeed"
+   * beside "Gulshan Saeed" with one each. Area.name is @unique and compares
+   * exactly, so a space or a capital is enough to get a second one in.
+   *
+   * A duplicate area splits a whole route. The dashboard's revenue-by-area
+   * chart reports it as two places, and neither row is the truth.
+   */
+  const madeArea = await createArea({ name: "Yousaf Goth" });
+  ok("the first one is created", madeArea.ok, madeArea);
+
+  const spacedCase = await createArea({ name: "yousaf   goth" });
+  ok("a different casing and spacing is the same area", spacedCase.ok, spacedCase);
+  ok(
+    "and it says so rather than creating a second",
+    spacedCase.ok && spacedCase.status === "existing",
+    spacedCase,
+  );
+  ok(
+    "so there is still one row",
+    (await prisma.area.count({ where: { name: { contains: "ousaf", mode: "insensitive" } } })) === 1,
+  );
+
+  const nearArea = await createArea({ name: "Yousuf Goth" });
+  ok("a near-match is held back", !nearArea.ok, nearArea);
+  ok(
+    "and the sales count comes with it, because that is the tell",
+    !nearArea.ok && (nearArea.similar ?? []).some((x) => typeof x.sales === "number"),
+    nearArea,
+  );
+  ok(
+    "nothing was created while asking",
+    (await prisma.area.count({ where: { name: "Yousuf Goth" } })) === 0,
+  );
+
+  const forced = await createArea({ name: "Yousuf Goth", confirmSimilar: true });
+  ok("confirming it goes through", forced.ok, forced);
+
   /* ---------------------------------------------------------------------- */
   section("two spellings of one shop are one shop");
 
