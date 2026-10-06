@@ -18,6 +18,7 @@ import { getKpis, getStockLevels } from "@/lib/queries";
 import { softDeleteSaleAction } from "@/actions/sales";
 import { renderInvoicePdf } from "@/lib/invoice-pdf";
 import { pdfText } from "./pdf-text";
+import { overlaps, pdfBoxes } from "./pdf-boxes";
 
 let checks = 0;
 let failures = 0;
@@ -330,6 +331,39 @@ async function main() {
   ok('and still shows "BALANCE DUE"', owingPdf.includes("BALANCE DUE"), owingPdf.slice(0, 200));
   ok("and does not claim to be paid in full", !owingPdf.includes("PAID IN FULL"));
   ok("still no cost or profit wording", !/\b(cost|profit|margin)\b/i.test(owingPdf));
+
+  /**
+   * Nothing is printed on top of anything else.
+   *
+   * The badge shipped overlapping the invoice date - the red box drawn straight
+   * through "2026-10-02" - and every check here passed while it did, because
+   * all of them ask what the document SAYS and both pieces said the right
+   * thing. They were simply in the same place.
+   *
+   * So this one reads the geometry instead. It checks the header, where the
+   * badge sits beside the invoice number and the date.
+   */
+  const { texts, rects } = pdfBoxes(await renderInvoicePdf(owing!));
+  const header = texts.filter((t) => t.y > 700);
+  ok("the header has the badge and the meta rows", header.length >= 5, header.map((t) => t.text));
+
+  // Helvetica averages a little over half an em; generous here, which errs
+  // towards reporting a collision rather than missing one.
+  const widthOf = (t: { text: string; size: number }) => t.text.length * t.size * 0.58;
+  const collisions = rects.flatMap((r) =>
+    header.filter((t) => overlaps(r, t, widthOf(t))).map((t) => ({ rect: r, text: t.text })),
+  );
+  ok(
+    "no filled box prints over a line of text in the header",
+    collisions.length === 0,
+    collisions.map((c) => `"${c.text}" under box at y=${c.rect.y.toFixed(0)}`),
+  );
+
+  const badge = rects.find((r) => Math.round(r.height) === 20 && r.y > 700);
+  const dateRow = header.find((t) => /^\d{4}-\d{2}-\d{2}$/.test(t.text));
+  ok("the badge sits clear below the date", badge != null && dateRow != null
+    && badge.y + badge.height < dateRow.bottom,
+    badge && dateRow ? `badge top ${(badge.y + badge.height).toFixed(1)} vs date bottom ${dateRow.bottom.toFixed(1)}` : [badge, dateRow]);
 
   // Cancelled once it has served its purpose. Later sections of this suite
   // assert that receivables is empty, and a second unpaid order left standing

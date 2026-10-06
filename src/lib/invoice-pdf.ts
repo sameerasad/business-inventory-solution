@@ -231,20 +231,36 @@ export async function renderInvoicePdf(invoice: Invoice): Promise<Uint8Array> {
     const padX = 10;
     const width = bold.widthOfTextAtSize(look.label, size) + padX * 2;
     const height = 20;
+
+    /**
+     * Placed against the last meta row's BASELINE, not against metaY.
+     *
+     * metaY has already stepped past that row by the time the loop ends, so
+     * hanging the badge off it put the top of the box above the date's own
+     * baseline and the red filled rectangle printed straight through the date.
+     * ROW_STEP is that step; GAP is clearance for the descenders below it.
+     */
+    const ROW_STEP = 13;
+    const GAP = 9;
+    const lastBaseline = metaY + ROW_STEP;
+    const top = lastBaseline - GAP;
+
     ctx.page.drawRectangle({
       x: MARGIN + COL.total - width,
-      y: metaY - 4,
+      y: top - height,
       width,
       height,
       color: look.fill,
     });
-    text(ctx, look.label, COL.total - padX, metaY + 2, {
+    // Optically centred in the box: a cap-height glyph sits a little above the
+    // true middle, so the baseline goes below it rather than on it.
+    text(ctx, look.label, COL.total - padX, top - height + 6.5, {
       size,
       bold: true,
       color: look.ink,
       align: "right",
     });
-    metaY -= height + 6;
+    metaY = top - height - 6;
   }
 
   ctx.y = Math.min(ctx.y, metaY) - 10;
