@@ -10,7 +10,13 @@
 import { prisma } from "@/lib/db";
 import { currentYear } from "@/lib/dates";
 import { dateOnly, money, qty } from "@/lib/format";
-import { getCashKpis } from "@/lib/recognition";
+import {
+  getCashByArea,
+  getCashByBooker,
+  getCashByProductName,
+  getCashByShop,
+  getCashKpis,
+} from "@/lib/recognition";
 import { getReceivables } from "@/lib/bookings";
 import { getStockLevels } from "@/lib/queries";
 import type { QueryPeriod } from "@/lib/voice/lexicon";
@@ -57,6 +63,10 @@ function whenLabel(q: Question): string {
 
 export async function answerQuery(question: Question): Promise<VoiceAnswer> {
   const { metric, period } = question;
+
+  // "Which one is biggest" is a different question from "how much", and is
+  // answered with a ranking rather than a figure.
+  if (question.dimension) return answerRanking(question);
 
   // "Corner Store ka balance kitna hai" - one shop, not the whole book.
   if (metric === "balance") {
@@ -417,4 +427,83 @@ export async function getVoiceCatalog() {
   ]);
 
   return { products, areas, shops, bookers, invoices, categories };
+}
+
+/**
+ * "Which area sold most", and the three others like it.
+ *
+ * Every figure here is one the dashboard already computes - this reaches the
+ * same functions rather than writing a second set of SQL that could drift from
+ * them and leave the spoken answer disagreeing with the chart.
+ *
+ * The metric decides what "most" means. "sab se zyada sale" ranks on revenue
+ * and "sab se zyada munafa" on profit, which is a real difference: the shop
+ * that buys the cheapest line in volume tops one list and sits well down the
+ * other.
+ */
+async function answerRanking(question: Question): Promise<VoiceAnswer> {
+  const { start, end } = periodRange(question);
+  const scope = {
+    start: new Date(`${start}T00:00:00Z`),
+    end: new Date(`${end}T00:00:00Z`),
+    categoryId: null,
+    areaId: null,
+    bookerId: null,
+  };
+
+  const dimension = question.dimension!;
+  const rows = await (dimension === "area"
+    ? getCashByArea(scope)
+    : dimension === "shop"
+      ? getCashByShop(scope, 50)
+      : dimension === "booker"
+        ? getCashByBooker(scope)
+        : getCashByProductName(scope));
+
+  /**
+   * Only revenue and profit can rank these.
+   *
+   * The cash breakdowns carry no unit counts - they are built from money
+   * recognised, not packs moved - so a question ranking on units is answered on
+   * revenue instead. The spoken answer names which, so the substitution is
+   * heard rather than hidden.
+   */
+  const by: "revenue" | "profit" = question.metric === "profit" ? "profit" : "revenue";
+  const ranked = [...rows].sort((a, b) => b[by] - a[by]).filter((r) => r[by] > 0);
+
+  const NAME: Record<string, string> = {
+    area: "area",
+    shop: "shop",
+    booker: "booker",
+    product: "product",
+  };
+  const when = whenLabel(question);
+  const what = by === "profit" ? "profit" : "sales";
+
+  if (ranked.length === 0) {
+    return {
+      speech: `Nothing was recorded ${when}, so there is no ${NAME[dimension]} to name.`,
+      value: "-",
+      label: `Top ${NAME[dimension]} ${when}`,
+      href: "/dashboard",
+    };
+  }
+
+  const top = ranked[0]!;
+  const runnersUp = ranked.slice(1, 3).map((r) => r.label);
+  // Two named behind the leader, no more. This is read aloud, and a list of
+  // twelve names spoken at somebody is not an answer.
+  const tail =
+    runnersUp.length > 0
+      ? ` Then ${runnersUp.join(", then ")}.`
+      : "";
+
+  return {
+    speech:
+      `${top.label} had the most ${what} ${when}, ${money(top[by])}.` +
+      `${tail}`,
+    value: money(top[by]),
+    label: `Top ${NAME[dimension]} by ${what} ${when}`,
+    href: "/dashboard",
+  };
 }

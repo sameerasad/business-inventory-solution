@@ -34,7 +34,10 @@ import {
   SALE_VERBS,
   UNIT_WORDS,
   type QueryMetric,
+  type QueryDimension,
   type QueryPeriod,
+  DIMENSION_WORDS,
+  RANKING_WORDS,
 } from "@/lib/voice/lexicon";
 import { readDateOrToday } from "@/lib/voice/dates";
 import {
@@ -82,6 +85,11 @@ export type VoiceCommand =
       kind: "query";
       metric: QueryMetric;
       period: QueryPeriod;
+      /**
+       * Set when the question is "which one is biggest" rather than "how much".
+       * The metric decides what biggest means - sale or munafa.
+       */
+      dimension: QueryDimension | null;
       /**
        * Only for period "range", and both set together. Carried on the command
        * rather than worked out from today, which is the whole reason a question
@@ -474,7 +482,19 @@ export function parseCommand(
   // - "order", "sale", "booking" all appear in "kitne order huye" and in "sell
   // twenty mango" - so an explicit asking word next to a figure this app tracks
   // is the strongest signal there is that nothing is being recorded.
-  if (hasAny(tokens, QUERY_VERBS) && matchMetric(tokens)) {
+  /**
+   * A ranking question is a question too.
+   *
+   * "kaun se area mein sab se zyada sale hui" contains no asking word from
+   * QUERY_VERBS - no kitna, no kya, no batao - so it fell straight past this
+   * gate and came out the other end as a navigation to the Sales page. The
+   * person asked which area and was shown a list of every area.
+   *
+   * matchDimension already insists on a ranking word beside the dimension, so
+   * this cannot swallow "area ki sale kitni hai", which is a plain total and
+   * still takes the asking-word path below it.
+   */
+  if (matchDimension(tokens) || (hasAny(tokens, QUERY_VERBS) && matchMetric(tokens))) {
     return parseQuery(tokens, catalog);
   }
 
@@ -604,6 +624,20 @@ function matchMetric(tokens: string[]): QueryMetric | null {
 /** Words that turn "this month" into "last month" when they sit in front of it. */
 const PREVIOUS = new Set(["pichle", "pichla", "pichli", "last", "guzishta", "گزشتہ", "پچھلے", "پچھلا"]);
 
+/**
+ * "Which one is biggest", as opposed to "how much altogether".
+ *
+ * Both halves are required. "area ki sale kitni hai" names a dimension and is
+ * still a plain total; without the ranking word it would turn into a league
+ * table nobody asked for.
+ */
+function matchDimension(tokens: string[]): QueryDimension | null {
+  if (!tokens.some((t) => RANKING_WORDS.has(t))) return null;
+  const rows = DIMENSION_WORDS.flatMap((d) => d.words.map((w) => ({ dimension: d.dimension, word: w })));
+  const match = bestMatch(tokens, rows, (r) => r.word, 0.85);
+  return match ? match.row.dimension : null;
+}
+
 function matchPeriod(tokens: string[]): QueryPeriod | null {
   const rows = PERIOD_WORDS.flatMap((p) => p.words.map((w) => ({ period: p.period, word: w })));
   const match = bestMatch(tokens, rows, (r) => r.word, 0.85);
@@ -626,7 +660,11 @@ function matchPeriod(tokens: string[]): QueryPeriod | null {
 }
 
 function parseQuery(tokens: string[], catalog: VoiceCatalog): VoiceCommand {
-  let metric = matchMetric(tokens);
+  const dimension = matchDimension(tokens);
+  // "kaun sa product sab se zyada bika" names no metric at all. Asking which
+  // one is biggest without saying biggest by what means by sales - and the
+  // answer says "had the most sales", so the assumption is read back.
+  let metric = matchMetric(tokens) ?? (dimension ? ("revenue" as QueryMetric) : null);
   if (!metric) {
     return {
       kind: "unknown",
@@ -656,6 +694,7 @@ function parseQuery(tokens: string[], catalog: VoiceCatalog): VoiceCommand {
   return {
     kind: "query",
     metric,
+    dimension,
     // The rules read a period WORD; two spoken dates are the model's job.
     from: null,
     to: null,

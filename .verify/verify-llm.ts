@@ -115,6 +115,7 @@ function said(over: Partial<Parameters<typeof toCommand>[0]>): Parameters<typeof
     href: null,
     metric: null,
     period: null,
+    dimension: null,
     from: null,
     to: null,
     date: null,

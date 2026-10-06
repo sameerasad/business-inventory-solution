@@ -1147,3 +1147,58 @@ export const PERIOD_WORDS: { period: QueryPeriod; words: string[] }[] = [
   },
   { period: "year", words: ["year", "yearly", "saal", "sal", "annual", "سال"] },
 ];
+
+/**
+ * What a "which one is biggest" question is asking about.
+ *
+ * The dashboard already works all of these out - revenue and profit per area,
+ * per shop, per booker, per product. Voice could not reach any of it: "kaun se
+ * area mein sab se zyada sale hui" came back unknown, and "kaun sa product sab
+ * se zyada bika" opened the Products page instead of answering.
+ */
+export type QueryDimension = "area" | "shop" | "booker" | "product";
+
+export const DIMENSION_WORDS: { dimension: QueryDimension; words: string[] }[] = [
+  { dimension: "area", words: ["area", "areas", "ilaqa", "ilaqe", "علاقہ", "علاقے", "ایریا"] },
+  {
+    dimension: "shop",
+    words: ["shop", "shops", "dukan", "dukaan", "dukane", "dukandar", "دکان", "دکاندار"],
+  },
+  {
+    dimension: "booker",
+    words: ["booker", "bookers", "salesman", "بکر", "بکار"],
+  },
+  {
+    dimension: "product",
+    words: ["product", "products", "item", "cheez", "flavour", "flavor", "مال", "چیز", "پروڈکٹ"],
+  },
+];
+
+/**
+ * Words that turn a figure into a ranking.
+ *
+ * Without one of these "area ki sale kitni hai" would become a league table
+ * when it is a plain question about a total.
+ */
+export const RANKING_WORDS = new Set([
+  "kaun",
+  "kon",
+  "konsa",
+  "kaunsa",
+  "konsi",
+  "kaunsi",
+  "which",
+  "top",
+  "best",
+  "highest",
+  "sabse",
+  "sab",
+  "zyada",
+  "ziyada",
+  "sarfaraz",
+  "کون",
+  "کونسا",
+  "کونسی",
+  "سبسے",
+  "زیادہ",
+]);

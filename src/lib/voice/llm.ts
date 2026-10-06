@@ -31,7 +31,7 @@ import {
   type TransportResult,
 } from "@/lib/voice/llm-groq";
 
-import type { QueryMetric, QueryPeriod } from "@/lib/voice/lexicon";
+import type { QueryDimension, QueryMetric, QueryPeriod } from "@/lib/voice/lexicon";
 import type { VoiceCatalog, VoiceCommand } from "@/lib/voice/parse";
 import { DESTINATIONS } from "@/lib/voice/lexicon";
 
@@ -113,6 +113,8 @@ const Extracted = z.object({
   period: z
     .enum(["today", "yesterday", "week", "last_week", "month", "last_month", "year", "range"])
     .nullable(),
+  /** Set only when they asked WHICH one is biggest, not how much in total. */
+  dimension: z.enum(["area", "shop", "booker", "product"]).nullable(),
   /** Only with period "range", as YYYY-MM-DD. */
   from: z.string().nullable(),
   to: z.string().nullable(),
@@ -248,6 +250,11 @@ const COMMAND_SCHEMA = {
     period: {
       type: ["string", "null"],
       enum: ["today", "yesterday", "week", "last_week", "month", "last_month", "year", "range", null],
+    },
+    dimension: {
+      type: ["string", "null"],
+      enum: ["area", "shop", "booker", "product", null],
+      description: "only for which-one-is-biggest questions",
     },
     from: { type: ["string", "null"], description: "YYYY-MM-DD, only with period range" },
     to: { type: ["string", "null"], description: "YYYY-MM-DD, only with period range" },
@@ -460,6 +467,10 @@ Choose exactly one kind:
 - query: they are asking for a figure. Set metric and period.
   Periods: today, yesterday (kal), week (is hafte), last_week (pichle hafte), month,
   last_month (pichle mahine), year, or range. "kal" is yesterday, never today.
+  For "which one is biggest" - "kaun se area mein sab se zyada sale", "kis dukaan ne
+  sab se zyada munafa diya", "kaun sa product sab se zyada bika" - also set dimension
+  to area, shop, booker or product. Leave dimension null for a plain total.
+  The metric still decides what biggest means: sale is revenue, munafa is profit.
   For two named dates - "pehli se dus tareekh tak", "1 October se 10 October" - use
   period "range" and set from and to as YYYY-MM-DD, both of them. The end is the last
   day they said and counts as included. Never set range with only one date.
@@ -856,6 +867,7 @@ function buildCommand(
       return {
         kind: "query",
         metric: (extracted.metric ?? "revenue") as QueryMetric,
+        dimension: (extracted.dimension ?? null) as QueryDimension | null,
         period: (ranged ? "range" : extracted.period === "range" ? "month" : (extracted.period ?? "month")) as QueryPeriod,
         from: ranged ? extracted.from! : null,
         to: ranged ? extracted.to! : null,

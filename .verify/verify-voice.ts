@@ -233,6 +233,40 @@ async function main() {
   );
 
   /* ---------------------------------------------------------------- questions */
+  section("which one is biggest");
+
+  /**
+   * These were not questions as far as the app was concerned. Two came back
+   * unknown and two opened a page - somebody asked which area sold most and
+   * was shown a list of every area.
+   */
+  const rankings: [string, string, string][] = [
+    ["kaun se area mein sab se zyada sale hui", "revenue", "area"],
+    ["kis dukaan ne sab se zyada manafa diya", "profit", "shop"],
+    // Names no metric at all: asking which is biggest without saying biggest
+    // by what means by sales.
+    ["kaun sa product sab se zyada bika", "revenue", "product"],
+    ["kaun se booker ne sab se zyada munafa diya", "profit", "booker"],
+  ];
+  for (const [text, metric, dimension] of rankings) {
+    const c = parse(text);
+    ok(
+      `"${text}" -> ${dimension} by ${metric}`,
+      c.kind === "query" && c.metric === metric && c.dimension === dimension,
+      c,
+    );
+  }
+
+  /**
+   * The guard that keeps the two apart. A dimension word on its own is not a
+   * ranking - this one is a plain total and must stay one, or every question
+   * mentioning an area turns into a league table.
+   */
+  const plain = parse("area ki sale kitni hai");
+  ok("a dimension word alone is still a plain total", plain.kind === "query" && plain.dimension === null, plain);
+  const plain2 = parse("aaj ki sale kitni hai");
+  ok("and so is a question with no dimension in it", plain2.kind === "query" && plain2.dimension === null, plain2);
+
   section("the window a question covers");
 
   /**
