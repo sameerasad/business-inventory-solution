@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
+import { similarity } from "@/lib/voice/normalise";
 import {
   areaSchema,
   failure,
@@ -160,15 +161,61 @@ export async function deleteAreaAction(
  * Shared by the Areas page and by the "add a shop without leaving this form"
  * dialog on the New Sale page, which is why it returns the shop id.
  */
+/**
+ * One name, for the purpose of deciding whether two shops are the same shop.
+ *
+ * The database constraint is @@unique([areaId, name]) and it compares exactly,
+ * so "Ghousia Cosmetics" and "Ghousia cosmetics" are two different shops as
+ * far as it is concerned - and both of them are sitting in laal market today,
+ * created that way, neither with a sale against it.
+ *
+ * Deliberately its own small thing rather than the speech normaliser: that one
+ * rewrites words to help a microphone, and whether two records are the same
+ * record should not change because somebody edited the voice lexicon.
+ */
+function fold(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9؀-ۿ]+/g, " ")
+    .trim()
+    .replace(/s+/g, " ");
+}
+
+export type Lookalike = { id: number; name: string; sales: number };
+
+/**
+ * Shops in this area whose name is near enough to be the same shop misspelt.
+ *
+ * Near, not identical: an identical fold IS the same shop and is handled by
+ * reusing it. This is for the pair a person has to look at - the real data has
+ * "Imran Journal Store" and "Irfan Journal Store" one letter apart in one area,
+ * and only a human knows whether that is two shopkeepers or one mishearing.
+ */
+export async function findLookalikeShops(areaId: number, name: string): Promise<Lookalike[]> {
+  const wanted = fold(name);
+  if (wanted.length < 3) return [];
+  const shops = await prisma.shop.findMany({
+    where: { areaId, isDeleted: false },
+    select: { id: true, name: true, _count: { select: { sales: true } } },
+  });
+  return shops
+    .map((sh) => ({ sh, score: similarity(wanted, fold(sh.name)) }))
+    .filter((x) => x.score >= 0.72 && fold(x.sh.name) !== wanted)
+    .sort((x, y) => y.score - x.score)
+    .map((x) => ({ id: x.sh.id, name: x.sh.name, sales: x.sh._count.sales }));
+}
+
 export async function createShop(input: {
   areaId: number;
   name: string;
   address?: string | null;
   phone?: string | null;
   voiceAlias?: string | null;
+  /** Set once a person has looked at the near-matches and meant it anyway. */
+  confirmSimilar?: boolean;
 }): Promise<
   | { ok: true; shopId: number; name: string; address: string | null; phone: string | null }
-  | { ok: false; message: string }
+  | { ok: false; message: string; similar?: Lookalike[] }
 > {
   const parsed = shopSchema.safeParse({
     areaId: String(input.areaId),
@@ -185,14 +232,52 @@ export async function createShop(input: {
   const area = await prisma.area.findUnique({ where: { id: areaId }, select: { isDeleted: true } });
   if (!area || area.isDeleted) return { ok: false, message: "That area is no longer available." };
 
+  /**
+   * A near-match is a question, not an error.
+   *
+   * Refusing outright would be wrong - "Imran Journal Store" and "Irfan Journal
+   * Store" sit one letter apart in one area and may well be two shopkeepers. So
+   * the first attempt comes back with what it found and the caller asks; a
+   * second attempt carrying confirmSimilar goes through.
+   *
+   * Only when something would actually be CREATED. A name that folds onto an
+   * existing shop is that shop, and reusing it is the fix rather than the risk.
+   */
+  if (!input.confirmSimilar) {
+    const inArea = await prisma.shop.findMany({
+      where: { areaId, isDeleted: false },
+      select: { name: true },
+    });
+    const reusing = inArea.some((sh) => fold(sh.name) === fold(name));
+    if (!reusing) {
+      const similar = await findLookalikeShops(areaId, name);
+      if (similar.length > 0) {
+        return {
+          ok: false,
+          message:
+            `This area already has ${similar.map((x) => `"${x.name}"`).join(" and ")}. ` +
+            `Add "${name}" as a separate shop only if it really is one.`,
+          similar,
+        };
+      }
+    }
+  }
+
   try {
     // Upsert on (area, name): re-adding a removed shop restores it, and a
     // double-click cannot create two shops with the same name in one area.
     const shop = await prisma.$transaction(async (tx) => {
-      const existing = await tx.shop.findUnique({
-        where: { areaId_name: { areaId, name } },
-        select: { id: true, isDeleted: true, address: true, phone: true, voiceAlias: true },
+      // Matched on the folded name, not the exact one. findUnique on
+      // (areaId, name) compares byte for byte, which is how laal market ended
+      // up with both "Ghousia Cosmetics" and "Ghousia cosmetics". A shop whose
+      // name differs only in case or punctuation IS this shop, so it is reused
+      // - and its existing spelling is kept rather than silently rewritten.
+      const inArea = await tx.shop.findMany({
+        where: { areaId },
+        select: { id: true, name: true, isDeleted: true, address: true, phone: true, voiceAlias: true },
       });
+      const wanted = fold(name);
+      const existing = inArea.find((sh) => fold(sh.name) === wanted);
       if (existing) {
         // Re-adding a shop that already exists never blanks an address it
         // already has; an address given now fills a blank one in.
@@ -257,8 +342,17 @@ export async function createShopAction(
     return failure("Pick an area first.", { areaId: "Area is required" });
   }
 
-  const result = await createShop({ areaId, name, address, phone, voiceAlias });
-  if (!result.ok) return failure(result.message, { name: result.message });
+  const confirmSimilar = String(formData.get("confirmSimilar") ?? "") === "true";
+  const result = await createShop({ areaId, name, address, phone, voiceAlias, confirmSimilar });
+  if (!result.ok) {
+    // A separate key rather than sniffing the wording: the form needs to know
+    // this refusal can be pressed through, and a message is for reading, not
+    // for branching on.
+    return failure(result.message, {
+      name: result.message,
+      ...(result.similar?.length ? { similar: "1" } : {}),
+    });
+  }
   return success(`Shop "${result.name}" added.`);
 }
 

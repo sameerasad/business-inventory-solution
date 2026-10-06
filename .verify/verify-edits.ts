@@ -7,7 +7,7 @@
  * correcting a cost has to re-cost every sale that came from that batch.
  */
 import { prisma } from "@/lib/db";
-import { saveShopPhoneAction } from "@/actions/areas";
+import { createShop, saveShopPhoneAction } from "@/actions/areas";
 import { emptyActionState } from "@/lib/validations";
 import {
   createCategoryAction,
@@ -704,6 +704,62 @@ async function main() {
       )
     ).ok,
   );
+  /* ---------------------------------------------------------------------- */
+  section("two spellings of one shop are one shop");
+
+  /**
+   * The real database has "Ghousia Cosmetics" and "Ghousia cosmetics" sitting
+   * in laal market together, created because the unique constraint compares
+   * exactly. A duplicate shop is the quietest kind of damage: half the orders
+   * land on one row and half on the other, receivables disagree with itself,
+   * and nobody notices for a month.
+   */
+  const dupArea = await prisma.area.findFirstOrThrow({ where: { isDeleted: false } });
+
+  const first = await createShop({ areaId: dupArea.id, name: "Ghousia Cosmetics" });
+  ok("the first one is created", first.ok, first);
+
+  const sameAgain = await createShop({ areaId: dupArea.id, name: "ghousia   cosmetics" });
+  ok("a different casing is the same shop", sameAgain.ok, sameAgain);
+  ok(
+    "so no second row appears",
+    (await prisma.shop.count({
+      where: { areaId: dupArea.id, name: { contains: "ousia", mode: "insensitive" } },
+    })) === 1,
+  );
+  ok(
+    "and the spelling already on the record is kept, not overwritten",
+    (await prisma.shop.findFirstOrThrow({ where: { areaId: dupArea.id, name: { contains: "ousia", mode: "insensitive" } } }))
+      .name === "Ghousia Cosmetics",
+  );
+
+  /**
+   * A near-match is a question, not an error: "Imran Journal Store" and "Irfan
+   * Journal Store" are one letter apart in one area of the real data and may
+   * well be two different shopkeepers.
+   */
+  const lookalike = await createShop({ areaId: dupArea.id, name: "Ghousia Cosmetic" });
+  ok("a near-match is held back", !lookalike.ok, lookalike);
+  ok(
+    "and says which shop it looks like",
+    !lookalike.ok && (lookalike.similar ?? []).some((x) => x.name === "Ghousia Cosmetics"),
+    lookalike,
+  );
+  ok(
+    "nothing was created while asking",
+    (await prisma.shop.count({ where: { areaId: dupArea.id, name: "Ghousia Cosmetic" } })) === 0,
+  );
+
+  const confirmed = await createShop({
+    areaId: dupArea.id,
+    name: "Ghousia Cosmetic",
+    confirmSimilar: true,
+  });
+  ok("confirming it goes through", confirmed.ok, confirmed);
+
+  const unrelated = await createShop({ areaId: dupArea.id, name: "Zubair Hardware" });
+  ok("a name like nothing else is not questioned", unrelated.ok, unrelated);
+
   /* ---------------------------------------------------------------------- */
   section("remembering a phone number against a shop");
 

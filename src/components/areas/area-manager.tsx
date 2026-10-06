@@ -364,6 +364,26 @@ function NameForm({
       {state.message && !state.ok ? (
         <p className="text-xs font-medium text-destructive">{state.message}</p>
       ) : null}
+
+      {/* A near-match is a question, not a refusal: two shopkeepers really can
+          be called Imran and Irfan on the same street. The way past it is a
+          second, deliberate press.
+
+          A submit button rather than a checkbox, because a button carries its
+          own name and value into the form data - so there is no state to set
+          first and no chance of the press racing the state update. */}
+      {state.fieldErrors.similar ? (
+        <Button
+          type="submit"
+          name="confirmSimilar"
+          value="true"
+          variant="outline"
+          size="sm"
+          disabled={isPending}
+        >
+          Add it anyway
+        </Button>
+      ) : null}
     </form>
   );
 }
