@@ -1,8 +1,10 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { parseDateOnly } from "@/lib/dates";
+import { DEFAULT_PAGE_SIZE, PAGE_SIZES } from "@/lib/lists";
 
-export const BOOKINGS_PAGE_SIZE = 50;
+// Bookings used to carry a page size of its own, a second 50 that nobody had
+// to keep in step with the other one. It reads the shared list now.
 
 /* ------------------------------------------------------------------ listing */
 
@@ -18,6 +20,7 @@ export type BookingListFilters = {
   status: PaymentStatusFilter;
   q: string | null;
   page: number;
+  pageSize: number;
 };
 
 export type BookingRow = {
@@ -101,13 +104,17 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
   rows: BookingRow[];
   total: number;
   page: number;
+  pageSize: number;
   pageCount: number;
   totals: { revenue: number; profit: number; units: number; collected: number };
 }> {
   for (const value of [filters.from, filters.to]) if (value) parseDateOnly(value);
 
   const page = Math.max(1, filters.page);
-  const offset = (page - 1) * BOOKINGS_PAGE_SIZE;
+  const pageSize = (PAGE_SIZES as readonly number[]).includes(filters.pageSize)
+    ? filters.pageSize
+    : DEFAULT_PAGE_SIZE;
+  const offset = (page - 1) * pageSize;
   const clause = bookingWhere(filters);
 
   const [rows, summary] = await Promise.all([
@@ -161,7 +168,7 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
       ) pay ON pay.booking_id = b.id
       ${clause}
       ORDER BY b.booking_date DESC, b.id DESC
-      LIMIT ${BOOKINGS_PAGE_SIZE} OFFSET ${offset}
+      LIMIT ${pageSize} OFFSET ${offset}
     `),
     prisma.$queryRaw<
       { total: number; revenue: number; profit: number; units: number; collected: number }[]
@@ -203,7 +210,8 @@ export async function getBookingList(filters: BookingListFilters): Promise<{
     rows,
     total: agg.total,
     page,
-    pageCount: Math.max(1, Math.ceil(agg.total / BOOKINGS_PAGE_SIZE)),
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(agg.total / pageSize)),
     totals: {
       revenue: agg.revenue,
       profit: agg.profit,

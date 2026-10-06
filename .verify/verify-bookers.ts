@@ -1,6 +1,7 @@
 /**
  * Bookers: CRUD, attribution, and the performance metrics built on it.
  */
+import { DEFAULT_PAGE_SIZE } from "@/lib/lists";
 import { prisma } from "@/lib/db";
 import { emptyActionState } from "@/lib/validations";
 import { createBatchAction } from "@/actions/batches";
@@ -179,6 +180,7 @@ async function main() {
     status: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok(
     "bookings list names the booker",
@@ -194,6 +196,7 @@ async function main() {
     status: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("the booker filter works", imranOnly.total === 2, imranOnly.total);
 

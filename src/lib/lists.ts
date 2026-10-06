@@ -8,7 +8,30 @@ import { parseDateOnly } from "@/lib/dates";
  * does: the client is never handed unit costs to multiply.
  */
 
-export const PAGE_SIZE = 50;
+/**
+ * How many rows a listing shows, and the choices offered.
+ *
+ * Fifty was hard-coded in two files that did not agree they were the same
+ * number. It is now one list, one default, and a value that has to come back
+ * through readPageSize before any query sees it - a page size arrives from the
+ * URL, where anyone can type anything, and it goes straight into LIMIT.
+ */
+export const PAGE_SIZES = [10, 20, 30, 50, 100] as const;
+export const DEFAULT_PAGE_SIZE = 30;
+
+/**
+ * The page size to use, from whatever the URL says.
+ *
+ * Anything that is not one of the offered sizes becomes the default rather
+ * than being clamped to the nearest. "?per=5000" is not a request for a
+ * hundred rows, it is a request for something this app does not do, and
+ * nothing good comes of guessing which of its neighbours was meant.
+ */
+export function readPageSize(value: string | string[] | undefined): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const n = Number.parseInt(raw ?? "", 10);
+  return (PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE;
+}
 
 /* ------------------------------------------------------------------- batches */
 
@@ -21,6 +44,7 @@ export type BatchListFilters = {
   to: string | null;
   q: string | null;
   page: number;
+  pageSize: number;
 };
 
 export type BatchRow = {
@@ -46,6 +70,7 @@ export async function getBatchList(filters: BatchListFilters): Promise<{
   rows: BatchRow[];
   total: number;
   page: number;
+  pageSize: number;
   pageCount: number;
 }> {
   for (const value of [filters.from, filters.to]) {
@@ -73,13 +98,16 @@ export async function getBatchList(filters: BatchListFilters): Promise<{
   }
 
   const page = Math.max(1, filters.page);
+  const pageSize = (PAGE_SIZES as readonly number[]).includes(filters.pageSize)
+    ? filters.pageSize
+    : DEFAULT_PAGE_SIZE;
   const [total, batches] = await Promise.all([
     prisma.batch.count({ where }),
     prisma.batch.findMany({
       where,
       orderBy: [{ receivedDate: "desc" }, { id: "desc" }],
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
       include: {
         product: {
           select: {
@@ -117,7 +145,7 @@ export async function getBatchList(filters: BatchListFilters): Promise<{
     };
   });
 
-  return { rows, total, page, pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)) };
+  return { rows, total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
 /* --------------------------------------------------------------------- sales */
@@ -134,6 +162,7 @@ export type SaleListFilters = {
   kind: SaleKindFilter;
   q: string | null;
   page: number;
+  pageSize: number;
 };
 
 export type SaleRow = {
@@ -203,6 +232,7 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
   rows: SaleRow[];
   total: number;
   page: number;
+  pageSize: number;
   pageCount: number;
   totals: { revenue: number; profit: number; units: number };
 }> {
@@ -212,7 +242,10 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
   }
 
   const page = Math.max(1, filters.page);
-  const offset = (page - 1) * PAGE_SIZE;
+  const pageSize = (PAGE_SIZES as readonly number[]).includes(filters.pageSize)
+    ? filters.pageSize
+    : DEFAULT_PAGE_SIZE;
+  const offset = (page - 1) * pageSize;
   const clause = saleWhere(filters);
 
   const [rows, summary] = await Promise.all([
@@ -258,7 +291,7 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
       ) pay ON pay.booking_id = s.booking_id
       ${clause}
       ORDER BY s.sale_date DESC, s.id DESC
-      LIMIT ${PAGE_SIZE} OFFSET ${offset}
+      LIMIT ${pageSize} OFFSET ${offset}
     `),
     prisma.$queryRaw<{ total: number; revenue: number; profit: number; units: number }[]>(
       Prisma.sql`
@@ -283,7 +316,8 @@ export async function getSaleList(filters: SaleListFilters): Promise<{
     rows,
     total: agg.total,
     page,
-    pageCount: Math.max(1, Math.ceil(agg.total / PAGE_SIZE)),
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(agg.total / pageSize)),
     totals: { revenue: agg.revenue, profit: agg.profit, units: agg.units },
   };
 }

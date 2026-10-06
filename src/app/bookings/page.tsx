@@ -28,7 +28,8 @@ import {
 import { cn } from "@/lib/utils";
 import { dateOnly, money, qty } from "@/lib/format";
 import { isDateOnly } from "@/lib/dates";
-import { BOOKINGS_PAGE_SIZE, getBookingList, type PaymentStatusFilter } from "@/lib/bookings";
+import { getBookingList, type PaymentStatusFilter } from "@/lib/bookings";
+import { readPageSize } from "@/lib/lists";
 import { prisma } from "@/lib/db";
 import { getAreasWithShops } from "@/lib/queries";
 
@@ -59,6 +60,7 @@ export default async function BookingsPage({
   const statusParam = first(sp.status);
   const q = (first(sp.q) ?? "").trim();
   const pageParam = Number.parseInt(first(sp.page) ?? "1", 10);
+  const perPage = readPageSize(sp.per);
 
   const status: PaymentStatusFilter =
     statusParam === "unpaid" || statusParam === "partial" || statusParam === "paid"
@@ -90,6 +92,7 @@ export default async function BookingsPage({
       status,
       q: q || null,
       page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1,
+      pageSize: perPage,
     }),
   ]);
 
@@ -336,7 +339,7 @@ export default async function BookingsPage({
         page={list.page}
         pageCount={list.pageCount}
         total={list.total}
-        pageSize={BOOKINGS_PAGE_SIZE}
+        pageSize={list.pageSize}
         basePath="/bookings"
         params={{ from: fromParam, to: toParam, area: areaParam }}
       />

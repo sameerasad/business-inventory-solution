@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/table";
 import { dateOnly, money, qty } from "@/lib/format";
 import { isDateOnly } from "@/lib/dates";
-import { getSaleList, PAGE_SIZE, type SaleKindFilter } from "@/lib/lists";
+import { getSaleList, readPageSize, type SaleKindFilter } from "@/lib/lists";
 import { getAreasWithShops, getProductOptions } from "@/lib/queries";
 import { prisma } from "@/lib/db";
 
@@ -54,6 +54,7 @@ export default async function SalesPage({
   const kindParam = first(sp.kind);
   const q = (first(sp.q) ?? "").trim();
   const pageParam = Number.parseInt(first(sp.page) ?? "1", 10);
+  const perPage = readPageSize(sp.per);
 
   const kind: SaleKindFilter =
     kindParam === "booked" || kindParam === "counter" ? kindParam : "all";
@@ -80,6 +81,7 @@ export default async function SalesPage({
       kind,
       q: q || null,
       page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1,
+      pageSize: perPage,
     }),
   ]);
 
@@ -323,7 +325,7 @@ export default async function SalesPage({
         page={list.page}
         pageCount={list.pageCount}
         total={list.total}
-        pageSize={PAGE_SIZE}
+        pageSize={list.pageSize}
         basePath="/sales"
         params={{ from: fromParam, to: toParam, area: areaParam, product: productParam }}
       />

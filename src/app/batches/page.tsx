@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table";
 import { dateOnly, money, qty } from "@/lib/format";
 import { isDateOnly } from "@/lib/dates";
-import { getBatchList, PAGE_SIZE, type BatchStatusFilter } from "@/lib/lists";
+import { getBatchList, readPageSize, type BatchStatusFilter } from "@/lib/lists";
 import { getProductOptions } from "@/lib/queries";
 
 export const metadata: Metadata = { title: "Batches" };
@@ -44,6 +44,7 @@ export default async function BatchesPage({
   const toParam = first(sp.to);
   const q = (first(sp.q) ?? "").trim();
   const pageParam = Number.parseInt(first(sp.page) ?? "1", 10);
+  const perPage = readPageSize(sp.per);
 
   // A malformed date in the URL should narrow nothing rather than 500 the page.
   const from = fromParam && isDateOnly(fromParam) ? fromParam : null;
@@ -63,6 +64,7 @@ export default async function BatchesPage({
       to: invalidRange ? null : to,
       q: q || null,
       page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1,
+      pageSize: perPage,
     }),
   ]);
 
@@ -227,7 +229,7 @@ export default async function BatchesPage({
         page={list.page}
         pageCount={list.pageCount}
         total={list.total}
-        pageSize={PAGE_SIZE}
+        pageSize={list.pageSize}
         basePath="/batches"
         params={{ product: productParam, status: statusParam }}
       />

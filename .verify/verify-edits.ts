@@ -6,6 +6,7 @@
  * has been paid for it, and because profit is derived rather than stored,
  * correcting a cost has to re-cost every sale that came from that batch.
  */
+import { DEFAULT_PAGE_SIZE } from "@/lib/lists";
 import { prisma } from "@/lib/db";
 import { createArea, createShop, saveShopPhoneAction } from "@/actions/areas";
 import { emptyActionState } from "@/lib/validations";
@@ -76,6 +77,7 @@ async function saleRow(id: number) {
     kind: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   return list.rows.find((r) => r.id === id) ?? null;
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { PageSizePicker } from "@/components/page-size-picker";
 
 /**
  * Server-rendered prev/next that carries the current filters along in the query
@@ -37,9 +38,14 @@ export function Pagination({
 
   return (
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-      <p className="num text-xs text-muted-foreground">
-        {total === 0 ? "No rows" : `Showing ${first}-${last} of ${total}`}
-      </p>
+      {/* The count and the size sit together: "showing 1-30 of 193" is the
+          sentence the choice beside it finishes. */}
+      <div className="flex items-center gap-3">
+        <p className="num text-xs text-muted-foreground">
+          {total === 0 ? "No rows" : `Showing ${first}-${last} of ${total}`}
+        </p>
+        <PageSizePicker value={pageSize} />
+      </div>
       {pageCount > 1 ? (
         <div className="flex items-center gap-2">
           {page > 1 ? (

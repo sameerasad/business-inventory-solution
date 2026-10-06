@@ -2,6 +2,7 @@
  * Bookings + invoice PDF, checked against a real Postgres.
  * Run via .verify/tsconfig.verify.json so next/cache is stubbed.
  */
+import { DEFAULT_PAGE_SIZE, readPageSize } from "@/lib/lists";
 import { prisma } from "@/lib/db";
 import { emptyActionState } from "@/lib/validations";
 import { createBatchAction } from "@/actions/batches";
@@ -220,6 +221,7 @@ async function main() {
     status: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("1 booking listed", list.total === 1, list.total);
   const row = list.rows[0];
@@ -525,6 +527,7 @@ async function main() {
     status: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("cancelled booking hidden from the list", listAfter.total === 2, listAfter.total);
   const cancelledInvoice = await getInvoice(booking.id);
@@ -570,6 +573,7 @@ async function main() {
     status: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   const badge = (r: { total: number; paid: number }) =>
     r.paid <= CENT ? "unpaid" : r.paid >= r.total - CENT ? "paid" : "partial";
@@ -585,6 +589,7 @@ async function main() {
       status: want,
       q: null,
       page: 1,
+      pageSize: DEFAULT_PAGE_SIZE,
     });
     const expected = ids(all.rows.filter((r) => badge(r) === want));
     ok(
@@ -621,6 +626,7 @@ async function main() {
       status: "all",
       q: needle,
       page: 1,
+      pageSize: DEFAULT_PAGE_SIZE,
     });
     ok(
       `searching "${needle}" finds the booking for ${named.customerName}`,
@@ -647,6 +653,7 @@ async function main() {
     status: "all",
     q: all.rows[0]!.invoiceNo,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok(
     "searching a whole invoice number finds that one invoice",
@@ -663,6 +670,7 @@ async function main() {
     status: "all",
     q: "zzzzz-no-such-thing",
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok(
     "a search that matches nothing returns nothing, and says so in the total",
@@ -682,6 +690,7 @@ async function main() {
     status: "paid",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   const paidRevenue = all.rows
     .filter((r) => badge(r) === "paid")
@@ -703,6 +712,7 @@ async function main() {
       status: "all",
       q: null,
       page: 1,
+      pageSize: DEFAULT_PAGE_SIZE,
     });
     ok(
       "filtering by shop returns only that shop's bookings",
@@ -713,6 +723,58 @@ async function main() {
 
   // Silence the unused-import warning while keeping the helper available.
   void yearRange;
+
+  /* ---------------------------------------------------------------------- */
+  section("how many rows a page shows");
+
+  /**
+   * The size comes out of the URL and goes into LIMIT, so what readPageSize
+   * lets through is the whole of the guard. Anything not on the offered list
+   * becomes the default rather than being clamped to its nearest neighbour:
+   * "?per=5000" is not a request for a hundred rows, it is a request for
+   * something this app does not do, and guessing which neighbour was meant is
+   * how a listing ends up quietly fetching more than anyone chose.
+   */
+  ok("an offered size is used", readPageSize("10") === 10, readPageSize("10"));
+  ok("and so is the largest", readPageSize("100") === 100, readPageSize("100"));
+  ok("nothing at all is the default", readPageSize(undefined) === DEFAULT_PAGE_SIZE);
+  ok("the default is 30", DEFAULT_PAGE_SIZE === 30, DEFAULT_PAGE_SIZE);
+  for (const junk of ["5000", "0", "-10", "abc", "", "30.5", "1e9"]) {
+    ok(`"${junk}" falls back to the default`, readPageSize(junk) === DEFAULT_PAGE_SIZE, readPageSize(junk));
+  }
+  ok("an array takes its first entry", readPageSize(["50", "100"]) === 50, readPageSize(["50", "100"]));
+
+  const asked = await getBookingList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "all",
+    q: null,
+    page: 1,
+    pageSize: 10,
+  });
+  ok("a listing returns no more than it was asked for", asked.rows.length <= 10, asked.rows.length);
+  ok("and reports the size it used", asked.pageSize === 10, asked.pageSize);
+
+  // A size the URL invented must not reach the query.
+  const junkSize = await getBookingList({
+    from: null,
+    to: null,
+    areaId: null,
+    shopId: null,
+    bookerId: null,
+    status: "all",
+    q: null,
+    page: 1,
+    pageSize: 9999 as number,
+  });
+  ok(
+    "a size that is not on the list is refused by the listing too",
+    junkSize.pageSize === DEFAULT_PAGE_SIZE,
+    junkSize.pageSize,
+  );
 
   console.log(`\n${checks - failures}/${checks} booking checks passed`);
   if (failures > 0) process.exitCode = 1;

@@ -2,6 +2,7 @@
  * End-to-end check of the data layer against a real Postgres.
  * Run via .verify/tsconfig.verify.json so next/cache is stubbed.
  */
+import { DEFAULT_PAGE_SIZE } from "@/lib/lists";
 import { prisma } from "@/lib/db";
 import { emptyActionState } from "@/lib/validations";
 import { createBatchAction, softDeleteBatchAction } from "@/actions/batches";
@@ -416,6 +417,7 @@ async function main() {
     to: null,
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("4 batches listed", batchList.total === 4, batchList.total);
   const activeOnly = await getBatchList({
@@ -425,6 +427,7 @@ async function main() {
     to: null,
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("all 4 batches still active", activeOnly.total === 4, activeOnly.total);
   const filteredBatches = await getBatchList({
@@ -434,6 +437,7 @@ async function main() {
     to: null,
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("batch product filter works", filteredBatches.total === 2, filteredBatches.total);
   ok(
@@ -451,6 +455,7 @@ async function main() {
     kind: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("8 sales listed", saleList.total === 8, saleList.total);
   ok(
@@ -488,6 +493,7 @@ async function main() {
     kind: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("date range filter works", ranged.total === 3, ranged.total);
   const byAreaList = await getSaleList({
@@ -499,6 +505,7 @@ async function main() {
     kind: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("area filter on the listing works", byAreaList.total === 2, byAreaList.total);
 
@@ -533,6 +540,7 @@ async function main() {
     kind: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   ok("deleted sale drops out of the listing", listAfterDelete.total === 7, listAfterDelete.total);
 

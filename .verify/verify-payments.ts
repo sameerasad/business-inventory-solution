@@ -2,6 +2,7 @@
  * Payment tracking: instalments, derived status, receivables, and the guarantee
  * that payments never move stock or revenue.
  */
+import { DEFAULT_PAGE_SIZE } from "@/lib/lists";
 import { prisma } from "@/lib/db";
 import { emptyActionState } from "@/lib/validations";
 import { createBatchAction } from "@/actions/batches";
@@ -383,6 +384,7 @@ async function main() {
     status: "all",
     q: null,
     page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   const row = list.rows.find((r) => r.id === booking.id)!;
   ok("row total", Math.abs(row.total - TOTAL) < 0.005, row.total);
