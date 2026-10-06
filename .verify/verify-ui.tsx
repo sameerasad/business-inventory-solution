@@ -388,6 +388,35 @@ async function main() {
     },
   } as unknown as NodeModule;
 
+  /**
+   * The shop actions, stubbed too.
+   *
+   * The order editor can now create a shop without leaving the panel, and that
+   * call would otherwise reach a real database from a jsdom test.
+   */
+  const areasPath = path.resolve("src/actions/areas.ts");
+  const created: { areaId: number; name: string; confirmSimilar?: boolean }[] = [];
+  require.cache[areasPath] = {
+    id: areasPath,
+    filename: areasPath,
+    loaded: true,
+    exports: {
+      createShop: async (input: { areaId: number; name: string; confirmSimilar?: boolean }) => {
+        created.push(input);
+        // One name is held back the first time, the way a near-match is.
+        if (/saleem/i.test(input.name) && !input.confirmSimilar) {
+          return {
+            ok: false as const,
+            message: 'This area already has "Saleem General Store".',
+            similar: [{ id: 7, name: "Saleem General Store", sales: 3 }],
+          };
+        }
+        return { ok: true as const, shopId: 900 + created.length, name: input.name, address: null, phone: null };
+      },
+      saveShopPhoneAction: async () => ({ ok: true, message: "", fieldErrors: {} }),
+    },
+  } as unknown as NodeModule;
+
   const { VoiceLauncher } = await import("@/components/voice/voice-launcher");
 
   const launcherHost = dom.window.document.createElement("div");
@@ -727,6 +756,51 @@ async function main() {
     panelText().slice(0, 300),
   );
   ok("and the order becomes saveable", saveButton() != null);
+
+  /* ------------------------------------------------------------------------ */
+  section("a shop nobody has dealt with before");
+
+  /**
+   * The booker is standing in the shop. Before this, a shop the catalogue had
+   * never heard of meant cancelling the order, going to Areas to add it, and
+   * saying the whole sentence again - which generally came back mangled
+   * somewhere else.
+   */
+  const byText = (re: RegExp) =>
+    [...(panel()?.querySelectorAll("button") ?? [])].find((b) => re.test(b.textContent ?? ""));
+
+  const addShopToggle = byText(/Shop not in the list/i);
+  ok("the order offers to add one", addShopToggle != null);
+  await click(addShopToggle!);
+
+  const shopNameBox = () => panel()?.querySelector("#v-newshop") as HTMLInputElement | null;
+  ok("there is a box to type the name into", shopNameBox() != null);
+  ok(
+    "and it is empty, not pre-filled with what was heard",
+    shopNameBox()?.value === "",
+    shopNameBox()?.value,
+  );
+
+  await type(shopNameBox()!, "Saleem General Store");
+  await click(byText(/^\s*Add shop\s*$/i)!);
+
+  ok(
+    "a name like one already there is held back",
+    /already has "Saleem General Store"/i.test(panelText()),
+    panelText().slice(0, 400),
+  );
+  const anyway = byText(/Add it anyway/i);
+  ok("with a way to go through with it", anyway != null);
+
+  await click(anyway!);
+  ok("the shop is created on the second press", created.length === 2, created);
+  ok("and only the second press was a confirmation", created[1]?.confirmSimilar === true, created);
+  ok("the form closes once it worked", shopNameBox() == null);
+  ok(
+    "and the order now names the shop",
+    panelText().includes("Saleem General Store"),
+    panelText().slice(0, 300),
+  );
 
   /* ------------------------------------------------------------------------ */
   section("a chart is as tall as the data it was handed");

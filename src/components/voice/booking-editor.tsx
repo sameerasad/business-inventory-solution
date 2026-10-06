@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import type { VoiceCommand } from "@/lib/voice/parse";
 import type { VoiceEditOptions } from "@/actions/voice";
+import { createShop } from "@/actions/areas";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -50,11 +52,21 @@ export function BookingEditor({
   disabled?: boolean;
   onChange: (next: BookingCommand) => void;
 }) {
+  /**
+   * Shops added from inside this panel.
+   *
+   * The option lists arrive as a prop, fetched once when the editor opened. A
+   * shop created a moment ago is not in them, so without this the select it was
+   * just assigned to would show nothing - the shop would be on the order and
+   * invisible on screen, which is the worst of both.
+   */
+  const [added, setAdded] = useState<VoiceEditOptions["shops"]>([]);
+
   const productOptions = options.products.map((p) => ({ value: String(p.id), label: p.label }));
   const areaOptions = options.areas.map((a) => ({ value: String(a.id), label: a.name }));
   // Only shops in the chosen area: a shop belongs to one area, and offering all
   // fifty is how the wrong one gets picked.
-  const shopOptions = options.shops
+  const shopOptions = [...options.shops, ...added]
     .filter((s) => order.areaId == null || s.areaId === order.areaId)
     .map((s) => ({ value: String(s.id), label: s.name }));
   const bookerOptions = options.bookers.map((b) => ({ value: String(b.id), label: b.name }));
@@ -175,7 +187,7 @@ export function BookingEditor({
               // would save an order against a shop that is not in the area it
               // claims to be in.
               const keep = order.shopId != null
-                && options.shops.some((s) => s.id === order.shopId && s.areaId === areaId);
+                && [...options.shops, ...added].some((s) => s.id === order.shopId && s.areaId === areaId);
               onChange({
                 ...order,
                 areaId,
@@ -195,7 +207,7 @@ export function BookingEditor({
             allLabel="No shop"
             disabled={disabled || order.areaId == null}
             onChange={(v) => {
-              const shop = options.shops.find((s) => String(s.id) === v);
+              const shop = [...options.shops, ...added].find((s) => String(s.id) === v);
               onChange({
                 ...order,
                 shopId: shop?.id ?? null,
@@ -211,6 +223,16 @@ export function BookingEditor({
             }}
           />
         </Field>
+
+        <NewShopField
+          areaId={order.areaId}
+          areaName={order.areaName}
+          disabled={disabled}
+          onCreated={(shop) => {
+            setAdded((list) => [...list, { ...shop, areaId: order.areaId! }]);
+            onChange({ ...order, shopId: shop.id, shopName: shop.name });
+          }}
+        />
 
         <Field label="Date" htmlFor="v-date" required>
           <Input
@@ -246,6 +268,148 @@ export function BookingEditor({
             onChange={(e) => onChange({ ...order, customerPhone: e.target.value.trim() || null })}
           />
         </Field>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Adding a shop that is not in the list yet, without leaving the order.
+ *
+ * The booker is standing in the shop. Before this, a shop the catalogue had
+ * never heard of meant cancelling the order, going to Areas, adding the shop,
+ * and saying the whole thing again - and what came back the second time was
+ * usually mangled in a different place.
+ *
+ * Three things it deliberately does NOT do.
+ *
+ * The name is TYPED, never pre-filled with what was heard. Whisper gets names
+ * wrong constantly - that is the entire reason voice:learn exists - and people
+ * accept text that is already in the box. A shop record outlives every order
+ * against it, so it is worth the typing.
+ *
+ * The area is chosen from the list, never created here. A duplicate shop
+ * splits one shopkeeper's history; a duplicate AREA splits a whole route, and
+ * the dashboard's figures with it. There is a deliberate "naya area add karo"
+ * command for when one is really new.
+ *
+ * And it goes through the same createShop as the Areas page, so the near-match
+ * guard applies: a name that folds onto an existing shop reuses it, and one
+ * that merely looks like an existing shop comes back asking.
+ */
+function NewShopField({
+  areaId,
+  areaName,
+  disabled,
+  onCreated,
+}: {
+  areaId: number | null;
+  areaName: string | null;
+  disabled?: boolean;
+  onCreated: (shop: { id: number; name: string }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+
+  const add = async (confirmSimilar: boolean) => {
+    if (areaId == null || !name.trim()) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      const result = await createShop({ areaId, name: name.trim(), confirmSimilar });
+      if (result.ok) {
+        onCreated({ id: result.shopId, name: result.name });
+        setOpen(false);
+        setName("");
+        setNeedsConfirm(false);
+        return;
+      }
+      setProblem(result.message);
+      setNeedsConfirm((result.similar ?? []).length > 0);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div className="sm:col-span-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled || areaId == null}
+          onClick={() => setOpen(true)}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Shop not in the list?
+        </Button>
+        {areaId == null ? (
+          <p className="mt-1 text-xs text-muted-foreground">Pick the area first.</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-card p-2.5 sm:col-span-2">
+      <Field
+        label={`New shop in ${areaName ?? "this area"}`}
+        htmlFor="v-newshop"
+        hint="Type the name as it should be saved - it will be on every invoice for this shop."
+      >
+        <Input
+          id="v-newshop"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setNeedsConfirm(false);
+            setProblem(null);
+          }}
+          placeholder="Shop name"
+          disabled={disabled || busy}
+          autoFocus
+        />
+      </Field>
+
+      {problem ? <p className="text-xs font-medium text-destructive">{problem}</p> : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          disabled={disabled || busy || !name.trim()}
+          onClick={() => void add(false)}
+        >
+          {busy ? "Adding..." : "Add shop"}
+        </Button>
+        {needsConfirm ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={disabled || busy}
+            onClick={() => void add(true)}
+          >
+            Add it anyway
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          onClick={() => {
+            setOpen(false);
+            setProblem(null);
+            setNeedsConfirm(false);
+          }}
+        >
+          Cancel
+        </Button>
       </div>
     </div>
   );
