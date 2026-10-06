@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 
-import { getVoiceCatalog } from "@/lib/voice/answer";
+import { answerQuery, getVoiceCatalog } from "@/lib/voice/answer";
 import { interpretWithLlm, llmProvider } from "@/lib/voice/llm";
 import { parseCommand } from "@/lib/voice/parse";
 
@@ -61,7 +61,7 @@ type Catalog = Awaited<ReturnType<typeof getVoiceCatalog>>;
  * Print a proposal the way the confirmation card does: what it would do, what
  * is still blank, and what you should look at before saving.
  */
-function show(command: Awaited<ReturnType<typeof parseCommand>>): void {
+async function show(command: Awaited<ReturnType<typeof parseCommand>>): Promise<void> {
   const k = command;
   console.log(`  ${BOLD}${k.kind}${OFF}`);
 
@@ -69,9 +69,20 @@ function show(command: Awaited<ReturnType<typeof parseCommand>>): void {
     case "navigate":
       console.log(`    open ${k.href}`);
       break;
-    case "query":
-      console.log(`    ${k.metric}${k.period ? ` for ${k.period}` : ""}`);
+    case "query": {
+      const range = k.from && k.to ? ` (${k.from} to ${k.to})` : "";
+      const ranked = k.dimension ? `, ranked by ${k.dimension}` : "";
+      console.log(`    ${k.metric} for ${k.period}${range}${ranked}`);
+      // The figure itself, because a question is only verified by its answer.
+      // Read-only: nothing here writes.
+      try {
+        const answer = await answerQuery(k);
+        console.log(`    ${GREEN}${answer.speech}${OFF}`);
+      } catch (error) {
+        console.log(`    ${RED}could not work it out: ${String(error)}${OFF}`);
+      }
       break;
+    }
     case "booking":
       console.log(`    shop:  ${k.shopName ?? `${YELLOW}(not identified)${OFF}`}`);
       console.log(`    area:  ${k.areaName ?? `${YELLOW}(not identified)${OFF}`}`);
@@ -143,7 +154,7 @@ async function run(said: string, catalog: Catalog): Promise<void> {
 
   if (provider === "none") {
     console.log(`\n${DIM}rule parser (no model configured)${OFF}`);
-    show(parseCommand(said, catalog));
+    await show(parseCommand(said, catalog));
     return;
   }
 
@@ -155,12 +166,12 @@ async function run(said: string, catalog: Catalog): Promise<void> {
     // parser's answer tells you whether the fallback would have coped.
     console.log(`\n${RED}the model could not answer: ${outcome.reason}${OFF}`);
     console.log(`${DIM}falling back to the rule parser, as the app would${OFF}`);
-    show(parseCommand(said, catalog));
+    await show(parseCommand(said, catalog));
     return;
   }
 
   console.log(`\n${DIM}${outcome.model} - ${took}s${OFF}`);
-  show(outcome.command);
+  await show(outcome.command);
 }
 
 async function main() {

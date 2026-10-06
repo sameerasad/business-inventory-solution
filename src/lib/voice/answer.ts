@@ -16,6 +16,7 @@ import {
   getCashByProductName,
   getCashByShop,
   getCashKpis,
+  getCashRangeTotals,
 } from "@/lib/recognition";
 import { getReceivables } from "@/lib/bookings";
 import { getStockLevels } from "@/lib/queries";
@@ -61,12 +62,12 @@ function whenLabel(q: Question): string {
   return PERIOD_LABEL[q.period];
 }
 
-export async function answerQuery(question: Question): Promise<VoiceAnswer> {
+export async function answerQuery(question: Question, now = new Date()): Promise<VoiceAnswer> {
   const { metric, period } = question;
 
   // "Which one is biggest" is a different question from "how much", and is
   // answered with a ranking rather than a figure.
-  if (question.dimension) return answerRanking(question);
+  if (question.dimension) return answerRanking(question, now);
 
   // "Corner Store ka balance kitna hai" - one shop, not the whole book.
   if (metric === "balance") {
@@ -148,19 +149,33 @@ export async function answerQuery(question: Question): Promise<VoiceAnswer> {
     };
   }
 
-  const kpis = await getCashKpis({
-    year: currentYear(),
+  /**
+   * Totalled over the window the question actually asked for.
+   *
+   * This used to pick one of three ready-made buckets from getCashKpis -
+   * today, this month, this year - with everything else falling through to
+   * the year. That was survivable while there were only three periods to ask
+   * about. The moment yesterday and last month existed it became the worst
+   * kind of wrong: the label said "yesterday" and the figure was the whole
+   * year, so the two agreed with each other and with nothing else.
+   *
+   * One range in, one total out, and no bucket to fall through to.
+   */
+  const { start, end } = periodRange(question, now);
+  const bucket = await getCashRangeTotals({
+    start: new Date(`${start}T00:00:00Z`),
+    end: new Date(`${end}T00:00:00Z`),
     categoryId: null,
     areaId: null,
     bookerId: null,
   });
-  const bucket = period === "today" ? kpis.today : period === "month" ? kpis.month : kpis.year;
+  const when = whenLabel(question);
 
   if (metric === "units") {
     return {
-      speech: `${qty(bucket.units)} units were delivered ${PERIOD_LABEL[period]}.`,
+      speech: `${qty(bucket.units)} units were delivered ${when}.`,
       value: qty(bucket.units),
-      label: `Units delivered ${PERIOD_LABEL[period]}`,
+      label: `Units delivered ${when}`,
       href: "/sales",
     };
   }
@@ -168,9 +183,9 @@ export async function answerQuery(question: Question): Promise<VoiceAnswer> {
   const isProfit = metric === "profit";
   const value = isProfit ? bucket.profit : bucket.revenue;
   return {
-    speech: `${isProfit ? "Profit" : "Revenue"} ${PERIOD_LABEL[period]} is ${money(value)}.`,
+    speech: `${isProfit ? "Profit" : "Revenue"} ${when} is ${money(value)}.`,
     value: money(value),
-    label: `${isProfit ? "Profit" : "Revenue"} ${PERIOD_LABEL[period]}`,
+    label: `${isProfit ? "Profit" : "Revenue"} ${when}`,
     href: "/dashboard",
   };
 }
@@ -441,8 +456,8 @@ export async function getVoiceCatalog() {
  * that buys the cheapest line in volume tops one list and sits well down the
  * other.
  */
-async function answerRanking(question: Question): Promise<VoiceAnswer> {
-  const { start, end } = periodRange(question);
+async function answerRanking(question: Question, now = new Date()): Promise<VoiceAnswer> {
+  const { start, end } = periodRange(question, now);
   const scope = {
     start: new Date(`${start}T00:00:00Z`),
     end: new Date(`${end}T00:00:00Z`),

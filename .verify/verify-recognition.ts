@@ -12,6 +12,7 @@ import { createBookingAction, softDeleteBookingAction } from "@/actions/bookings
 import { createSaleAction } from "@/actions/sales";
 import { deletePaymentAction, recordPaymentAction } from "@/actions/payments";
 import { createBookerAction } from "@/actions/bookers";
+import { answerQuery } from "@/lib/voice/answer";
 import {
   getCashRangeTotals,
   getAwaitingPayment,
@@ -628,6 +629,69 @@ async function main() {
   ok("a log failure never becomes the command's failure", !threw);
 
   await prisma.voiceAttempt.deleteMany({ where: { id: { in: [attemptId!, longId!] } } });
+
+  /* --------------------------------------------------------------------- */
+  section("a spoken answer is about the period it names");
+
+  /**
+   * Nothing tested the answering half at all, and it showed. Revenue and profit
+   * were read out of three ready-made buckets - today, this month, this year -
+   * with everything else falling through to the year. That was survivable while
+   * only those three periods could be asked about. The moment yesterday and
+   * last month existed, a question about yesterday came back labelled
+   * "yesterday" carrying the whole year's revenue: the label and the figure
+   * agreed with each other and with nothing else, which is worse than the
+   * mismatch it replaced because it cannot be heard.
+   */
+  const ask = (period: string, from: string | null = null, to: string | null = null) =>
+    answerQuery(
+      { kind: "query", metric: "revenue", period, from, to, dimension: null } as never,
+      new Date(`${YEAR}-06-15T09:00:00Z`),
+    );
+
+  const yearAns = await ask("year");
+  const todayAns = await ask("today");
+  const yesterdayAns = await ask("yesterday");
+  const lastMonthAns = await ask("last_month");
+
+  ok("each period names itself", yesterdayAns.speech.includes("yesterday"), yesterdayAns.speech);
+  /**
+   * Named against the YEAR specifically, and that matters.
+   *
+   * "the four figures are not all equal" passes under the old behaviour too:
+   * today had a bucket of its own, so it differed while yesterday and last
+   * month were both quietly the year. The bug lives in those two, so those two
+   * are what is asserted.
+   */
+  ok(
+    "yesterday is not the year wearing a different label",
+    yesterdayAns.value !== yearAns.value,
+    { yesterday: yesterdayAns.value, year: yearAns.value },
+  );
+  ok(
+    "nor is last month",
+    lastMonthAns.value !== yearAns.value,
+    { lastMonth: lastMonthAns.value, year: yearAns.value },
+  );
+  ok(
+    "and today is its own figure too",
+    new Set([yearAns.value, todayAns.value, yesterdayAns.value, lastMonthAns.value]).size > 1,
+    {
+      year: yearAns.value,
+      today: todayAns.value,
+      yesterday: yesterdayAns.value,
+      lastMonth: lastMonthAns.value,
+    },
+  );
+
+  // A range is the one period that cannot be wrong unnoticed: it reads its own
+  // dates back, so a misread window shows up in the answer itself.
+  const ranged = await ask("range", `${YEAR}-01-01`, `${YEAR}-12-31`);
+  ok("a whole-year range matches the year", ranged.value === yearAns.value, {
+    ranged: ranged.value,
+    year: yearAns.value,
+  });
+  ok("and the answer says which dates it used", /\d{4}-\d{2}-\d{2}|\d{1,2} \w+ \d{4}/.test(ranged.speech), ranged.speech);
 
   console.log(`\n${checks - failures}/${checks} recognition checks passed`);
   if (failures > 0) process.exitCode = 1;
