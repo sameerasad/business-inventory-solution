@@ -24,7 +24,7 @@
  *                                          useful rows in the table.
  */
 import { prisma } from "@/lib/db";
-import { CONFIRM_WORDS, CANCEL_WORDS } from "@/lib/voice/lexicon";
+import { CONFIRM_WORDS, CANCEL_WORDS, GO_AHEAD_WORDS } from "@/lib/voice/lexicon";
 import { tokenise } from "@/lib/voice/normalise";
 
 const DIM = "[2m";
@@ -82,10 +82,15 @@ async function main() {
   const isAnswer = (transcript: string) =>
     transcript.split("|").some((reading) => {
       const tokens = tokenise(reading);
+      // Same shape as parseConfirmation: made ONLY of yes/no words and the
+      // words that complete them. A two-word cap was the first version of this
+      // and it under-counted badly - people say "haan add kar do jaldi se",
+      // which is six words of pure yes, and every one of those was landing in
+      // the not-understood column. That alone read as a drop from 91% to 85%.
       return (
         tokens.length > 0 &&
-        tokens.length <= 2 &&
-        tokens.every((t) => CONFIRM_WORDS.has(t) || CANCEL_WORDS.has(t))
+        tokens.some((t) => CONFIRM_WORDS.has(t) || CANCEL_WORDS.has(t)) &&
+        tokens.every((t) => CONFIRM_WORDS.has(t) || CANCEL_WORDS.has(t) || GO_AHEAD_WORDS.has(t))
       );
     });
 

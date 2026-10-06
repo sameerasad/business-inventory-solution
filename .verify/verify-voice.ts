@@ -582,6 +582,47 @@ async function main() {
     parseConfirmation("ji woh corner store ka order tha jo kal aaya tha") === "cancel",
   );
 
+  /**
+   * How people actually say yes, taken from the log rather than imagined.
+   *
+   * These were all refused, and each refusal threw away a real order. The rule
+   * was a length test - four words or fewer - and natural speech runs past it
+   * without meaning anything more than yes.
+   */
+  for (const yes of [
+    "haan add kardo jaldi se",
+    "ہاں ایڈ کر دو جلدی سے",
+    "ہاں سیف کر دو",
+    "ہاں ایڈ کر دو",
+    "yes save it",
+    "yes add it",
+    "haan theek hai kar do",
+    "ji haan save kar dein",
+  ]) {
+    ok(`"${yes}" saves`, parseConfirmation(yes) === "confirm", parseConfirmation(yes));
+  }
+
+  /**
+   * And the direction the length test was ALSO wrong in.
+   *
+   * "haan rajput dairy" is three words, so it passed - although it is plainly
+   * somebody still describing the order. Counting words cannot tell the
+   * difference; asking which words can.
+   */
+  for (const notYes of [
+    "haan rajput dairy",
+    "haan 20 pack",
+    "ہاں یہ کیا ہے",
+    "yes but change the shop",
+    "haan saleem general store",
+  ]) {
+    ok(
+      `"${notYes}" is still somebody talking, not a yes`,
+      parseConfirmation(notYes) === "cancel",
+      parseConfirmation(notYes),
+    );
+  }
+
   /* ------------------------------------------------------- dictated phone */
   section("dictated phone numbers");
   const ph1 = parse("sell bees mango bottle 250 to Corner Store phone 03001234567");

@@ -665,6 +665,67 @@ export const CONFIRM_WORDS = new Set([
   "محفوظ",
 ]);
 
+/**
+ * Words that complete a yes without adding anything to it.
+ *
+ * "haan add kar do jaldi se" is a yes. So is "yes, save it". Neither says
+ * anything the yes did not, and the only reason they used to be refused is
+ * that they ran past a four-word limit - which cost real orders: the log shows
+ * people confirming exactly this way and watching the booking vanish.
+ *
+ * Nothing here names a thing. No shop, no product, no number, no pronoun. That
+ * is the whole point: an utterance made only of yes-words and these is a yes,
+ * and one containing anything else is somebody still talking, however short it
+ * is. "haan rajput dairy" is three words and was accepted under the old rule.
+ */
+export const GO_AHEAD_WORDS = new Set([
+  "kar",
+  "kardo",
+  "kardein",
+  "karein",
+  "karde",
+  "do",
+  "dou",
+  "de",
+  "dey",
+  "den",
+  "add",
+  "save",
+  "seyf",
+  "it",
+  "this",
+  "jaldi",
+  "se",
+  "please",
+  "plz",
+  "abhi",
+  "acha",
+  "accha",
+  "hai",
+  "hain",
+  "he",
+  "dein",
+  "dijiye",
+  "dijiyega",
+  "کر",
+  "کردو",
+  "کردیں",
+  "کریں",
+  "دو",
+  "دیں",
+  "دے",
+  "ایڈ",
+  "ایٹ",
+  "سیف",
+  "جلدی",
+  "سے",
+  "ابھی",
+  "اچھا",
+  "ہے",
+  "ہیں",
+  "دیجیے",
+]);
+
 /** Words that mean no. Anything unclear is treated as one of these. */
 export const CANCEL_WORDS = new Set([
   "no",

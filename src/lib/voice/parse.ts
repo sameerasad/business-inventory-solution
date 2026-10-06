@@ -15,6 +15,7 @@ import {
   BATCH_VERBS,
   CANCEL_WORDS,
   CONFIRM_WORDS,
+  GO_AHEAD_WORDS,
   COST_WORDS,
   COUNTER_WORDS,
   NEW_AREA_VERBS,
@@ -308,11 +309,24 @@ export function parseConfirmation(transcript: string): "confirm" | "cancel" {
   // An explicit no anywhere in the utterance wins outright: "haan nahi ruko".
   if (tokens.some((t) => CANCEL_WORDS.has(t))) return "cancel";
 
-  // A yes has to be most of what was said. "haan" is a yes; a long sentence
-  // that happens to contain "ji" is somebody still talking.
   const yeses = tokens.filter((t) => CONFIRM_WORDS.has(t)).length;
   if (yeses === 0) return "cancel";
-  return tokens.length <= 4 ? "confirm" : "cancel";
+
+  /**
+   * Everything else said has to be a word that just completes the yes.
+   *
+   * This used to be a length test - a yes had to be four words or fewer - and
+   * it was wrong in both directions. People confirm by saying "haan add kar do
+   * jaldi se", which is six words and unmistakably a yes; the log has orders
+   * thrown away for exactly that. And "haan rajput dairy" is three words, so it
+   * passed, although it is plainly somebody still talking about the order.
+   *
+   * Asking WHICH words rather than HOW MANY gets both right. Nothing in
+   * GO_AHEAD_WORDS names a thing, so an utterance built only from those and a
+   * yes cannot be carrying a correction; one word of real content - a shop, a
+   * number, a question - and it is not an answer.
+   */
+  return tokens.every((t) => CONFIRM_WORDS.has(t) || GO_AHEAD_WORDS.has(t)) ? "confirm" : "cancel";
 }
 
 /* ------------------------------------------------------------------- helpers */
