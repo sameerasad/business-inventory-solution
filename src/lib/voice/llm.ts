@@ -482,7 +482,12 @@ Choose exactly one kind:
   counter, walk-in. "Sell", "bech do", "de do" on their own are NOT cash sales: selling to
   a shop or an area on credit is a booking, which is how nearly every order here works. If
   a shop or an area is named, it is a booking unless cash was actually said.
-- batch: stock arriving. Set productId, quantity and unitCost.
+- batch: stock arriving - goods coming IN, not going out. Set productId, quantity and
+  unitCost. "aaya", "aaye", "aa gaya", "khareeda", "purchase", "stock aaya", "maal aaya"
+  all mean arriving. A price said with one of those is the COST paid, not a sale price:
+  "sau mango bottle aaye teen sau bees ke hisab se" is a hundred arriving at a cost of
+  320 each, and is NOT an order for a hundred. An arrival has no shop and no area; if
+  you find yourself wanting a shop for one of these, it is a booking and not a batch.
 - payment: money received against an invoice. Set bookingId and amount.
 - shop: adding a new shop. Set newName and areaId.
 - category: a new product category. Set newName only.

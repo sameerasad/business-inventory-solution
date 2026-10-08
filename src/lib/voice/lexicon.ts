@@ -424,6 +424,21 @@ export const BATCH_VERBS = [
   "kharida",
   "kharidi",
   "khareede",
+  // Spellings that were missing, found by typing real sentences at it: "do sau
+  // aam bottle kharide 320 ka" came back unknown for want of one vowel.
+  "kharide",
+  "khareedi",
+  "kharidey",
+  "agaya",
+  "agaye",
+  "aagaya",
+  // Having stock sent for is how most of it arrives here.
+  "mangwaya",
+  "mangwaye",
+  "mangaya",
+  "mangaye",
+  "منگوایا",
+  "منگوائے",
   "purchase",
   "purchased",
   "stockin",

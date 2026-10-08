@@ -558,6 +558,36 @@ async function main() {
     s3,
   );
 
+  /**
+   * Spellings found by typing real sentences at it rather than by imagining
+   * them. "do sau aam bottle kharide 320 ka" came back unknown for the want of
+   * one vowel: the list had khareeda, kharida, kharidi and khareede, and not
+   * the one somebody actually said.
+   */
+  for (const said of [
+    "do sau aam bottle 250 kharide 320 ka",
+    "do sau aam bottle 250 khareedi 320 ka",
+    "sau mango bottle 250 mangwaye 320 ke hisab se",
+    "sau mango bottle 250 agaye 320 ka",
+  ]) {
+    const c = parse(said);
+    ok(`"${said}" is stock arriving`, c.kind === "batch", c);
+  }
+
+  /**
+   * The direction, which is the one thing that must never be read backwards.
+   * This phrasing was going out rather than coming in - the model read "aaye
+   * ... ke hisab se" as an order for a hundred rather than a hundred arriving,
+   * and proposed selling the stock that had just been bought.
+   */
+  const dir = parse("sau mango bottle 250 ml aaye teen sau bees ke hisab se");
+  ok("goods arriving are not an order going out", dir.kind === "batch", dir);
+  ok(
+    "and the price said with them is the cost, not a sale price",
+    dir.kind === "batch" && dir.unitCost === 320,
+    dir.kind === "batch" ? dir.unitCost : dir,
+  );
+
   const s4 = parse("stock kitna hai");
   ok("'stock' on its own is still a question, not a receipt", s4.kind === "query", s4);
 
