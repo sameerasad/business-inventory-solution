@@ -100,6 +100,9 @@ export default async function SalesPage({
       unitCost: true,
       remainingQty: true,
       receivedDate: true,
+      // How many sales draw their cost from this batch. Correcting the cost
+      // changes every one of them, and the editor says so before it is pressed.
+      _count: { select: { sales: { where: { isDeleted: false } } } },
     },
   });
   const batchOptions = batchRows.map((b) => ({
@@ -108,6 +111,7 @@ export default async function SalesPage({
     unitCost: Number(b.unitCost),
     remainingQty: b.remainingQty,
     receivedDate: dateOnly(b.receivedDate),
+    salesCount: b._count.sales,
   }));
   const batchesByProduct = new Map<number, typeof batchOptions>();
   for (const b of batchOptions) {

@@ -9,6 +9,7 @@
 import { DEFAULT_PAGE_SIZE } from "@/lib/lists";
 import { prisma } from "@/lib/db";
 import { createArea, createShop, saveShopPhoneAction } from "@/actions/areas";
+import { updateBatchCostAction } from "@/actions/batches";
 import { emptyActionState } from "@/lib/validations";
 import {
   createCategoryAction,
@@ -308,6 +309,88 @@ async function main() {
     emptyActionState,
     fd({ id: String(b1.id), quantity: "120", unitCost: "200", receivedDate: `${YEAR}-01-05` }),
   );
+
+  /* ---------------------------------------------------------------------- */
+  section("correcting a cost from the sale that exposed it");
+
+  /**
+   * The same correction, reached from where it is noticed. Somebody looks at an
+   * order, sees the profit is wrong, and the reason is a cost typed with a
+   * digit missing when the stock arrived - the real database has one Mango
+   * batch at 32.00 among a dozen at 320.00, with five sales drawn off it.
+   *
+   * What makes this worth its own action is what it must NOT become: a cost on
+   * the sale. A sale has none of its own, it inherits the batch's, and profit
+   * is derived from that join. A per-sale figure would be a second source of
+   * truth beside the first, free to disagree with it.
+   */
+  const costBefore = await saleRow(s1.id);
+  ok("the sale starts at the batch's cost", near(costBefore!.profit, 7500), costBefore?.profit);
+
+  const typo = await updateBatchCostAction(
+    emptyActionState,
+    fd({ id: String(b1.id), unitCost: "20" }),
+  );
+  ok("a cost can be corrected on its own", typo.ok, typo);
+  ok(
+    "the sale is re-costed: 30 x (450 - 20) = 12,900",
+    near((await saleRow(s1.id))!.profit, 12900),
+    (await saleRow(s1.id))?.profit,
+  );
+  ok("the message names how many sales moved", /re-costed/i.test(typo.message ?? ""), typo.message);
+  ok(
+    "and it is audited with the before and after",
+    (await prisma.auditLog.count({
+      where: { entityType: "batch", entityId: b1.id, action: "batch.cost_corrected" },
+    })) === 1,
+  );
+
+  // Nothing else about the batch may move. Quantity and date are a different
+  // edit, and reaching them from a sale row would be a surprise.
+  const untouched = await prisma.batch.findUniqueOrThrow({ where: { id: b1.id } });
+  ok("quantity is untouched", untouched.quantity === 120, untouched.quantity);
+  ok(
+    "and so is the received date",
+    untouched.receivedDate.toISOString().slice(0, 10) === `${YEAR}-01-05`,
+    untouched.receivedDate,
+  );
+
+  const same = await updateBatchCostAction(
+    emptyActionState,
+    fd({ id: String(b1.id), unitCost: "20" }),
+  );
+  ok("setting the cost it already has writes nothing", same.ok, same);
+  ok(
+    "so there is still one audit row",
+    (await prisma.auditLog.count({
+      where: { entityType: "batch", entityId: b1.id, action: "batch.cost_corrected" },
+    })) === 1,
+  );
+
+  const negative = await updateBatchCostAction(
+    emptyActionState,
+    fd({ id: String(b1.id), unitCost: "-5" }),
+  );
+  ok("a negative cost is refused", !negative.ok, negative);
+  const nonsense = await updateBatchCostAction(
+    emptyActionState,
+    fd({ id: String(b1.id), unitCost: "abc" }),
+  );
+  ok("and so is something that is not a number", !nonsense.ok, nonsense);
+  ok(
+    "neither of them changed the cost",
+    Number((await prisma.batch.findUniqueOrThrow({ where: { id: b1.id } })).unitCost) === 20,
+  );
+
+  const noBatch = await updateBatchCostAction(
+    emptyActionState,
+    fd({ id: "999999", unitCost: "100" }),
+  );
+  ok("a batch that does not exist is refused", !noBatch.ok, noBatch);
+
+  // Put it back, so the sections after this start where they expect to.
+  await updateBatchCostAction(emptyActionState, fd({ id: String(b1.id), unitCost: "200" }));
+  ok("restored for the rest of the suite", near((await saleRow(s1.id))!.profit, 7500));
 
   /* ------------------------------------------------------------------ sales */
   section("sales: quantity");

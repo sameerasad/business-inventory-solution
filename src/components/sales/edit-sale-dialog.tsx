@@ -1,8 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 
 import { updateSaleAction } from "@/actions/sales";
+import { updateBatchCostAction } from "@/actions/batches";
+import { emptyActionState } from "@/lib/validations";
+import { Button } from "@/components/ui/button";
 import { EditDialog } from "@/components/forms/edit-dialog";
 import { Field } from "@/components/ui/field";
 import { Input, Textarea } from "@/components/ui/input";
@@ -18,6 +21,107 @@ import { money, qty } from "@/lib/format";
 import type { AreaOption } from "@/components/forms/sale-form";
 
 const NO_SHOP = "none";
+
+/**
+ * Correct the cost this sale was bought at.
+ *
+ * The cost belongs to the BATCH, not the sale - a sale has none of its own, it
+ * inherits one, and profit is worked out from that join every time it is asked
+ * for. So this is here because it is where the mistake is noticed (the profit
+ * on an order looks wrong), not because the cost lives here.
+ *
+ * Which means it changes every sale from the same batch, and the count is on
+ * the button rather than in a footnote. In the real data one batch feeds
+ * thirty-one sales; a cost corrected from one of them quietly rewrites the
+ * profit on the other thirty.
+ *
+ * Its own control rather than part of the sale form, for two reasons: a form
+ * inside a form is not valid HTML, and nobody fixing a quantity should re-cost
+ * thirty sales as a side effect of pressing Save.
+ */
+function CorrectCost({ batch }: { batch: SaleBatchOption }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(String(batch.unitCost));
+  const [note, setNote] = useState<{ ok: boolean; message: string } | null>(null);
+  const [pending, start] = useTransition();
+
+  const others = batch.salesCount - 1;
+  const parsed = Number(value);
+  const changed = Number.isFinite(parsed) && parsed >= 0 && Math.abs(parsed - batch.unitCost) >= 0.005;
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="text-left text-xs font-medium text-muted-foreground underline underline-offset-2"
+        onClick={() => {
+          setValue(String(batch.unitCost));
+          setNote(null);
+          setOpen(true);
+        }}
+      >
+        Cost wrong on batch #{batch.id}?
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/30 p-2.5 sm:col-span-2">
+      <Field
+        label={`Cost per unit on batch #${batch.id}`}
+        htmlFor={`cost-${batch.id}`}
+        hint={
+          others > 0
+            ? `${others} other ${others === 1 ? "sale draws" : "sales draw"} from this batch. Changing it re-costs ${others === 1 ? "that one" : "them"} too, including past months.`
+            : "No other sale draws from this batch."
+        }
+      >
+        <Input
+          id={`cost-${batch.id}`}
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step="0.01"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          disabled={pending}
+        />
+      </Field>
+
+      {note ? (
+        <Alert tone={note.ok ? "success" : "error"}>{note.message}</Alert>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={others > 0 ? "destructive" : "default"}
+          disabled={pending || !changed}
+          onClick={() =>
+            start(async () => {
+              const form = new FormData();
+              form.set("id", String(batch.id));
+              form.set("unitCost", value);
+              const result = await updateBatchCostAction(emptyActionState, form);
+              setNote({ ok: result.ok, message: result.message ?? "" });
+              if (result.ok) setOpen(false);
+            })
+          }
+        >
+          {pending
+            ? "Saving..."
+            : others > 0
+              ? `Correct it and re-cost ${others + 1} sales`
+              : "Correct it"}
+        </Button>
+        <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export type EditableSale = {
   id: number;
@@ -41,6 +145,8 @@ export type SaleBatchOption = {
   unitCost: number;
   remainingQty: number;
   receivedDate: string;
+  /** Live sales drawing their cost from this batch, this one included. */
+  salesCount: number;
 };
 
 /**
@@ -143,6 +249,8 @@ export function EditSaleDialog({
                 </SelectContent>
               </Select>
             </Field>
+
+            {selectedBatch ? <CorrectCost batch={selectedBatch} /> : null}
 
             <Field
               label="Sale date"

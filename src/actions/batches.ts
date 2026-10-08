@@ -261,3 +261,79 @@ export async function updateBatchAction(
         : ""),
   );
 }
+
+/**
+ * Correct a batch's unit cost, and nothing else.
+ *
+ * Reachable from the sale editor, because that is where somebody notices: the
+ * profit on an order looks wrong, and the reason is a cost typed with a digit
+ * missing when the stock came in. The real database has exactly that - one
+ * Mango batch at 32.00 among a dozen at 320.00, with five sales drawn off it.
+ *
+ * Deliberately NOT a cost on the sale. A sale has no cost of its own; it
+ * inherits the batch's, and profit is worked out from that join every time it
+ * is asked for. Giving one sale its own figure would put a second source of
+ * truth beside the first and let them disagree - the thing this schema avoids
+ * everywhere else.
+ *
+ * Which means changing it here changes every sale from that batch, and in this
+ * data that is up to thirty-one of them. Nothing can make that not be true, so
+ * the caller is told the count and says it out loud before anyone presses it.
+ *
+ * No re-costing step is needed. Profit is derived, so correcting the cost
+ * corrects every figure that was ever built on it, including last month's.
+ */
+export async function updateBatchCostAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = Number.parseInt(String(formData.get("id") ?? ""), 10);
+  const unitCost = Number(String(formData.get("unitCost") ?? ""));
+
+  if (!Number.isInteger(id)) return failure("No batch to correct.");
+  if (!Number.isFinite(unitCost) || unitCost < 0) {
+    return failure("That is not a cost.", { unitCost: "Enter a number" });
+  }
+
+  const batch = await prisma.batch.findUnique({
+    where: { id },
+    select: {
+      isDeleted: true,
+      unitCost: true,
+      product: { select: { sku: true } },
+      _count: { select: { sales: { where: { isDeleted: false } } } },
+    },
+  });
+  if (!batch) return failure("Batch not found.");
+  if (batch.isDeleted) return failure("That batch has been removed and cannot be edited.");
+
+  const before = Number(batch.unitCost);
+  if (Math.abs(before - unitCost) < 0.005) {
+    return success("That is already the cost on this batch.");
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.batch.update({
+        where: { id },
+        data: { unitCost: new Prisma.Decimal(unitCost.toFixed(2)) },
+      });
+      await writeAudit(tx, {
+        entityType: "batch",
+        entityId: id,
+        action: "batch.cost_corrected",
+        payload: { from: before, to: unitCost, salesRecosted: batch._count.sales },
+      });
+    });
+  } catch (error) {
+    console.error("updateBatchCostAction failed", error);
+    return failure("Could not change the cost.");
+  }
+
+  revalidateInventory();
+  const n = batch._count.sales;
+  return success(
+    `Batch #${id} (${batch.product.sku}) now costs ${unitCost.toFixed(2)}. ` +
+      `${n} ${n === 1 ? "sale was" : "sales were"} re-costed.`,
+  );
+}
