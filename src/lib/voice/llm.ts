@@ -466,7 +466,11 @@ Choose exactly one kind:
 - navigate: they want to open a page. Set href.
 - query: they are asking for a figure. Set metric and period.
   Periods: today, yesterday (kal), week (is hafte), last_week (pichle hafte), month,
-  last_month (pichle mahine), year, or range. "kal" is yesterday, never today.
+  last_month (pichle mahine), year, or range. "kal" is yesterday - never today, and
+  never tomorrow. It means both in Urdu, and the English reading of a recording will
+  sometimes come back as "tomorrow" for that reason; one reading saying yesterday and
+  another saying tomorrow is the same word, not a disagreement. Nobody asks this app
+  what tomorrow earned.
   For "which one is biggest" - "kaun se area mein sab se zyada sale", "kis dukaan ne
   sab se zyada munafa diya", "kaun sa product sab se zyada bika" - also set dimension
   to area, shop, booker or product. Leave dimension null for a plain total.
