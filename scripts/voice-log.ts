@@ -151,7 +151,13 @@ async function main() {
     console.log(`
 ${BOLD}Microphone settings${OFF}`);
     for (const mode of captures) {
-      const group = rows.filter((r) => r.engine.endsWith(`:${mode}`));
+      // commands, not rows: a confirmation is not a command, and counting one
+      // as a failed command poisons exactly this comparison. They are not
+      // spread evenly - somebody testing hands-free does it in whichever mode
+      // is switched on, so every "haan" was marked against that mode alone.
+      // The script comparison below was fixed for this and this one was missed,
+      // and then read aloud as advice about which microphone setting to use.
+      const group = commands.filter((r) => r.engine.endsWith(`:${mode}`));
       if (group.length === 0) {
         console.log(`  ${mode.padEnd(6)} ${DIM}not tried yet${OFF}`);
         continue;
