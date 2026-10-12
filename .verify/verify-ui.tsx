@@ -708,6 +708,29 @@ async function main() {
     !/parseConfirmation\(/.test(browserPath) && !/parseConfirmation\(/.test(whisperPath),
     "parseConfirmation belongs in one place only",
   );
+  /**
+   * And the cheap path is taken for it.
+   *
+   * A yes needs hearing, not understanding. Sending it through the
+   * interpreting action costs a full catalogue prompt - about 3,500 tokens -
+   * to find out whether somebody said haan, and on the free tier that halves
+   * how many orders a day the thing can take.
+   *
+   * Wiring, not behaviour: firing a real clip needs a MediaRecorder that emits
+   * events and an analyser that reports speech, and jsdom has neither.
+   */
+  ok(
+    "a confirmation is transcribed, not interpreted",
+    /modeRef.current === "confirm"/.test(whisperPath) &&
+      whisperPath.indexOf("transcribeOnlyAction") <
+        whisperPath.indexOf("transcribeAndInterpretAction"),
+    whisperPath.slice(0, 200),
+  );
+  ok(
+    "and a command still goes the long way",
+    whisperPath.includes("transcribeAndInterpretAction(form)"),
+  );
+
   ok(
     "which is the shared answer itself",
     /answerTheQuestionRef\.current = async/.test(barSrc) &&

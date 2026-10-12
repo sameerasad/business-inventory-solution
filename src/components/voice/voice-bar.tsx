@@ -9,6 +9,7 @@ import {
   getVoiceEditOptions,
   interpretVoiceAction,
   transcribeAndInterpretAction,
+  transcribeOnlyAction,
   markVoiceAttemptSavedAction,
   type VoiceEditOptions,
   type VoiceResult,
@@ -305,25 +306,36 @@ export function VoiceBar({
         form.append("audio", audio, "command.webm");
         form.append("language", lang === "ur-PK" ? "ur" : "en");
         form.append("capture", capture);
+        /**
+         * A yes or a no needs HEARING, not understanding.
+         *
+         * This used to go the long way round: transcribe, then hand the word
+         * to the model with the whole catalogue attached, then read the answer
+         * back off a command nobody could act on. One call of about 3,500
+         * tokens to find out whether somebody said haan.
+         *
+         * On the free tier that is the difference between roughly 49 orders a
+         * day and roughly 87, because every hands-free save was paying for two
+         * calls instead of one. The model has nothing to contribute here -
+         * parseConfirmation reads the word on the client - so it is not asked.
+         */
+        if (modeRef.current === "confirm") {
+          const heard = await transcribeOnlyAction(form);
+          if (!heard.ok) {
+            setWhisperError(heard.reason);
+            return;
+          }
+          setWhisperError(null);
+          await answerTheQuestion(heard.text);
+          return;
+        }
+
         const outcome = await transcribeAndInterpretAction(form);
         if (!outcome.ok) {
           setWhisperError(outcome.reason);
           return;
         }
         setWhisperError(null);
-
-        // The clip is the answer to "Save?", not a new command. Without this
-        // the answer went off to be interpreted as an order, which is how a
-        // spoken "haan" managed never to save anything.
-        //
-        // The interpreting round trip above is wasted on a one-word answer and
-        // is not free - it spends a full catalogue prompt out of a daily
-        // allowance that runs out. Worth removing later with a transcribe-only
-        // path; not worth holding up a fix for something that has never worked.
-        if (modeRef.current === "confirm") {
-          await answerTheQuestion(outcome.result.transcript);
-          return;
-        }
         await applyResult(outcome.result);
       } finally {
         setThinking(false);

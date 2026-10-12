@@ -105,8 +105,13 @@ async function main() {
 
   /* ------------------------------------------------------------ the summary */
   // Answers to "Save?" are not commands and are not judged as ones.
-  const answers = rows.filter((r) => isAnswer(r.transcript));
-  const commands = rows.filter((r) => !isAnswer(r.transcript));
+  // kind first, text second. Rows written from here on say what they are;
+  // the guess stays for everything recorded before they did, where a
+  // confirmation misheard as "Huh." is invisible to it.
+  const anAnswer = (r: { kind: string; transcript: string }) =>
+    r.kind === "confirm" || isAnswer(r.transcript);
+  const answers = rows.filter(anAnswer);
+  const commands = rows.filter((r) => !anAnswer(r));
 
   const total = commands.length;
   const unknown = commands.filter((r) => r.kind === "unknown").length;

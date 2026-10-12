@@ -319,6 +319,7 @@ export async function transcribeOnlyAction(
   const audio = formData.get("audio");
   if (!(audio instanceof Blob)) return { ok: false, reason: "No audio was received." };
   const language = String(formData.get("language") ?? "ur") === "en" ? "en" : "ur";
+  const capture = String(formData.get("capture") ?? "clean") === "raw" ? "raw" : "clean";
 
   // The same catalog vocabulary, because a field answer is exactly where a
   // shop or product name shows up.
@@ -334,6 +335,28 @@ export async function transcribeOnlyAction(
     language,
     prompt: buildPrompt(vocabulary),
   });
+
+  /**
+   * Logged as what it is.
+   *
+   * These used to reach the log through the interpreting path, where they came
+   * out as "unknown" - a yes counted as a command nobody could understand. The
+   * report then had to guess them back out of the transcript text, and a
+   * confirmation misheard as "Huh." was invisible to that guess and counted
+   * against whichever microphone setting heard it.
+   *
+   * Recording the kind removes the guessing for everything from here on.
+   */
+  if (result.ok) {
+    void logVoiceAttempt({
+      transcript: result.text,
+      engine: `whisper:${capture}`,
+      language,
+      kind: "confirm",
+      noSpeechProb: result.noSpeechProb ?? null,
+    });
+  }
+
   return result.ok ? { ok: true, text: result.text } : { ok: false, reason: result.reason };
 }
 
