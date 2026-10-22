@@ -431,6 +431,8 @@ it runs unchanged in a Vercel function.
 Put your own details on it via `.env`:
 
 ```dotenv
+AUTH_SECRET="..."            # long random string; signs the session cookie
+AUTH_PASSWORD="..."          # the password people type to get in
 BUSINESS_NAME="Your Business Name"
 BUSINESS_ADDRESS="Street, City, Postcode"
 BUSINESS_PHONE="+92 ..."

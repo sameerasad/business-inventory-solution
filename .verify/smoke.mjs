@@ -1,6 +1,7 @@
 // Boots PGlite + the built Next server, then fetches every page and asserts it
 // renders with real data in it.
 import { spawn } from "node:child_process";
+import { createHmac } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
@@ -25,13 +26,35 @@ await server.start();
 // Never build into .next: the dev server shares it, and mixing dev and
 // production artifacts leaves the dev server serving a page with no CSS.
 const DIST = ".next-verify";
+/**
+ * The app is behind a password now, so the harness has to be on the inside of
+ * it - every page would otherwise answer with a redirect to /login and the
+ * whole suite would pass its status check while testing nothing.
+ *
+ * It sets the credentials for the server it starts and then mints its own
+ * cookie with the same HMAC the app uses. Going through the login form would
+ * test the form; this tests the pages, which is what this suite is for. The
+ * form is covered where it belongs, in the auth checks below.
+ */
+const AUTH_SECRET = "smoke-suite-secret-not-a-real-one";
+const AUTH_PASSWORD = "smoke-password";
+
 const env = {
   ...process.env,
   DATABASE_URL: url,
   DATABASE_URL_UNPOOLED: url,
   DEFAULT_ACTOR: "smoke",
   NEXT_DIST_DIR: DIST,
+  AUTH_SECRET,
+  AUTH_PASSWORD,
 };
+
+function sessionCookie() {
+  const expires = String(Date.now() + 86400_000);
+  const mac = createHmac("sha256", AUTH_SECRET).update(expires).digest("hex");
+  return `ibt_session=${expires}.${mac}`;
+}
+const COOKIE = sessionCookie();
 
 function run(cmd) {
   return new Promise((resolve) => {
@@ -91,7 +114,10 @@ let up = false;
 for (let i = 0; i < 60; i += 1) {
   await new Promise((r) => setTimeout(r, 1000));
   try {
-    const res = await fetch(`http://127.0.0.1:${APP_PORT}/dashboard`, { redirect: "manual" });
+    const res = await fetch(`http://127.0.0.1:${APP_PORT}/dashboard`, {
+      redirect: "manual",
+      headers: { cookie: COOKIE },
+    });
     if (res.status < 500) {
       up = true;
       break;
@@ -325,7 +351,9 @@ const pages = [
 
 for (const [pathname, markers] of pages) {
   try {
-    const res = await fetch(`http://127.0.0.1:${APP_PORT}${pathname}`);
+    const res = await fetch(`http://127.0.0.1:${APP_PORT}${pathname}`, {
+      headers: { cookie: COOKIE },
+    });
     const html = await res.text();
     check(`${pathname} -> ${res.status}`, res.status === 200, res.status);
     for (const marker of markers) {
@@ -351,6 +379,79 @@ for (const [pathname, markers] of pages) {
   } catch (err) {
     check(`${pathname} fetched`, false, err.message);
   }
+}
+
+/* ------------------------------------------------------------------- the gate */
+/**
+ * The app was open to anyone with the URL until now, including the button that
+ * marks every invoice in the business as paid. These check the gate itself
+ * rather than what is behind it.
+ */
+const bare = (pathname, init) => fetch(`http://127.0.0.1:${APP_PORT}${pathname}`, {
+  redirect: "manual",
+  ...init,
+});
+
+{
+  const res = await bare("/dashboard");
+  check("a page with no cookie redirects", res.status === 307 || res.status === 302, res.status);
+  check(
+    "and it redirects to the login page",
+    (res.headers.get("location") ?? "").includes("/login"),
+    res.headers.get("location"),
+  );
+  check(
+    "carrying where they were going",
+    (res.headers.get("location") ?? "").includes("next="),
+    res.headers.get("location"),
+  );
+}
+
+{
+  const res = await bare("/api/invoices/1");
+  check("an API call with no cookie gets 401, not a login page", res.status === 401, res.status);
+}
+
+{
+  // Signed with the wrong key, and with a timestamp far in the future - so it
+  // fails on the signature rather than on having expired.
+  const expires = String(Date.now() + 86400_000);
+  const mac = createHmac("sha256", "not-the-real-secret").update(expires).digest("hex");
+  const res = await bare("/dashboard", { headers: { cookie: `ibt_session=${expires}.${mac}` } });
+  check("a forged cookie is refused", res.status !== 200, res.status);
+}
+
+{
+  // Correctly signed, but the expiry inside it has passed. The expiry is part
+  // of what is signed, so this is the only way to have a valid signature on a
+  // dead session.
+  const expires = String(Date.now() - 1000);
+  const mac = createHmac("sha256", AUTH_SECRET).update(expires).digest("hex");
+  const res = await bare("/dashboard", { headers: { cookie: `ibt_session=${expires}.${mac}` } });
+  check("an expired cookie is refused", res.status !== 200, res.status);
+}
+
+{
+  const res = await bare("/login");
+  check("the login page itself is reachable", res.status === 200, res.status);
+}
+
+/**
+ * The one thing that must stay open.
+ *
+ * Customers open this from a WhatsApp message and have no account and never
+ * will. A wrong token must come back as not-found rather than as a redirect to
+ * a login page - a redirect here would mean every invoice this business has
+ * ever sent stopped being readable, and nothing would say so.
+ */
+{
+  const res = await bare("/api/invoices/share/definitely-not-a-real-token");
+  check(
+    "the customer invoice link is not behind the gate",
+    res.status !== 307 && res.status !== 302,
+    res.status,
+  );
+  check("and an unknown token is simply not found", res.status === 404, res.status);
 }
 
 if (/Error|error:/i.test(appLog) && !/Compiled|ready/i.test(appLog)) {

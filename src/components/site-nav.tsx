@@ -11,6 +11,7 @@ import {
   MapPin,
   PackagePlus,
   Receipt,
+  LogOut,
   Mic,
   ShoppingCart,
   Users,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { signOutAction } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 
 type NavLink = {
@@ -97,6 +99,16 @@ export function NavActions() {
           </Button>
         );
       })}
+
+      {/* A way out, because there is now a way in. Its own small form rather
+          than a link: signing out clears a cookie, and a GET that changes
+          something gets fired by anything that prefetches links. */}
+      <form action={signOutAction}>
+        <Button type="submit" variant="ghost" size="icon" className="h-9 w-9" title="Sign out">
+          <LogOut className="h-4 w-4" />
+          <span className="sr-only">Sign out</span>
+        </Button>
+      </form>
     </div>
   );
 }
