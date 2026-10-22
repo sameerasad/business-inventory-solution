@@ -120,12 +120,39 @@ async function main() {
   const booker = loose[0]!;
 
   if (!apply) {
+    /**
+     * Count the territory change the way the real run computes it.
+     *
+     * --assign-areas means "everywhere this booker works once the attribution
+     * is done", which is the backlog's areas PLUS the areas their existing
+     * orders are already in, minus whatever they are assigned to today. The
+     * backlog's own area count answers none of that, and a dry run that
+     * reports a different number from the thing it is previewing is worse
+     * than no dry run.
+     */
+    const worked = await prisma.booking.findMany({
+      where: {
+        area: { isDeleted: false },
+        OR: [{ bookerId: null }, { bookerId: booker.id }],
+      },
+      select: { areaId: true },
+      distinct: ["areaId"],
+    });
+    const already = await prisma.bookerArea.findMany({
+      where: { bookerId: booker.id },
+      select: { areaId: true },
+    });
+    const have = new Set(already.map((a) => a.areaId));
+    const toAdd = worked.filter((w) => !have.has(w.areaId)).length;
+
     console.log(
       `\nDRY RUN - nothing was changed.\n` +
         `  Would attribute ${summary.bookings} booking(s) worth ${money(summary.value)} to ${booker.name}.` +
         (assignAreas
-          ? `\n  Would also add ${summary.areas.length} area(s) to their territory.`
-          : "\n  Territory would be left alone (add --assign-areas to set it from those bookings).") +
+          ? `\n  Would add ${toAdd} area(s) to their territory, taking it from ${have.size} to ${worked.length} -` +
+            `\n  every area they have an order in.`
+          : `\n  Territory would be left alone at ${have.size} area(s), though their orders span ${worked.length}.` +
+            `\n  Add --assign-areas unless you mean to set it by hand.`) +
         `\n\nRe-run with --apply to do it.\n`,
     );
     return;

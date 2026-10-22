@@ -653,6 +653,44 @@ async function main() {
     perfB.rows.find((r) => r.id === imran.id)!.offTerritoryValue,
   );
 
+  /**
+   * Territory follows their own orders, not just the backlog.
+   *
+   * The case that actually bit: a booker selling in an area for months, with
+   * every one of those bookings already attributed to them, and the area never
+   * assigned. Reading only the unattributed backlog left them unassigned there
+   * - which, once the shop list is scoped by territory, means they cannot see
+   * the shops they have been selling to all along.
+   */
+  const northZone = await prisma.area.findFirstOrThrow({ where: { name: "North Zone" } });
+  const alreadyHis = await createBookingAction(
+    emptyActionState,
+    fd({
+      customerName: "North Regular",
+      areaId: String(northZone.id),
+      bookerId: String(imran.id),
+      bookingDate: `${YEAR}-02-06`,
+      lines: JSON.stringify([{ productId: product.id, quantity: 1, unitPrice: 450 }]),
+      idempotencyKey: "bkr-northZone-1",
+    }),
+  );
+  ok("a booking attributed to him from the start, in North Zone", alreadyHis.ok, alreadyHis);
+  ok(
+    "North Zone is not his territory yet",
+    (await prisma.bookerArea.count({ where: { bookerId: imran.id, areaId: northZone.id } })) === 0,
+  );
+
+  const noBacklog = await attributeUnattributedBookings({
+    bookerId: imran.id,
+    assignAreas: true,
+  });
+  ok("there was no backlog left to attribute", noBacklog.bookings === 0, noBacklog);
+  ok(
+    "but North Zone was still added, because he sells there",
+    (await prisma.bookerArea.count({ where: { bookerId: imran.id, areaId: northZone.id } })) === 1,
+    "territory was read from the backlog alone",
+  );
+
   let threw = false;
   try {
     await attributeUnattributedBookings({ bookerId: 999999, assignAreas: false });

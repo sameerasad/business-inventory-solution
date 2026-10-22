@@ -458,7 +458,14 @@ export async function getUnattributedBookings(): Promise<UnattributedSummary> {
  */
 export async function attributeUnattributedBookings(options: {
   bookerId: number;
-  /** Also make every area in that backlog part of the booker's territory. */
+  /**
+   * Also give them the territory their own orders say they work.
+   *
+   * Every area they have an order in once this attribution is done - not just
+   * the areas in the backlog. The difference is not academic: a booker who has
+   * sold in an area for months, with the bookings already attributed, would
+   * otherwise be left unassigned there and unable to see those shops at all.
+   */
   assignAreas: boolean;
 }): Promise<{ bookings: number; areasAssigned: number }> {
   const booker = await prisma.booker.findUnique({
@@ -478,11 +485,17 @@ export async function attributeUnattributedBookings(options: {
     });
 
     let areasAssigned = 0;
-    if (options.assignAreas && before.areas.length > 0) {
+    if (options.assignAreas) {
+      // Read AFTER the update above, so the rows just attributed count too.
+      const worked = await tx.booking.findMany({
+        where: { bookerId: booker.id, area: { isDeleted: false } },
+        select: { areaId: true },
+        distinct: ["areaId"],
+      });
       // skipDuplicates: an area they are already assigned to must not fail the
       // whole backfill on the composite primary key.
       const result = await tx.bookerArea.createMany({
-        data: before.areas.map((a) => ({ bookerId: booker.id, areaId: a.id })),
+        data: worked.map((w) => ({ bookerId: booker.id, areaId: w.areaId })),
         skipDuplicates: true,
       });
       areasAssigned = result.count;
