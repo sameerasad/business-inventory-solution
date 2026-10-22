@@ -144,6 +144,19 @@ const bookingRows = await db.query(
 );
 const SAMPLE_BOOKING = bookingRows.rows[0]?.id;
 
+const territoryRows = await db.query(
+  `SELECT sh.name AS name,
+          (ba.booker_id IS NOT NULL) AS mine
+     FROM shops sh
+     JOIN areas a ON a.id = sh.area_id AND a.is_deleted = false
+     LEFT JOIN booker_areas ba ON ba.area_id = sh.area_id AND ba.booker_id = $1
+    WHERE sh.is_deleted = false
+    ORDER BY mine DESC`,
+  [bookerId("Sample Booker")],
+);
+const SHOP_INSIDE = territoryRows.rows.find((r) => r.mine)?.name;
+const SHOP_OUTSIDE = territoryRows.rows.find((r) => !r.mine)?.name;
+
 const WORKING = sessionCookie(userId("smoke_working"));
 const OTHER = sessionCookie(userId("smoke_other"));
 const NOBODY = sessionCookie(userId("smoke_nobody"));
@@ -662,6 +675,51 @@ for (const pathname of ["/dashboard", "/sales", "/batches", "/products", "/booke
     "the emergency session says Emergency, not Admin",
     asOwner.includes(">Emergency<") && !asOwner.includes(">Admin<"),
     "break-glass looks like an ordinary admin",
+  );
+}
+
+{
+  /**
+   * The shop list is the customer list, and it is the most portable thing this
+   * business owns. A booker sees the territory they were assigned.
+   */
+  check(
+    "the fixtures give one shop inside the territory and one outside",
+    SHOP_INSIDE != null && SHOP_OUTSIDE != null && SHOP_INSIDE !== SHOP_OUTSIDE,
+    `inside=${SHOP_INSIDE} outside=${SHOP_OUTSIDE}`,
+  );
+
+  const theirs = await (await get("/areas", WORKING)).text();
+  check("a booker sees a shop in their own area", theirs.includes(SHOP_INSIDE), SHOP_INSIDE);
+  check(
+    "and not one from an area they were never given",
+    !theirs.includes(SHOP_OUTSIDE),
+    `${SHOP_OUTSIDE} leaked`,
+  );
+
+  const all = await (await get("/areas", COOKIE)).text();
+  check("the owner sees both", all.includes(SHOP_INSIDE) && all.includes(SHOP_OUTSIDE));
+
+  // The booking form is the other door onto the same list.
+  const form = await (await get("/bookings/new", WORKING)).text();
+  check("the booking form offers their own shops", form.includes(SHOP_INSIDE));
+  check(
+    "and not shops outside their territory",
+    !form.includes(SHOP_OUTSIDE),
+    `${SHOP_OUTSIDE} offered`,
+  );
+
+  // No territory at all must mean nothing, said plainly - not everything.
+  const none = await (await get("/areas", OTHER)).text();
+  check(
+    "a booker with no territory is told so",
+    none.includes("No areas have been assigned to you"),
+    "no explanation given",
+  );
+  check(
+    "and sees no shops at all",
+    !none.includes(SHOP_INSIDE) && !none.includes(SHOP_OUTSIDE),
+    "an unassigned booker saw the customer list",
   );
 }
 

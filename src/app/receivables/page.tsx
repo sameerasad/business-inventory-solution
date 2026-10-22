@@ -23,7 +23,7 @@ import {
 import { dateOnly, money } from "@/lib/format";
 import { getReceivables, type AgeFilter } from "@/lib/bookings";
 import { prisma } from "@/lib/db";
-import { requireUser, scopeBookerId } from "@/lib/session";
+import { requireUser, scopeBookerId, visibleAreaIds } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Receivables" };
 export const dynamic = "force-dynamic";
@@ -47,6 +47,9 @@ export default async function ReceivablesPage({
   const user = await requireUser();
   // What this booker is owed, not what the business is owed.
   const mine = scopeBookerId(user);
+  // The area dropdown is a list of area names, which is the first half of the
+  // customer list. Scoped for the same reason the directory is.
+  const territory = await visibleAreaIds(user);
 
   const sp = await searchParams;
   const areaParam = first(sp.area);
@@ -63,7 +66,7 @@ export default async function ReceivablesPage({
 
   const [areas, bookers, data] = await Promise.all([
     prisma.area.findMany({
-      where: { isDeleted: false },
+      where: { isDeleted: false, ...(territory == null ? {} : { id: { in: territory } }) },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),

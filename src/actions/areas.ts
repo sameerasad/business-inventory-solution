@@ -17,7 +17,8 @@ import {
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
-import { denyNonAdmin } from "@/lib/guard";
+import { denyNonAdmin, viewer } from "@/lib/guard";
+import { visibleAreaIds } from "@/lib/session";
 
 function revalidateGeography() {
   revalidatePath("/areas");
@@ -102,10 +103,34 @@ export async function createArea(input: { name: string; confirmSimilar?: boolean
     }
   }
 
+  /**
+   * A booker who creates an area gets it, in the same transaction.
+   *
+   * Without this the area they just added would vanish the moment the page
+   * reloaded - created, real, and outside their own territory. Granting it is
+   * safe precisely because the area is NEW: nobody else had it, so nothing is
+   * being taken from anyone.
+   *
+   * Deliberately only on "created". An area that already exists belongs to
+   * whoever the owner gave it to, and auto-assigning there would turn typing
+   * a name into a way of helping yourself to somebody else's round.
+   */
+  const user = await viewer();
+  const claimFor = user && user.role !== "admin" ? user.bookerId : null;
+
   try {
     const created = await prisma.$transaction(async (tx) => {
       const row = await tx.area.create({ data: { name }, select: { id: true } });
       await writeAudit(tx, { entityType: "area", entityId: row.id, action: "area.created", payload: { name } });
+      if (claimFor != null) {
+        await tx.bookerArea.create({ data: { bookerId: claimFor, areaId: row.id } });
+        await writeAudit(tx, {
+          entityType: "area",
+          entityId: row.id,
+          action: "area.assigned",
+          payload: { bookerId: claimFor, reason: "created by this booker" },
+        });
+      }
       return row;
     });
     revalidateGeography();
@@ -137,7 +162,17 @@ export async function createAreaAction(
   // page, even though the order editor treats the same answer as "that is the
   // area you meant" and just selects it.
   if (result.status === "existing") {
-    return failure(`Area "${result.name}" already exists.`, { name: "Already exists" });
+    // A booker cannot see every area, so "already exists" on its own reads
+    // as the app being wrong. Say where it went instead.
+    const user = await viewer();
+    const theirs = user ? await visibleAreaIds(user) : null;
+    const hidden = theirs != null && !theirs.includes(result.areaId);
+    return failure(
+      hidden
+        ? `Area "${result.name}" already exists, but it is not in your territory. Ask the owner to assign it to you.`
+        : `Area "${result.name}" already exists.`,
+      { name: "Already exists" },
+    );
   }
   return success(
     result.status === "restored"
@@ -276,6 +311,20 @@ export async function findLookalikeShops(areaId: number, name: string): Promise<
     .map((x) => ({ id: x.sh.id, name: x.sh.name, sales: x.sh._count.sales }));
 }
 
+/**
+ * May this person put something in this area?
+ *
+ * Both halves matter. Without it a booker could add a shop into any area by
+ * posting its id - which writes a name into a part of the business they are
+ * not allowed to read, and shows up later as an order from nowhere.
+ */
+async function mayUseArea(areaId: number): Promise<boolean> {
+  const user = await viewer();
+  if (!user) return false;
+  const territory = await visibleAreaIds(user);
+  return territory == null || territory.includes(areaId);
+}
+
 export async function createShop(input: {
   areaId: number;
   name: string;
@@ -411,6 +460,10 @@ export async function createShopAction(
   const areaId = Number.parseInt(areaIdRaw, 10);
   if (!Number.isInteger(areaId) || areaId <= 0) {
     return failure("Pick an area first.", { areaId: "Area is required" });
+  }
+
+  if (!(await mayUseArea(areaId))) {
+    return failure("That area is not in your territory.", { areaId: "Not your area" });
   }
 
   const confirmSimilar = String(formData.get("confirmSimilar") ?? "") === "true";

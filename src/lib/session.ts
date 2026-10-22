@@ -125,3 +125,26 @@ export function scopeBookerId(user: SignedIn): number | null {
   if (user.role === "admin") return null;
   return user.bookerId ?? NO_BOOKER;
 }
+
+/**
+ * The areas this person may see, or null for an admin.
+ *
+ * The shop list is this business's customer list - seventy-odd names with the
+ * area each one sits in - and it is the most portable thing it owns. A margin
+ * seen once is a loss once; a customer list that walks out is a loss every
+ * month after. So a booker sees the territory they were assigned, and that
+ * assignment is a decision the owner already makes on the Bookers page.
+ *
+ * Null means no restriction and is only ever returned for an admin. An EMPTY
+ * array means exactly that - no areas - and callers must not read it as "no
+ * filter", which is the same mistake NO_BOOKER exists to prevent.
+ */
+export async function visibleAreaIds(user: SignedIn): Promise<number[] | null> {
+  if (user.role === "admin") return null;
+  if (user.bookerId == null) return [];
+  const rows = await prisma.bookerArea.findMany({
+    where: { bookerId: user.bookerId, area: { isDeleted: false } },
+    select: { areaId: true },
+  });
+  return rows.map((r) => r.areaId);
+}

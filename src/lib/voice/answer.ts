@@ -7,6 +7,8 @@
  * quietly used a different basis would be worse than no answer.
  */
 
+import { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/db";
 import { currentYear } from "@/lib/dates";
 import { dateOnly, money, qty } from "@/lib/format";
@@ -325,7 +327,20 @@ async function answerBalance(question: Question): Promise<VoiceAnswer> {
  * Sent to the parser rather than queried inside it, so the parser stays pure
  * and every phrasing can be tested against a fixed catalog.
  */
-export async function getVoiceCatalog() {
+/**
+ * Everything a spoken command can name.
+ *
+ * Scoped by area for a booker, for the same reason the Areas page is: the
+ * names Whisper is told about ARE the customer list, read out loud. Null is
+ * every area, which is what an admin gets.
+ */
+export async function getVoiceCatalog(areaIds: number[] | null = null) {
+  // Built once rather than at both use sites, so the areas and the shops can
+  // never be scoped differently - which would let a shop be named under an
+  // area the speaker cannot see.
+  const areaScope =
+    areaIds == null ? Prisma.empty : Prisma.sql`AND sh.area_id = ANY(${areaIds}::int[])`;
+
   const [products, areas, shops, bookers, invoices, categories] = await Promise.all([
     prisma.$queryRaw<
       {
@@ -362,7 +377,7 @@ export async function getVoiceCatalog() {
       ORDER BY p.name
     `,
     prisma.area.findMany({
-      where: { isDeleted: false },
+      where: { isDeleted: false, ...(areaIds == null ? {} : { id: { in: areaIds } }) },
       orderBy: { name: "asc" },
       select: { id: true, name: true, voiceAlias: true },
     }),
@@ -385,7 +400,7 @@ export async function getVoiceCatalog() {
      * arrives at the top, and drifts down on its own if nothing is ever sold
      * there.
      */
-    prisma.$queryRaw<{ id: number; name: string; areaId: number; voiceAlias: string | null }[]>`
+    prisma.$queryRaw<{ id: number; name: string; areaId: number; voiceAlias: string | null }[]>(Prisma.sql`
       SELECT sh.id                AS "id",
              sh.name              AS "name",
              sh.area_id           AS "areaId",
@@ -393,6 +408,7 @@ export async function getVoiceCatalog() {
         FROM shops sh
         LEFT JOIN sales s ON s.shop_id = sh.id AND s.is_deleted = false
        WHERE sh.is_deleted = false
+             ${areaScope}
        GROUP BY sh.id, sh.name, sh.area_id, sh.voice_alias, sh.created_at
        -- created_at breaks the tie, not the alphabet. A shop added today ties
        -- with every shop sold to today, and on that day the new one is the
@@ -400,7 +416,7 @@ export async function getVoiceCatalog() {
        ORDER BY COALESCE(MAX(s.sale_date), sh.created_at::date) DESC,
                 sh.created_at DESC,
                 sh.name ASC
-    `,
+    `),
     prisma.booker.findMany({
       where: { isDeleted: false, isActive: true },
       orderBy: { name: "asc" },

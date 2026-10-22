@@ -8,7 +8,8 @@ import { buildPrompt, groqConfigured, transcribeWithGroq } from "@/lib/voice/tra
 import { speechVocabulary } from "@/lib/voice/names";
 import { enrich } from "@/lib/voice/enrich";
 import { logVoiceAttempt, markVoiceAttemptSaved } from "@/lib/voice/log";
-import { currentUser, scopeBookerId } from "@/lib/session";
+import { currentUser, scopeBookerId, visibleAreaIds } from "@/lib/session";
+import { viewer } from "@/lib/guard";
 
 /**
  * The answer a booker gets to a question about the business.
@@ -30,6 +31,19 @@ function notYours(): VoiceAnswer {
     label: "Owner only",
     href: "/my",
   };
+}
+
+/**
+ * The areas whose names this speaker may hear back.
+ *
+ * The catalog is what Whisper is told to listen for, so it IS the customer
+ * list read out loud. Scoping it here rather than filtering afterwards matters:
+ * a name that reached the prompt has already been disclosed, whatever the
+ * parser does with it next.
+ */
+async function myAreas(): Promise<number[] | null> {
+  const user = await viewer();
+  return user ? visibleAreaIds(user) : [];
 }
 
 /** True when the signed-in person may not be told business-wide figures. */
@@ -113,7 +127,7 @@ export async function interpretVoiceAction(transcript: string): Promise<VoiceRes
     };
   }
 
-  const catalog = await getVoiceCatalog();
+  const catalog = await getVoiceCatalog(await myAreas());
   const command = await understand(said, catalog);
 
   // Typed or spoken through the browser engine, the text arrived without
@@ -246,7 +260,7 @@ export async function transcribeAndInterpretAction(
 
   // Fetched before transcribing: the names go to Whisper as context, which is
   // what lets it produce "Rakshani bazar" instead of something phonetic.
-  const catalog = await getVoiceCatalog();
+  const catalog = await getVoiceCatalog(await myAreas());
   // What Whisper is told to listen for. The order and the shortening both
   // live in names.ts - see there for why a derived word beats a full name in a
   // budget this small.
@@ -352,7 +366,7 @@ export async function transcribeOnlyAction(
 
   // The same catalog vocabulary, because a field answer is exactly where a
   // shop or product name shows up.
-  const catalog = await getVoiceCatalog();
+  const catalog = await getVoiceCatalog(await myAreas());
   const vocabulary = [
     ...catalog.shops.flatMap((sh) => [sh.name, sh.voiceAlias ?? ""]),
     ...catalog.areas.flatMap((ar) => [ar.name, ar.voiceAlias ?? ""]),

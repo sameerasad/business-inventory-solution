@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { getBookableProducts } from "@/lib/bookings";
 import { getAreasWithShops } from "@/lib/queries";
 import { getActiveBookers } from "@/lib/bookers";
-import { requireUser, scopeBookerId } from "@/lib/session";
+import { requireUser, scopeBookerId, visibleAreaIds } from "@/lib/session";
 
 export const metadata: Metadata = { title: "New Booking" };
 export const dynamic = "force-dynamic";
@@ -16,10 +16,11 @@ export const dynamic = "force-dynamic";
 export default async function NewBookingPage() {
   const user = await requireUser();
   const mine = scopeBookerId(user);
+  const territory = await visibleAreaIds(user);
 
   const [products, areas, allBookers] = await Promise.all([
     getBookableProducts(),
-    getAreasWithShops(),
+    getAreasWithShops(territory),
     getActiveBookers(),
   ]);
 
@@ -52,11 +53,23 @@ export default async function NewBookingPage() {
         </Alert>
       ) : blocked === "areas" ? (
         <Alert tone="error">
-          Every booking needs an area. Add one on the{" "}
-          <Link href="/areas" className="font-medium underline">
-            Areas &amp; Shops
-          </Link>{" "}
-          page first.
+          {/* Two different problems wearing the same empty list. An owner with
+              no areas has to create one; a booker with none has been assigned
+              none, and creating more would not help. */}
+          {mine == null ? (
+            <>
+              Every booking needs an area. Add one on the{" "}
+              <Link href="/areas" className="font-medium underline">
+                Areas &amp; Shops
+              </Link>{" "}
+              page first.
+            </>
+          ) : (
+            <>
+              No areas have been assigned to you, and every booking needs one. Ask the owner to
+              assign your territory.
+            </>
+          )}
         </Alert>
       ) : (
         <>

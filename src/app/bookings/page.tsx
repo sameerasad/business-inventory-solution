@@ -32,7 +32,7 @@ import { getBookingList, type PaymentStatusFilter } from "@/lib/bookings";
 import { readPageSize } from "@/lib/lists";
 import { prisma } from "@/lib/db";
 import { getAreasWithShops } from "@/lib/queries";
-import { requireUser, scopeBookerId } from "@/lib/session";
+import { requireUser, scopeBookerId, visibleAreaIds } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Bookings" };
 export const dynamic = "force-dynamic";
@@ -56,6 +56,9 @@ export default async function BookingsPage({
   // A booker sees the orders they took, and no others. Forced here rather than
   // defaulted into the filter: a filter is something the URL can change.
   const mine = scopeBookerId(user);
+  // The area dropdown is a list of area names, which is the first half of the
+  // customer list. Scoped for the same reason the directory is.
+  const territory = await visibleAreaIds(user);
 
   const sp = await searchParams;
   const fromParam = first(sp.from);
@@ -79,7 +82,7 @@ export default async function BookingsPage({
 
   const [areas, bookers, areasWithShops, list] = await Promise.all([
     prisma.area.findMany({
-      where: { isDeleted: false },
+      where: { isDeleted: false, ...(territory == null ? {} : { id: { in: territory } }) },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
@@ -88,7 +91,7 @@ export default async function BookingsPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
-    getAreasWithShops(),
+    getAreasWithShops(territory),
     getBookingList({
       from: invalidRange ? null : from,
       to: invalidRange ? null : to,

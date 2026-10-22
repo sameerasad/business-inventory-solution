@@ -386,9 +386,16 @@ export async function getCategories() {
   });
 }
 
-export async function getAreasWithShops() {
+/**
+ * Areas and their shops.
+ *
+ * `areaIds` null means every area, which is what an admin gets. A list - even
+ * an empty one - means exactly those areas: an empty territory shows nothing,
+ * rather than quietly showing everything.
+ */
+export async function getAreasWithShops(areaIds: number[] | null = null) {
   const areas = await prisma.area.findMany({
-    where: { isDeleted: false },
+    where: { isDeleted: false, ...(areaIds == null ? {} : { id: { in: areaIds } }) },
     orderBy: { name: "asc" },
     include: {
       shops: {
