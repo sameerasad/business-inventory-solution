@@ -35,11 +35,15 @@ function packLabel(quantity: number): string {
 
 /**
  * Who the invoice is addressed to. The customer name is optional - a cash or
- * walk-in sale often has none - but the BILL TO block must never be blank, so
- * it falls back to a neutral label.
+ * walk-in sale often has none - so it falls back to the shop, and only to a
+ * neutral label when there is no shop either. The block must never be blank.
  */
 function billTo(invoice: Invoice): string {
-  return invoice.customerName?.trim() || "Walk-in customer";
+  // The shop before the neutral label. An order delivered to a named shop was
+  // billing itself to "Walk-in customer" while printing that shop two inches
+  // to the right - and the WhatsApp message for the same invoice named the
+  // shop correctly, so the two documents disagreed about who owed the money.
+  return invoice.customerName?.trim() || invoice.shopName?.trim() || "Walk-in customer";
 }
 
 const A4 = { width: 595.28, height: 841.89 };
@@ -296,8 +300,14 @@ export async function renderInvoicePdf(invoice: Invoice): Promise<Uint8Array> {
   let areaY = billTop;
   text(ctx, invoice.areaName, 300, areaY, { size: 11, bold: true });
   areaY -= 13;
-  text(ctx, invoice.shopName ?? "Direct sale (no shop)", 300, areaY, { size: 9, color: MUTED });
-  areaY -= 11;
+  // Not repeated when BILL TO is already the shop, which it is whenever no
+  // customer was named. The same words twice, a hand span apart, reads as a
+  // mistake rather than as emphasis.
+  const shopLine = invoice.shopName ?? "Direct sale (no shop)";
+  if (shopLine !== billTo(invoice)) {
+    text(ctx, shopLine, 300, areaY, { size: 9, color: MUTED });
+    areaY -= 11;
+  }
   // The shop's delivery address, stored once on the shop record.
   if (invoice.shopAddress) {
     for (const line of wrap(regular, invoice.shopAddress, 9, 200)) {
@@ -339,7 +349,17 @@ export async function renderInvoicePdf(invoice: Invoice): Promise<Uint8Array> {
   }
 
   /* -------------------------------------------------------------- totals */
-  ctx.y -= 8;
+  /**
+   * The totals band closes the table rather than floating under it.
+   *
+   * There used to be eight more points here, which put a strip of white
+   * between the full-width rule under the last row and the 200pt band on the
+   * right. On a long invoice nobody notices; on a two-line one it reads as a
+   * table that stopped halfway, with the totals belonging to something else.
+   *
+   * The rule the loop leaves behind sits at ctx.y + 6 and the band's top edge
+   * lands at ctx.y + 4, so they meet with a hairline between them.
+   */
   const totalsLeft = COL.total - 200;
 
   ctx.page.drawRectangle({

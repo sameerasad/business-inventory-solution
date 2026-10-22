@@ -311,6 +311,65 @@ async function main() {
    * paid against said nothing at all about money being owed, which is the one
    * invoice that most needs to.
    */
+  /* ---------------------------------------------------------------------- */
+  section("who the invoice is addressed to");
+
+  /**
+   * An order delivered to a named shop was billing itself to "Walk-in
+   * customer" while printing that shop's name two inches to the right, and the
+   * WhatsApp message for the same invoice named the shop correctly - so the
+   * two documents a customer receives disagreed about who owed the money.
+   */
+  const shopInvoice = await getInvoice(booking.id);
+  const shopPdf = pdfText(await renderInvoicePdf(shopInvoice!));
+  ok(
+    "an order to a shop is billed to that shop",
+    shopInvoice!.shopName != null && shopPdf.includes(shopInvoice!.shopName),
+    shopInvoice?.shopName,
+  );
+  ok(
+    "and the shop is not printed twice",
+    shopPdf.split(shopInvoice!.shopName!).length - 1 === 1,
+    shopPdf.split(shopInvoice!.shopName!).length - 1,
+  );
+
+  /**
+   * The neutral label is still there for the case it was written for: a
+   * counter sale with no shop and nobody named.
+   */
+  const anonymous = {
+    ...shopInvoice!,
+    customerName: null,
+    shopName: null,
+    shopAddress: null,
+  };
+  const anonPdf = pdfText(await renderInvoicePdf(anonymous));
+  ok('a sale with no shop still says "Walk-in customer"', anonPdf.includes("Walk-in customer"));
+
+  /**
+   * The totals band closes the table rather than floating under it.
+   *
+   * There used to be a strip of white between the full-width rule under the
+   * last row and the 200pt band on the right. On a long invoice nobody
+   * notices; on a two-line one it reads as a table that stopped halfway.
+   */
+  {
+    const { texts, rects } = pdfBoxes(await renderInvoicePdf(shopInvoice!));
+    const rows = texts.filter((t) => /^(MNG|CHO|APL|LYC|PCH|POM)-/.test(t.text));
+    const band = rects.find((r) => Math.round(r.height) === 46);
+    ok("the line rows and the totals band are both there", rows.length > 0 && band != null, {
+      rows: rows.length,
+      band,
+    });
+    const lowestRow = Math.min(...rows.map((r) => r.bottom));
+    const gap = lowestRow - (band!.y + band!.height);
+    ok(
+      "the totals sit directly under the last line, not adrift below it",
+      gap >= 0 && gap <= 16,
+      `${gap.toFixed(1)}pt between the last row and the totals`,
+    );
+  }
+
   section("an invoice nothing has been paid against");
   const untouched = await createBookingAction(
     emptyActionState,
