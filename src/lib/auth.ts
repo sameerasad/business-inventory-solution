@@ -41,6 +41,23 @@ export function emergencyPassword(): string {
 
 export const EMERGENCY_USER_ID = 0;
 
+/**
+ * Does the owner's emergency password apply to this attempt?
+ *
+ * Only when no username was offered, and that is the whole rule. Checking the
+ * emergency password against every attempt meant that naming yourself as a
+ * booker and happening to type it signed you in as the owner, with the
+ * username silently discarded - the screen then looked exactly as it would
+ * have if that booker really could see the whole business.
+ *
+ * A username therefore means "sign me in as this person, or not at all".
+ */
+export function emergencyMatches(username: string, password: string): boolean {
+  if (username.trim().length > 0) return false;
+  const emergency = emergencyPassword();
+  return emergency.length > 0 && sameString(password, emergency);
+}
+
 export function authConfigured(): boolean {
   return secret().length >= 16;
 }

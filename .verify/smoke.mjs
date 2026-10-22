@@ -132,7 +132,8 @@ await db.exec(`
   VALUES
     ('smoke_working', 'Smoke Working', 'x', 'booker', ${bookerId("Sample Booker")}, true, now(), now()),
     ('smoke_other',   'Smoke Other',   'x', 'booker', ${bookerId("Smoke Other")}, true, now(), now()),
-    ('smoke_nobody',  'Smoke Nobody',  'x', 'booker', NULL, true, now(), now())
+    ('smoke_nobody',  'Smoke Nobody',  'x', 'booker', NULL, true, now(), now()),
+    ('smoke_boss',    'Smoke Boss',    'x', 'admin',  NULL, true, now(), now())
   ON CONFLICT (username) DO NOTHING;
 `);
 const userRows = await db.query("SELECT id, username FROM users WHERE username LIKE 'smoke\\_%'");
@@ -146,6 +147,7 @@ const SAMPLE_BOOKING = bookingRows.rows[0]?.id;
 const WORKING = sessionCookie(userId("smoke_working"));
 const OTHER = sessionCookie(userId("smoke_other"));
 const NOBODY = sessionCookie(userId("smoke_nobody"));
+const BOSS = sessionCookie(userId("smoke_boss"));
 
 console.log("\nstarting next server...");
 const app = spawn(`npx next start --port ${APP_PORT}`, {
@@ -634,6 +636,33 @@ for (const pathname of ["/dashboard", "/sales", "/batches", "/products", "/booke
 
   const owner = await get(`/api/invoices/${SAMPLE_BOOKING}`, COOKIE);
   check("and the owner can download any of them", owner.status === 200, owner.status);
+}
+
+{
+  /**
+   * The header has to say whose session this is.
+   *
+   * Without it there was no way to tell a booker's session from the owner's
+   * except by noticing which tabs were missing - and when the emergency
+   * password quietly outranked a typed username, that was the only symptom
+   * there was.
+   */
+  const asBooker = await (await get("/bookings", WORKING)).text();
+  check("a booker's header says Booker", asBooker.includes(">Booker<"), "no role chip");
+  check("and names them", asBooker.includes("Smoke Working"), "no name");
+  check("and does not say Admin", !asBooker.includes(">Admin<"));
+
+  const asAdmin = await (await get("/dashboard", BOSS)).text();
+  check("an admin's header says Admin", asAdmin.includes(">Admin<"), "no role chip");
+  check("and names them", asAdmin.includes("Smoke Boss"), "no name");
+
+  // The break-glass session is not an account, and must not be dressed as one.
+  const asOwner = await (await get("/dashboard", COOKIE)).text();
+  check(
+    "the emergency session says Emergency, not Admin",
+    asOwner.includes(">Emergency<") && !asOwner.includes(">Admin<"),
+    "break-glass looks like an ordinary admin",
+  );
 }
 
 {

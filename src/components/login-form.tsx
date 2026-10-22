@@ -18,7 +18,12 @@ export function LoginForm({ next }: { next: string }) {
 
       {state.message && !state.ok ? <Alert tone="error">{state.message}</Alert> : null}
 
-      <Field label="Username" htmlFor="username" error={state.fieldErrors.username}>
+      <Field
+        label="Username"
+        htmlFor="username"
+        error={state.fieldErrors.username}
+        hint="Leave blank only to use the owner's emergency password."
+      >
         <Input
           id="username"
           name="username"

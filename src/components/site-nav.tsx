@@ -73,7 +73,21 @@ const BROWSE: NavLink[] = [
 ];
 
 /** Who the links are being drawn for. */
-export type NavRole = { admin: boolean; isBooker: boolean };
+export type NavRole = {
+  admin: boolean;
+  isBooker: boolean;
+  /** Shown in the header, so the app always says whose session this is. */
+  name: string;
+  /**
+   * Signed in with the owner's emergency password rather than as an account.
+   *
+   * Worth saying out loud. That password ignores whatever username was typed,
+   * so without this the screen looks identical to being the person you named -
+   * and "why can a booker see the dashboard" is a frightening question to have
+   * to ask about your own books.
+   */
+  emergency: boolean;
+};
 
 function allowed(link: NavLink, who: NavRole): boolean {
   if (link.admin && !who.admin) return false;
@@ -123,6 +137,31 @@ export function NavActions({ who }: { who: NavRole }) {
           </Button>
         );
       })}
+
+      {/* Who this is. The role is the part that matters and is shown at every
+          width; the name is detail and folds away on a phone. */}
+      <span className="ml-1 flex min-w-0 items-center gap-1.5 border-l pl-2">
+        <span className="hidden min-w-0 truncate text-xs font-medium sm:block">{who.name}</span>
+        <span
+          className={cn(
+            "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+            who.emergency
+              ? "bg-destructive/12 text-destructive"
+              : who.admin
+                ? "bg-primary/10 text-primary"
+                : "bg-secondary text-secondary-foreground",
+          )}
+          title={
+            who.emergency
+              ? "Signed in with the emergency password, not as an account. Any username you typed was ignored."
+              : who.admin
+                ? "Admin - the whole business"
+                : "Booker - your own orders"
+          }
+        >
+          {who.emergency ? "Emergency" : who.admin ? "Admin" : "Booker"}
+        </span>
+      </span>
 
       {/* A way out, because there is now a way in. Its own small form rather
           than a link: signing out clears a cookie, and a GET that changes

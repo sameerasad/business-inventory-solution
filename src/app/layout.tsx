@@ -8,6 +8,7 @@ import { VoiceLauncher } from "@/components/voice/voice-launcher";
 import { groqConfigured } from "@/lib/voice/transcribe";
 import { business, businessInitials } from "@/lib/business";
 import { currentUser } from "@/lib/session";
+import { EMERGENCY_USER_ID } from "@/lib/auth";
 
 const { name: BUSINESS } = business();
 
@@ -76,6 +77,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const who: NavRole = {
     admin: user?.role === "admin",
     isBooker: user?.bookerId != null,
+    name: user?.name ?? "",
+    emergency: user?.id === EMERGENCY_USER_ID,
   };
 
   return (

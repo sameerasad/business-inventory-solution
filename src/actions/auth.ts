@@ -8,10 +8,9 @@ import {
   EMERGENCY_USER_ID,
   SESSION_COOKIE,
   authConfigured,
-  emergencyPassword,
+  emergencyMatches,
   newSession,
   passwordMatchesHash,
-  sameString,
 } from "@/lib/auth";
 import { failure, type ActionState } from "@/lib/validations";
 
@@ -64,15 +63,23 @@ export async function signInAction(_prev: ActionState, formData: FormData): Prom
 /**
  * Who this is, or null.
  *
- * The break-glass password is checked first and belongs to no row: it exists
- * so a mistake in the users table - the last admin deactivated, a password
- * lost - is something you recover from rather than a locked door.
+ * The break-glass password belongs to no row. It exists so that a mistake in
+ * the users table - the last admin deactivated, a password lost - is something
+ * you recover from rather than a locked door.
+ *
+ * It is only offered when NO username is given, and that restriction is the
+ * whole point. Checking it against every attempt meant that naming yourself as
+ * a booker and happening to type the emergency password signed you in as the
+ * owner, with the username silently ignored. Nothing on screen said so, and
+ * the gap between "who I said I was" and "who the app thinks I am" is the last
+ * place a surprise belongs.
+ *
+ * So: a username means "sign me in as this person, or not at all".
  */
 async function identify(username: string, password: string): Promise<number | null> {
-  const emergency = emergencyPassword();
-  if (emergency.length > 0 && sameString(password, emergency)) return EMERGENCY_USER_ID;
-
+  if (emergencyMatches(username, password)) return EMERGENCY_USER_ID;
   if (!username) return null;
+
   const user = await prisma.user.findUnique({
     where: { username },
     select: { id: true, passwordHash: true, isActive: true },
