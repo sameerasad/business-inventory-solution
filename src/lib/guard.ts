@@ -1,4 +1,5 @@
-import { currentUser, insideRequest, type SignedIn } from "@/lib/session";
+import { prisma } from "@/lib/db";
+import { currentUser, insideRequest, scopeBookerId, type SignedIn } from "@/lib/session";
 import { failure, type ActionState } from "@/lib/validations";
 
 /**
@@ -66,3 +67,27 @@ export async function viewer(): Promise<SignedIn | null> {
 
 /** Stands in for the caller when there is no caller. Named, so audit rows say so. */
 const SCRIPT: SignedIn = { id: 0, name: "script", role: "admin", bookerId: null };
+
+/**
+ * May this caller act on this one booking?
+ *
+ * Several things take a booking id straight from the client - the invoice PDF,
+ * the WhatsApp share, the payment history. An id is a small integer, so for a
+ * booker an unguarded one of those is a way to walk the whole business's
+ * invoices from a browser console. An admin passes; a booker passes only for
+ * an order they took.
+ *
+ * Callers answer false the same way they answer a missing booking, so trying
+ * ids tells you nothing about which ones exist.
+ */
+export async function mayTouchBooking(bookingId: number): Promise<boolean> {
+  const user = await viewer();
+  if (!user) return false;
+  const mine = scopeBookerId(user);
+  if (mine == null) return true;
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { bookerId: true },
+  });
+  return booking?.bookerId === mine;
+}

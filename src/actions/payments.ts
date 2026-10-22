@@ -16,7 +16,7 @@ import {
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
-import { denyNonAdmin, viewer } from "@/lib/guard";
+import { denyNonAdmin, mayTouchBooking, viewer } from "@/lib/guard";
 import { currentUser, scopeBookerId } from "@/lib/session";
 
 function revalidateMoney() {
@@ -193,6 +193,7 @@ export async function getPaymentDetails(bookingId: number): Promise<{
   status: "unpaid" | "partial" | "paid";
 } | null> {
   if (!Number.isInteger(bookingId) || bookingId <= 0) return null;
+  if (!(await mayTouchBooking(bookingId))) return null;
   const balance = await getBookingBalance(bookingId);
   if (!balance) return null;
   return { payments: await getPayments(bookingId), ...balance };

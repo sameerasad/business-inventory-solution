@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getInvoice } from "@/lib/bookings";
 import { invoiceFileName, renderInvoicePdf } from "@/lib/invoice-pdf";
+import { mayTouchBooking } from "@/lib/guard";
 
 // The PDF is built from live data on every request, so a corrected price or a
 // cancelled booking is reflected immediately.
@@ -15,6 +16,13 @@ export async function GET(
   const bookingId = Number.parseInt(id, 10);
   if (!Number.isInteger(bookingId) || bookingId <= 0) {
     return new NextResponse("Invalid invoice id", { status: 400 });
+  }
+
+  // Signed in is not the same as entitled. Middleware proved somebody is on
+  // the inside; this decides whether this invoice is theirs to download.
+  // Answered as not-found so ids cannot be probed.
+  if (!(await mayTouchBooking(bookingId))) {
+    return new NextResponse("Invoice not found", { status: 404 });
   }
 
   const invoice = await getInvoice(bookingId);

@@ -20,7 +20,7 @@ import {
   type BookingLineInput,
   updateBookingSchema,
 } from "@/lib/validations";
-import { denyNonAdmin, viewer } from "@/lib/guard";
+import { denyNonAdmin, mayTouchBooking, viewer } from "@/lib/guard";
 import { currentUser, scopeBookerId } from "@/lib/session";
 
 /**
@@ -306,6 +306,7 @@ export async function createBookingAction(
  */
 export async function getInvoiceShareToken(bookingId: number): Promise<string | null> {
   if (!Number.isInteger(bookingId) || bookingId <= 0) return null;
+  if (!(await mayTouchBooking(bookingId))) return null;
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     select: { id: true, shareToken: true },

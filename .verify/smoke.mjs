@@ -137,6 +137,12 @@ await db.exec(`
 `);
 const userRows = await db.query("SELECT id, username FROM users WHERE username LIKE 'smoke\\_%'");
 const userId = (u) => userRows.rows.find((r) => r.username === u)?.id;
+const bookingRows = await db.query(
+  "SELECT id FROM bookings WHERE booker_id = $1 AND is_deleted = false ORDER BY id LIMIT 1",
+  [bookerId("Sample Booker")],
+);
+const SAMPLE_BOOKING = bookingRows.rows[0]?.id;
+
 const WORKING = sessionCookie(userId("smoke_working"));
 const OTHER = sessionCookie(userId("smoke_other"));
 const NOBODY = sessionCookie(userId("smoke_nobody"));
@@ -609,6 +615,25 @@ for (const pathname of ["/dashboard", "/sales", "/batches", "/products", "/booke
   // The half they do need.
   check("but still offers add shop", theirs.includes("Add shop"), "cannot add a shop");
   check("and add area", theirs.includes("Add area"), "cannot add an area");
+}
+
+{
+  // The invoice PDF takes a booking id straight off the URL. Signed in is not
+  // the same as entitled, and ids are small integers.
+  check("there is a sample booking to probe with", SAMPLE_BOOKING != null, SAMPLE_BOOKING);
+
+  const own = await get(`/api/invoices/${SAMPLE_BOOKING}`, WORKING);
+  check("a booker can download their own invoice", own.status === 200, own.status);
+
+  const other = await get(`/api/invoices/${SAMPLE_BOOKING}`, OTHER);
+  check(
+    "but not another booker's",
+    other.status === 404,
+    `got ${other.status}, wanted 404`,
+  );
+
+  const owner = await get(`/api/invoices/${SAMPLE_BOOKING}`, COOKIE);
+  check("and the owner can download any of them", owner.status === 200, owner.status);
 }
 
 {
