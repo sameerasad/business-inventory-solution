@@ -15,6 +15,8 @@ import {
   type ActionState,
   updateBatchSchema,
 } from "@/lib/validations";
+import { denyNonAdmin } from "@/lib/guard";
+import { currentUser } from "@/lib/session";
 
 function revalidateInventory() {
   revalidatePath("/batches");
@@ -35,6 +37,9 @@ export async function createBatchAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = createBatchSchema.safeParse({
     productId: formData.get("productId") ?? "",
     quantity: formData.get("quantity") ?? "",
@@ -79,7 +84,7 @@ export async function createBatchAction(
           receivedDate: parseDateOnly(input.receivedDate),
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
-          createdBy: currentActor(),
+          createdBy: currentActor(await currentUser()),
         },
         select: { id: true },
       });
@@ -123,6 +128,9 @@ export async function softDeleteBatchAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = softDeleteSchema.safeParse({
     id: formData.get("id") ?? "",
     reason: formData.get("reason") ?? undefined,
@@ -180,6 +188,9 @@ export async function updateBatchAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = updateBatchSchema.safeParse({
     id: formData.get("id") ?? "",
     quantity: formData.get("quantity") ?? "",
@@ -287,6 +298,9 @@ export async function updateBatchCostAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const id = Number.parseInt(String(formData.get("id") ?? ""), 10);
   const unitCost = Number(String(formData.get("unitCost") ?? ""));
 

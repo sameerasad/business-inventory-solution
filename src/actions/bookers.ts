@@ -15,6 +15,7 @@ import {
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
+import { denyNonAdmin } from "@/lib/guard";
 
 function revalidateBookers() {
   revalidatePath("/bookers");
@@ -28,6 +29,9 @@ export async function createBookerAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = createBookerSchema.safeParse({
     name: formData.get("name") ?? "",
     code: formData.get("code") ?? undefined,
@@ -91,6 +95,9 @@ export async function updateBookerAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = updateBookerSchema.safeParse({
     id: formData.get("id") ?? "",
     name: formData.get("name") ?? "",
@@ -138,6 +145,9 @@ export async function toggleBookerActiveAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
 
@@ -169,6 +179,9 @@ export async function deleteBookerAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
   const { id } = parsed.data;
@@ -213,6 +226,9 @@ export async function setBookerAreasAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = setBookerAreasSchema.safeParse({
     bookerId: formData.get("bookerId") ?? "",
     areaIds: formData.get("areaIds") ?? "",

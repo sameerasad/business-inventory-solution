@@ -16,6 +16,8 @@ import {
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
+import { denyNonAdmin, viewer } from "@/lib/guard";
+import { currentUser, scopeBookerId } from "@/lib/session";
 
 function revalidateMoney() {
   revalidatePath("/bookings");
@@ -65,9 +67,17 @@ export async function recordPaymentAction(
 
   const booking = await prisma.booking.findUnique({
     where: { id: input.bookingId },
-    select: { id: true, invoiceNo: true, isDeleted: true },
+    select: { id: true, invoiceNo: true, isDeleted: true, bookerId: true },
   });
   if (!booking) return failure("Booking not found.");
+
+  // Money against somebody else's invoice. Answered the same way as a missing
+  // booking on purpose: a different message here would let a booker discover
+  // which invoice numbers exist by trying them.
+  const user = await viewer();
+  if (!user) return failure("You are not signed in.");
+  const mine = scopeBookerId(user);
+  if (mine != null && booking.bookerId !== mine) return failure("Booking not found.");
   if (booking.isDeleted) {
     return failure(`${booking.invoiceNo} is cancelled, so no payment can be recorded against it.`);
   }
@@ -94,7 +104,7 @@ export async function recordPaymentAction(
           method: input.method,
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
-          createdBy: currentActor(),
+          createdBy: currentActor(await currentUser()),
         },
         select: { id: true },
       });
@@ -141,6 +151,9 @@ export async function deletePaymentAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = softDeleteSchema.safeParse({
     id: formData.get("id") ?? "",
     reason: formData.get("reason") ?? undefined,
@@ -201,6 +214,9 @@ export async function updatePaymentAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = updatePaymentSchema.safeParse({
     id: formData.get("id") ?? "",
     amount: formData.get("amount") ?? "",

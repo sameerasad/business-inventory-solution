@@ -36,9 +36,19 @@ type AreaBooker = { id: number; name: string; isActive: boolean };
 export function AreaManager({
   areas,
   bookersByArea,
+  canManage = true,
 }: {
   areas: AreaWithShops[];
   bookersByArea: Map<number, AreaBooker[]>;
+  /**
+   * Whether existing areas and shops can be renamed or removed.
+   *
+   * False for a booker. They need to ADD a shop - a new customer on a round is
+   * the whole reason this page is open to them - but renaming one silently
+   * renames it on every invoice already sent, and deleting an area is a thing
+   * the owner should do deliberately or not at all.
+   */
+  canManage?: boolean;
 }) {
   return (
     <div className="space-y-5">
@@ -60,7 +70,12 @@ export function AreaManager({
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {areas.map((area) => (
-            <AreaCard key={area.id} area={area} bookers={bookersByArea.get(area.id) ?? []} />
+            <AreaCard
+              key={area.id}
+              area={area}
+              bookers={bookersByArea.get(area.id) ?? []}
+              canManage={canManage}
+            />
           ))}
         </div>
       )}
@@ -68,7 +83,15 @@ export function AreaManager({
   );
 }
 
-function AreaCard({ area, bookers }: { area: AreaWithShops; bookers: AreaBooker[] }) {
+function AreaCard({
+  area,
+  bookers,
+  canManage,
+}: {
+  area: AreaWithShops;
+  bookers: AreaBooker[];
+  canManage: boolean;
+}) {
   const [renaming, setRenaming] = useState(false);
 
   return (
@@ -101,7 +124,7 @@ function AreaCard({ area, bookers }: { area: AreaWithShops; bookers: AreaBooker[
             </div>
           )}
 
-          {!renaming ? (
+          {!renaming && canManage ? (
             <div className="flex shrink-0 items-center gap-1">
               <Button variant="ghost" size="sm" onClick={() => setRenaming(true)}>
                 <Pencil className="h-3.5 w-3.5" />
@@ -126,7 +149,7 @@ function AreaCard({ area, bookers }: { area: AreaWithShops; bookers: AreaBooker[
           ) : (
             <ul className="space-y-1.5">
               {area.shops.map((shop) => (
-                <ShopRow key={shop.id} shop={shop} />
+                <ShopRow key={shop.id} shop={shop} canManage={canManage} />
               ))}
             </ul>
           )}
@@ -149,7 +172,9 @@ function AreaCard({ area, bookers }: { area: AreaWithShops; bookers: AreaBooker[
 
 function ShopRow({
   shop,
+  canManage,
 }: {
+  canManage: boolean;
   shop: {
     id: number;
     name: string;
@@ -200,24 +225,26 @@ function ShopRow({
           </span>
         ) : null}
       </span>
-      <span className="flex shrink-0 items-center gap-0.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setRenaming(true)}
-          aria-label={`Rename ${shop.name}`}
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
-        <DeleteButton
-          action={deleteShopAction}
-          id={shop.id}
-          label={`Delete shop ${shop.name}`}
-          disabled={shop.salesCount > 0}
-          disabledReason={`${shop.salesCount} sale(s) recorded here`}
-          iconOnly
-        />
-      </span>
+      {canManage ? (
+        <span className="flex shrink-0 items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setRenaming(true)}
+            aria-label={`Rename ${shop.name}`}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <DeleteButton
+            action={deleteShopAction}
+            id={shop.id}
+            label={`Delete shop ${shop.name}`}
+            disabled={shop.salesCount > 0}
+            disabledReason={`${shop.salesCount} sale(s) recorded here`}
+            iconOnly
+          />
+        </span>
+      ) : null}
     </li>
   );
 }

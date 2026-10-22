@@ -17,6 +17,7 @@ import {
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
+import { denyNonAdmin } from "@/lib/guard";
 
 function revalidateGeography() {
   revalidatePath("/areas");
@@ -149,6 +150,9 @@ export async function renameAreaAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = updateAreaSchema.safeParse({
     id: formData.get("id") ?? "",
     name: formData.get("name") ?? "",
@@ -187,6 +191,9 @@ export async function deleteAreaAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
   const { id } = parsed.data;
@@ -424,6 +431,9 @@ export async function renameShopAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = updateShopSchema.safeParse({
     id: formData.get("id") ?? "",
     name: formData.get("name") ?? "",
@@ -460,6 +470,9 @@ export async function deleteShopAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
   const { id } = parsed.data;

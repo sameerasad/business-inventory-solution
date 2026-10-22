@@ -23,6 +23,7 @@ import { currentYear } from "@/lib/dates";
 import { getBookerPerformance, getUnassignedAreas, getUncoveredAreas } from "@/lib/bookers";
 import { getCashYears } from "@/lib/recognition";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Bookers" };
 export const dynamic = "force-dynamic";
@@ -49,6 +50,9 @@ export default async function BookersPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Cost and profit are on this page. A booker is sent to their own.
+  await requireAdmin();
+
   const sp = await searchParams;
   const yearParam = parseId(first(sp.year));
   const areaParam = first(sp.area);

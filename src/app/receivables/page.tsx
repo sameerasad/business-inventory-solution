@@ -23,6 +23,7 @@ import {
 import { dateOnly, money } from "@/lib/format";
 import { getReceivables, type AgeFilter } from "@/lib/bookings";
 import { prisma } from "@/lib/db";
+import { requireUser, scopeBookerId } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Receivables" };
 export const dynamic = "force-dynamic";
@@ -43,6 +44,10 @@ export default async function ReceivablesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const user = await requireUser();
+  // What this booker is owed, not what the business is owed.
+  const mine = scopeBookerId(user);
+
   const sp = await searchParams;
   const areaParam = first(sp.area);
   const bookerParam = first(sp.booker);
@@ -69,7 +74,7 @@ export default async function ReceivablesPage({
     }),
     getReceivables({
       areaId: Number.isInteger(areaId) && areaId! > 0 ? areaId : null,
-      bookerId: Number.isInteger(bookerId) && bookerId! > 0 ? bookerId : null,
+      bookerId: mine ?? (Number.isInteger(bookerId) && bookerId! > 0 ? bookerId : null),
       age,
       q: q || null,
     }),
@@ -93,15 +98,20 @@ export default async function ReceivablesPage({
       width: "w-[200px]",
       options: areas.map((a) => ({ value: String(a.id), label: a.name })),
     },
-    {
-      kind: "select",
-      key: "booker",
-      label: "Booker",
-      value: bookerParam ?? "all",
-      allLabel: "All bookers",
-      width: "w-[180px]",
-      options: bookers.map((b) => ({ value: String(b.id), label: b.name })),
-    },
+    // Dropped for a booker: every option returns the same rows.
+    ...(mine != null
+      ? []
+      : [
+          {
+            kind: "select" as const,
+            key: "booker",
+            label: "Booker",
+            value: bookerParam ?? "all",
+            allLabel: "All bookers",
+            width: "w-[180px]",
+            options: bookers.map((b) => ({ value: String(b.id), label: b.name })),
+          },
+        ]),
     {
       kind: "select",
       key: "age",
@@ -240,6 +250,7 @@ export default async function ReceivablesPage({
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1.5">
                       <PaymentDialog
+                        canAmend={mine == null}
                         bookingId={row.id}
                         invoiceNo={row.invoiceNo}
                         total={row.total}

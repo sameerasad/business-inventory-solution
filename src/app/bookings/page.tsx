@@ -32,6 +32,7 @@ import { getBookingList, type PaymentStatusFilter } from "@/lib/bookings";
 import { readPageSize } from "@/lib/lists";
 import { prisma } from "@/lib/db";
 import { getAreasWithShops } from "@/lib/queries";
+import { requireUser, scopeBookerId } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Bookings" };
 export const dynamic = "force-dynamic";
@@ -51,6 +52,11 @@ export default async function BookingsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const user = await requireUser();
+  // A booker sees the orders they took, and no others. Forced here rather than
+  // defaulted into the filter: a filter is something the URL can change.
+  const mine = scopeBookerId(user);
+
   const sp = await searchParams;
   const fromParam = first(sp.from);
   const toParam = first(sp.to);
@@ -88,7 +94,7 @@ export default async function BookingsPage({
       to: invalidRange ? null : to,
       areaId: parseId(areaParam),
       shopId: parseId(shopParam),
-      bookerId: parseId(bookerParam),
+      bookerId: mine ?? parseId(bookerParam),
       status,
       q: q || null,
       page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1,
@@ -138,15 +144,21 @@ export default async function BookingsPage({
       width: "w-[200px]",
       options: shopOptions,
     },
-    {
-      kind: "select",
-      key: "booker",
-      label: "Booker",
-      value: bookerParam ?? "all",
-      allLabel: "All bookers",
-      width: "w-[180px]",
-      options: bookers.map((b) => ({ value: String(b.id), label: b.name })),
-    },
+    // Dropped for a booker: a control whose every option returns the same
+    // rows reads as broken.
+    ...(mine != null
+      ? []
+      : [
+          {
+            kind: "select" as const,
+            key: "booker",
+            label: "Booker",
+            value: bookerParam ?? "all",
+            allLabel: "All bookers",
+            width: "w-[180px]",
+            options: bookers.map((b) => ({ value: String(b.id), label: b.name })),
+          },
+        ]),
     {
       kind: "select",
       key: "status",
@@ -169,7 +181,7 @@ export default async function BookingsPage({
         description="Orders taken by a booker. Each one recorded its own sales and drew stock down automatically, so these figures are the same ones the dashboard uses."
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <BulkClearDialog />
+            {mine == null ? <BulkClearDialog /> : null}
             <Button asChild>
               <Link href="/bookings/new">New booking</Link>
             </Button>
@@ -191,13 +203,18 @@ export default async function BookingsPage({
         </Alert>
       ) : null}
 
-      <div className="mb-4 grid gap-4 sm:grid-cols-3">
+      {/* Margin is the owner's business. A booker negotiating a price must
+          not be able to read what the stock cost, which two of these three
+          figures would hand them. */}
+      <div className={cn("mb-4 grid gap-4", mine == null ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
         <Tile label="Booked value (filtered)" value={money(list.totals.revenue)} />
-        <Tile
-          label="Profit (filtered)"
-          value={money(list.totals.profit)}
-          tone={list.totals.profit < 0 ? "loss" : "gain"}
-        />
+        {mine == null ? (
+          <Tile
+            label="Profit (filtered)"
+            value={money(list.totals.profit)}
+            tone={list.totals.profit < 0 ? "loss" : "gain"}
+          />
+        ) : null}
         <Tile label="Collected (filtered)" value={money(list.totals.collected)} tone="gain" />
       </div>
 
@@ -213,7 +230,7 @@ export default async function BookingsPage({
               <TableHead className="text-right">Lines</TableHead>
               <TableHead className="text-right">Units</TableHead>
               <TableHead className="text-right">Total</TableHead>
-              <TableHead className="text-right">Profit</TableHead>
+              {mine == null ? <TableHead className="text-right">Profit</TableHead> : null}
               <TableHead className="text-right">Paid</TableHead>
               <TableHead className="text-right">Balance</TableHead>
               <TableHead>Status</TableHead>
@@ -225,7 +242,10 @@ export default async function BookingsPage({
           <TableBody>
             {list.rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={16} className="py-10 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={mine == null ? 16 : 15}
+                  className="py-10 text-center text-muted-foreground"
+                >
                   No bookings match these filters.{" "}
                   <Link href="/bookings/new" className="underline">
                     Take a booking
@@ -256,12 +276,14 @@ export default async function BookingsPage({
                   </TableCell>
                   <TableCell className="num text-right">{qty(row.units)}</TableCell>
                   <TableCell className="num text-right font-medium">{money(row.total)}</TableCell>
-                  <TableCell
-                    className="num text-right font-medium"
-                    style={{ color: row.profit < 0 ? "#d03b3b" : "#006300" }}
-                  >
-                    {money(row.profit)}
-                  </TableCell>
+                  {mine == null ? (
+                    <TableCell
+                      className="num text-right font-medium"
+                      style={{ color: row.profit < 0 ? "#d03b3b" : "#006300" }}
+                    >
+                      {money(row.profit)}
+                    </TableCell>
+                  ) : null}
                   <TableCell className="num text-right" style={{ color: "#006300" }}>
                     {money(row.paid)}
                   </TableCell>
@@ -289,6 +311,7 @@ export default async function BookingsPage({
                         PDF
                       </a>
                       <PaymentDialog
+                        canAmend={mine == null}
                         bookingId={row.id}
                         invoiceNo={row.invoiceNo}
                         total={row.total}
@@ -304,28 +327,36 @@ export default async function BookingsPage({
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-0.5">
-                      <EditBookingDialog
-                        booking={{
-                          id: row.id,
-                          invoiceNo: row.invoiceNo,
-                          customerName: row.customerName,
-                          customerPhone: row.customerPhone,
-                          areaId: row.areaId,
-                          shopId: row.shopId,
-                          bookerId: row.bookerId,
-                          bookingDate: dateOnly(row.bookingDate),
-                          notes: row.notes,
-                        }}
-                        areas={areasWithShops}
-                        bookers={bookers}
-                      />
-                      <SoftDeleteButton
-                        action={softDeleteBookingAction}
-                        id={row.id}
-                        title={`Cancel ${row.invoiceNo}`}
-                        description={`${row.customerName ?? "Walk-in customer"}, ${qty(row.units)} unit(s), ${money(row.total)}. All ${row.units} unit(s) go back to the batches they came from and the sales stop counting. The booking is kept so the invoice number is never reused.`}
-                        confirmLabel="Cancel booking"
-                      />
+                      {/* A booker records orders; changing or cancelling one
+                          after the fact is the owner's call. The actions are
+                          refused server-side too - this only stops drawing a
+                          button that would fail. */}
+                      {mine == null ? (
+                        <>
+                        <EditBookingDialog
+                          booking={{
+                            id: row.id,
+                            invoiceNo: row.invoiceNo,
+                            customerName: row.customerName,
+                            customerPhone: row.customerPhone,
+                            areaId: row.areaId,
+                            shopId: row.shopId,
+                            bookerId: row.bookerId,
+                            bookingDate: dateOnly(row.bookingDate),
+                            notes: row.notes,
+                          }}
+                          areas={areasWithShops}
+                          bookers={bookers}
+                        />
+                        <SoftDeleteButton
+                          action={softDeleteBookingAction}
+                          id={row.id}
+                          title={`Cancel ${row.invoiceNo}`}
+                          description={`${row.customerName ?? "Walk-in customer"}, ${qty(row.units)} unit(s), ${money(row.total)}. All ${row.units} unit(s) go back to the batches they came from and the sales stop counting. The booking is kept so the invoice number is never reused.`}
+                          confirmLabel="Cancel booking"
+                        />
+                        </>
+                      ) : null}
                     </div>
                   </TableCell>
                 </TableRow>

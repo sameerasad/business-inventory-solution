@@ -40,11 +40,11 @@ export default async function LoginPage({
              forgot the environment variables looks exactly like a forgotten
              password otherwise, and that is an hour of the wrong search. */
           <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm">
-            <p className="font-medium text-destructive">No password is set on this server.</p>
+            <p className="font-medium text-destructive">This server cannot sign anyone in.</p>
             <p className="text-muted-foreground">
-              Set <code className="font-mono text-xs">AUTH_PASSWORD</code> and{" "}
-              <code className="font-mono text-xs">AUTH_SECRET</code> in the environment, then
-              deploy again. Nobody can sign in until both are there.
+              <code className="font-mono text-xs">AUTH_SECRET</code> is missing from the
+              environment. It signs the session cookie, and without it a sign-in cannot be
+              remembered. Set it and deploy again.
             </p>
           </div>
         )}

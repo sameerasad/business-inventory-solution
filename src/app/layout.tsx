@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import "./globals.css";
-import { NavActions, NavTabs } from "@/components/site-nav";
+import { NavActions, NavTabs, type NavRole } from "@/components/site-nav";
 import { AppChrome } from "@/components/app-chrome";
 import { VoiceLauncher } from "@/components/voice/voice-launcher";
 import { groqConfigured } from "@/lib/voice/transcribe";
 import { business, businessInitials } from "@/lib/business";
+import { currentUser } from "@/lib/session";
 
 const { name: BUSINESS } = business();
 
@@ -25,13 +26,13 @@ export const metadata: Metadata = {
  * them, and a squeezed nav is where links go missing. Sticky, because the
  * tables below are long.
  */
-function Header() {
+function Header({ who }: { who: NavRole }) {
   return (
     <header className="sticky top-0 z-40 border-b bg-card/90 backdrop-blur supports-[backdrop-filter]:bg-card/75">
       <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
         <div className="flex h-14 items-center gap-3">
           <Link
-            href="/dashboard"
+            href={who.admin ? "/dashboard" : "/my"}
             className="flex min-w-0 shrink items-center gap-2.5 rounded-md py-1 transition-opacity hover:opacity-80"
           >
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary text-[11px] font-bold tracking-tight text-primary-foreground">
@@ -48,11 +49,11 @@ function Header() {
           </Link>
 
           <div className="ml-auto shrink-0">
-            <NavActions />
+            <NavActions who={who} />
           </div>
         </div>
 
-        <NavTabs />
+        <NavTabs who={who} />
       </div>
     </header>
   );
@@ -67,7 +68,16 @@ function Footer() {
   );
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Read once here and handed down. The nav is a client component and cannot
+  // ask the database itself; passing the answer in also means one lookup for
+  // the whole render rather than one per link.
+  const user = await currentUser();
+  const who: NavRole = {
+    admin: user?.role === "admin",
+    isBooker: user?.bookerId != null,
+  };
+
   return (
     // suppressHydrationWarning covers attributes on THIS element only, not the
     // tree below it. Browser extensions (page rulers, dark-mode injectors,
@@ -84,7 +94,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             only looks at environment variables, so calling it in the layout
             costs nothing and does not make the layout async. */}
         <AppChrome
-          header={<Header />}
+          header={<Header who={who} />}
           voice={<VoiceLauncher whisperAvailable={groqConfigured()} />}
           footer={<Footer />}
         >

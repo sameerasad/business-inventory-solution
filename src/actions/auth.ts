@@ -3,49 +3,82 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { SESSION_COOKIE, authConfigured, newSession, passwordMatches } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import {
+  EMERGENCY_USER_ID,
+  SESSION_COOKIE,
+  authConfigured,
+  emergencyPassword,
+  newSession,
+  passwordMatchesHash,
+  sameString,
+} from "@/lib/auth";
 import { failure, type ActionState } from "@/lib/validations";
 
 /**
  * A wrong password should cost something.
  *
  * There is no store to count attempts in, so this is not a rate limit - it is
- * a floor on how fast a wrong guess can be tried. At roughly three a second
- * instead of hundreds, guessing an ordinary password stops being a thing
- * somebody does idly from a browser tab.
+ * a floor on how fast a wrong guess can be tried. PBKDF2 already spends real
+ * time on every attempt; this covers the paths that fail before it, so a
+ * username that does not exist cannot be told apart from one that does by how
+ * quickly it comes back.
  */
-const WRONG_PASSWORD_DELAY_MS = 350;
+const WRONG_DELAY_MS = 350;
 
 export async function signInAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   if (!authConfigured()) {
     return failure(
-      "This server has no password set. AUTH_PASSWORD and AUTH_SECRET have to be set in the environment before anyone can sign in.",
+      "This server has no AUTH_SECRET set, so nobody can sign in. It has to be set in the environment first.",
     );
   }
 
-  const given = String(formData.get("password") ?? "");
+  const username = String(formData.get("username") ?? "").trim().toLowerCase();
+  const password = String(formData.get("password") ?? "");
   const next = String(formData.get("next") ?? "");
 
-  if (!passwordMatches(given)) {
-    await new Promise((r) => setTimeout(r, WRONG_PASSWORD_DELAY_MS));
-    return failure("That password is not right.", { password: "Try again" });
+  const userId = await identify(username, password);
+  if (userId == null) {
+    await new Promise((r) => setTimeout(r, WRONG_DELAY_MS));
+    // One message for both halves. "No such user" tells somebody which
+    // usernames are real, which is the first thing worth knowing.
+    return failure("That username and password do not match.", { password: "Try again" });
   }
 
-  const session = await newSession();
+  const session = await newSession(userId);
   const jar = await cookies();
   jar.set(SESSION_COOKIE, session.value, {
     httpOnly: true,
     sameSite: "lax",
-    // Only over HTTPS in production; a plain-http localhost would never
-    // receive the cookie back otherwise.
+    // HTTPS only in production; a plain-http localhost would never get it back.
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: session.maxAge,
   });
 
-  // Only ever back into this app. A "next" that could be an absolute URL is
-  // an open redirect, and a login page is exactly where that gets used.
+  // Only ever back into this app. A "next" that could be an absolute URL is an
+  // open redirect, and a login page is exactly where one gets used.
   redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard");
+}
+
+/**
+ * Who this is, or null.
+ *
+ * The break-glass password is checked first and belongs to no row: it exists
+ * so a mistake in the users table - the last admin deactivated, a password
+ * lost - is something you recover from rather than a locked door.
+ */
+async function identify(username: string, password: string): Promise<number | null> {
+  const emergency = emergencyPassword();
+  if (emergency.length > 0 && sameString(password, emergency)) return EMERGENCY_USER_ID;
+
+  if (!username) return null;
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true, passwordHash: true, isActive: true },
+  });
+  if (!user || !user.isActive) return null;
+  return (await passwordMatchesHash(password, user.passwordHash)) ? user.id : null;
 }
 
 export async function signOutAction(): Promise<void> {

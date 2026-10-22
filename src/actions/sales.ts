@@ -16,6 +16,8 @@ import {
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
+import { denyNonAdmin, adminOnly } from "@/lib/guard";
+import { currentUser } from "@/lib/session";
 
 function revalidateSales() {
   revalidatePath("/sales");
@@ -27,6 +29,8 @@ function revalidateSales() {
 
 /** Called from the New Sale form when the selected product changes. */
 export async function fetchAvailableBatches(productId: number): Promise<AvailableBatch[]> {
+  await adminOnly();
+
   if (!Number.isInteger(productId) || productId <= 0) return [];
   return getAvailableBatchesForProduct(productId);
 }
@@ -48,6 +52,9 @@ export async function createSaleAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = createSaleSchema.safeParse({
     productId: formData.get("productId") ?? "",
     batchId: formData.get("batchId") ?? "",
@@ -146,7 +153,7 @@ export async function createSaleAction(
           saleDate: parseDateOnly(input.saleDate),
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
-          createdBy: currentActor(),
+          createdBy: currentActor(await currentUser()),
         },
         select: { id: true },
       });
@@ -222,6 +229,9 @@ export async function softDeleteSaleAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = softDeleteSchema.safeParse({
     id: formData.get("id") ?? "",
     reason: formData.get("reason") ?? undefined,
@@ -309,6 +319,9 @@ export async function updateSaleAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = updateSaleSchema.safeParse({
     id: formData.get("id") ?? "",
     batchId: formData.get("batchId") ?? "",

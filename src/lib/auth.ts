@@ -1,45 +1,94 @@
 /**
- * Who is allowed in.
+ * Who is allowed in, and what they are allowed to see.
  *
- * Until now anybody with the URL could do anything: add a booking, correct a
- * cost, or press "Clear all" and mark every invoice in the business as paid.
- * That was survivable while the address was only in one person's phone, and it
- * stopped being survivable the moment a button existed that rewrites the whole
- * receivables ledger in one press.
+ * Two roles. "admin" sees the whole business - cost, profit, every booker.
+ * "booker" sees their own areas, their own orders and never a margin, because
+ * a booker sits in front of shopkeepers all day and a known margin travels.
  *
- * One shared password, because there is one owner. Not a users table: that
- * needs a migration against production and buys nothing until a second person
- * actually logs in. When bookers get their own accounts, this is the file that
- * grows a lookup and currentActor() starts naming them.
+ * The session cookie carries the user id and nothing else about them. The role
+ * is read from the database on each request rather than carried in the token,
+ * which costs one indexed lookup and buys the thing that matters: demoting
+ * somebody takes effect now, instead of whenever their cookie happens to
+ * expire. A token that remembers an authority the database has taken away is
+ * the whole problem with putting roles in tokens.
  *
- * No library. The session is a timestamp with an HMAC over it, which is all a
- * single-password cookie needs, and Web Crypto is the only thing available in
- * middleware anyway - node:crypto does not run there.
+ * No library. PBKDF2 and HMAC come from Web Crypto, which is the only thing
+ * that runs in middleware anyway.
  */
 
-const COOKIE = "ibt_session";
-/** Long enough that a working day never ends with a login screen. */
+export type Role = "admin" | "booker";
+
+export const SESSION_COOKIE = "ibt_session";
+/** Long enough that a working day never ends at a login screen. */
 const DAYS = 30;
+/** Slow enough to make a stolen hash expensive, fast enough for a login. */
+const PBKDF2_ROUNDS = 120_000;
 
 function secret(): string {
   return (process.env.AUTH_SECRET ?? "").trim();
 }
 
-function password(): string {
+/**
+ * The break-glass password.
+ *
+ * Signs in as an admin with no row in the users table. It exists so a mistake
+ * in that table - the last admin deactivated, a password lost - is a thing you
+ * recover from rather than a locked door. Everyone else is a real user.
+ */
+export function emergencyPassword(): string {
   return (process.env.AUTH_PASSWORD ?? "").trim();
 }
 
-/**
- * Whether the server is able to authenticate anyone at all.
- *
- * Both are required, and a missing one locks the app rather than opening it.
- * An auth feature that fails open is not an auth feature; the login page says
- * plainly what is missing so a misconfigured deploy is five seconds to
- * diagnose instead of a mystery.
- */
+export const EMERGENCY_USER_ID = 0;
+
 export function authConfigured(): boolean {
-  return secret().length >= 16 && password().length > 0;
+  return secret().length >= 16;
 }
+
+/* ------------------------------------------------------------- passwords */
+
+function toHex(bytes: ArrayBuffer | Uint8Array): string {
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function pbkdf2(password: string, salt: string, rounds: number): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: rounds, hash: "SHA-256" },
+    key,
+    256,
+  );
+  return toHex(bits);
+}
+
+/** Stored as "rounds:salt:hash", so the cost can be raised later without a migration. */
+export async function hashPassword(password: string): Promise<string> {
+  const salt = toHex(crypto.getRandomValues(new Uint8Array(16)));
+  return `${PBKDF2_ROUNDS}:${salt}:${await pbkdf2(password, salt, PBKDF2_ROUNDS)}`;
+}
+
+export async function passwordMatchesHash(password: string, stored: string): Promise<boolean> {
+  const [roundsRaw, salt, want] = stored.split(":");
+  const rounds = Number.parseInt(roundsRaw ?? "", 10);
+  if (!Number.isInteger(rounds) || !salt || !want) return false;
+  return sameString(await pbkdf2(password, salt, rounds), want);
+}
+
+/** Compared to the end regardless, so the time taken says nothing. */
+export function sameString(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/* -------------------------------------------------------------- sessions */
 
 async function sign(value: string): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -49,42 +98,31 @@ async function sign(value: string): Promise<string> {
     false,
     ["sign"],
   );
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
-  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return toHex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
 }
 
-/** Compared byte by byte to the end, so the time taken says nothing. */
-function sameString(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-export function passwordMatches(given: string): boolean {
-  const want = password();
-  return want.length > 0 && sameString(given, want);
-}
-
-export const SESSION_COOKIE = COOKIE;
-
-export async function newSession(): Promise<{ value: string; maxAge: number }> {
-  const expires = Date.now() + DAYS * 86400_000;
-  const body = String(expires);
+export async function newSession(userId: number): Promise<{ value: string; maxAge: number }> {
+  const body = `${Date.now() + DAYS * 86400_000}:${userId}`;
   return { value: `${body}.${await sign(body)}`, maxAge: DAYS * 86400 };
 }
 
 /**
- * Is this cookie one we issued, and still valid?
+ * The user id inside a cookie we issued, or null.
  *
- * The expiry is inside the signed part, so a cookie cannot be kept alive by
+ * The expiry is part of what is signed, so a cookie cannot be kept alive by
  * editing it - changing the timestamp breaks the signature.
  */
-export async function sessionValid(cookie: string | undefined): Promise<boolean> {
-  if (!cookie || !authConfigured()) return false;
-  const [body, mac] = cookie.split(".");
-  if (!body || !mac) return false;
-  if (!sameString(mac, await sign(body))) return false;
-  const expires = Number.parseInt(body, 10);
-  return Number.isFinite(expires) && expires > Date.now();
+export async function sessionUserId(cookie: string | undefined): Promise<number | null> {
+  if (!cookie || !authConfigured()) return null;
+  const at = cookie.lastIndexOf(".");
+  if (at < 0) return null;
+  const body = cookie.slice(0, at);
+  const mac = cookie.slice(at + 1);
+  if (!sameString(mac, await sign(body))) return null;
+
+  const [expiresRaw, idRaw] = body.split(":");
+  const expires = Number.parseInt(expiresRaw ?? "", 10);
+  const id = Number.parseInt(idRaw ?? "", 10);
+  if (!Number.isFinite(expires) || expires <= Date.now()) return null;
+  return Number.isInteger(id) ? id : null;
 }

@@ -18,6 +18,19 @@ export function LoginForm({ next }: { next: string }) {
 
       {state.message && !state.ok ? <Alert tone="error">{state.message}</Alert> : null}
 
+      <Field label="Username" htmlFor="username" error={state.fieldErrors.username}>
+        <Input
+          id="username"
+          name="username"
+          autoComplete="username"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={isPending}
+          autoFocus
+        />
+      </Field>
+
       <Field label="Password" htmlFor="password" required error={state.fieldErrors.password}>
         <Input
           id="password"
@@ -31,7 +44,6 @@ export function LoginForm({ next }: { next: string }) {
           spellCheck={false}
           disabled={isPending}
           required
-          autoFocus
         />
       </Field>
 

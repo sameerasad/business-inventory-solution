@@ -13,7 +13,9 @@ import {
   Receipt,
   LogOut,
   Mic,
+  Target,
   ShoppingCart,
+  UserCog,
   Users,
   Wallet,
   type LucideIcon,
@@ -29,6 +31,17 @@ type NavLink = {
   /** Shown instead of `label` on narrow screens, where "New " is just noise. */
   short?: string;
   icon: LucideIcon;
+  /**
+   * Hidden from a booker.
+   *
+   * Everything marked here either shows what stock cost and what the business
+   * earned on it, or changes something only the owner should change. The pages
+   * themselves turn a booker away as well; this list only decides whether a
+   * link is drawn, and a link that would bounce is worse than no link.
+   */
+  admin?: true;
+  /** Only drawn for somebody who is a booker, or who is also one. */
+  booker?: true;
 };
 
 /**
@@ -41,21 +54,32 @@ type NavLink = {
  */
 const RECORD: NavLink[] = [
   { href: "/bookings/new", label: "New Booking", short: "Booking", icon: ClipboardList },
-  { href: "/sales/new", label: "New Sale", short: "Sale", icon: ShoppingCart },
-  { href: "/batches/new", label: "New Batch", short: "Batch", icon: PackagePlus },
+  { href: "/sales/new", label: "New Sale", short: "Sale", icon: ShoppingCart, admin: true },
+  { href: "/batches/new", label: "New Batch", short: "Batch", icon: PackagePlus, admin: true },
 ];
 
 const BROWSE: NavLink[] = [
-  { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
+  { href: "/dashboard", label: "Dashboard", icon: BarChart3, admin: true },
+  { href: "/my", label: "My Target", short: "Target", icon: Target, booker: true },
   { href: "/bookings", label: "Bookings", icon: FileText },
   { href: "/receivables", label: "Receivables", icon: Wallet },
-  { href: "/sales", label: "Sales", icon: Receipt },
-  { href: "/batches", label: "Batches", icon: Layers },
-  { href: "/products", label: "Products", icon: Boxes },
-  { href: "/bookers", label: "Bookers", icon: Users },
+  { href: "/sales", label: "Sales", icon: Receipt, admin: true },
+  { href: "/batches", label: "Batches", icon: Layers, admin: true },
+  { href: "/products", label: "Products", icon: Boxes, admin: true },
+  { href: "/bookers", label: "Bookers", icon: Users, admin: true },
+  { href: "/users", label: "Users", icon: UserCog, admin: true },
   { href: "/voice", label: "Voice", icon: Mic },
   { href: "/areas", label: "Areas & Shops", short: "Areas", icon: MapPin },
 ];
+
+/** Who the links are being drawn for. */
+export type NavRole = { admin: boolean; isBooker: boolean };
+
+function allowed(link: NavLink, who: NavRole): boolean {
+  if (link.admin && !who.admin) return false;
+  if (link.booker && !who.isBooker) return false;
+  return true;
+}
 
 /**
  * "/sales/new" must not also light up "/sales", so the create routes are matched
@@ -70,12 +94,12 @@ function useIsActive() {
 }
 
 /** The three create actions. Top row, right-aligned. */
-export function NavActions() {
+export function NavActions({ who }: { who: NavRole }) {
   const isActive = useIsActive();
 
   return (
     <div className="flex items-center gap-1.5" role="group" aria-label="Record">
-      {RECORD.map((link, index) => {
+      {RECORD.filter((link) => allowed(link, who)).map((link, index) => {
         const active = isActive(link.href);
         const Icon = link.icon;
         // New Booking is the one action taken dozens of times a day, so it is the
@@ -119,12 +143,12 @@ export function NavActions() {
  * flex-wrap, never overflow-x-auto: with this many tabs a scrolling row silently
  * hides the last few, which is indistinguishable from those pages not existing.
  */
-export function NavTabs() {
+export function NavTabs({ who }: { who: NavRole }) {
   const isActive = useIsActive();
 
   return (
     <nav className="-mb-px flex flex-wrap items-center gap-x-0.5" aria-label="Main">
-      {BROWSE.map((link) => {
+      {BROWSE.filter((link) => allowed(link, who)).map((link) => {
         const active = isActive(link.href);
         const Icon = link.icon;
         return (

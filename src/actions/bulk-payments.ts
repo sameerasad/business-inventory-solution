@@ -10,6 +10,8 @@ import { currentActor, writeAudit } from "@/lib/audit";
 import { parseDateOnly } from "@/lib/dates";
 import { getReceivables } from "@/lib/bookings";
 import { failure, success, type ActionState } from "@/lib/validations";
+import { denyNonAdmin, adminOnly } from "@/lib/guard";
+import { currentUser } from "@/lib/session";
 
 /**
  * Settling every outstanding invoice at once.
@@ -64,6 +66,8 @@ export type ClearancePreview = {
  * blast radius of the thing it is introducing.
  */
 export async function previewClearAllAction(): Promise<ClearancePreview> {
+  await adminOnly();
+
   const { rows } = await getReceivables();
   const owing = rows.filter((r) => r.balance > CENT);
   return {
@@ -78,6 +82,9 @@ export async function clearAllReceivablesAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const paidOn = String(formData.get("paidOn") ?? "").trim();
   const method = String(formData.get("method") ?? "").trim() || null;
   const confirmRaw = String(formData.get("confirmCount") ?? "").trim();
@@ -113,7 +120,7 @@ export async function clearAllReceivablesAction(
   const batchId = randomUUID();
   const date = parseDateOnly(paidOn);
   const total = owing.reduce((sum, r) => sum + r.balance, 0);
-  const actor = currentActor();
+  const actor = currentActor(await currentUser());
 
   try {
     await prisma.$transaction(
@@ -175,6 +182,8 @@ export type LastClearance = {
 
 /** The most recent bulk run that has not been undone, so it can be offered back. */
 export async function getLastClearance(): Promise<LastClearance | null> {
+  await adminOnly();
+
   const newest = await prisma.payment.findFirst({
     where: { isDeleted: false, idempotencyKey: { startsWith: `${BULK}:` } },
     orderBy: { createdAt: "desc" },
@@ -211,6 +220,9 @@ export async function undoClearanceAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const batchId = String(formData.get("batchId") ?? "").trim();
   if (!batchId) return failure("Nothing to undo.");
 
@@ -223,7 +235,7 @@ export async function undoClearanceAction(
   }
 
   const total = rows.reduce((sum, r) => sum + Number(r.amount), 0);
-  const actor = currentActor();
+  const actor = currentActor(await currentUser());
 
   try {
     await prisma.$transaction(

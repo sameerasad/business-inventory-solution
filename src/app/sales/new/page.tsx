@@ -6,11 +6,15 @@ import { SaleForm } from "@/components/forms/sale-form";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { getAreasWithShops, getProductOptions } from "@/lib/queries";
+import { requireAdmin } from "@/lib/session";
 
 export const metadata: Metadata = { title: "New Sale" };
 export const dynamic = "force-dynamic";
 
 export default async function NewSalePage() {
+  // Cost and profit are on this page. A booker is sent to their own.
+  await requireAdmin();
+
   const [products, areas] = await Promise.all([getProductOptions(), getAreasWithShops()]);
 
   const blocked =

@@ -36,6 +36,7 @@ import {
   getCashYears,
 } from "@/lib/recognition";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -60,6 +61,9 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Cost and profit are on this page. A booker is sent to their own.
+  await requireAdmin();
+
   const sp = await searchParams;
 
   const [years, categories, areaRows, bookerRows] = await Promise.all([

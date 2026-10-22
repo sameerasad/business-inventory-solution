@@ -45,7 +45,8 @@
     "verify:layout": "node .verify/verify-layout.mjs",
     "voice:learn": "tsx scripts/voice-learn.ts",
     "verify:bulkpay": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-bulk-payments.ts\"",
-    "verify:stock": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-stock-cover.ts\""
+    "verify:stock": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-stock-cover.ts\"",
+    "db:user": "tsx scripts/make-user.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

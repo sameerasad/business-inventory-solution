@@ -6,11 +6,15 @@ import { BatchForm } from "@/components/forms/batch-form";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { getProductOptions } from "@/lib/queries";
+import { requireAdmin } from "@/lib/session";
 
 export const metadata: Metadata = { title: "New Batch" };
 export const dynamic = "force-dynamic";
 
 export default async function NewBatchPage() {
+  // Cost and profit are on this page. A booker is sent to their own.
+  await requireAdmin();
+
   const products = await getProductOptions();
 
   return (

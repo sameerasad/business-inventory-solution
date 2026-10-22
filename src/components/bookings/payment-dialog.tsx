@@ -53,11 +53,21 @@ export function PaymentDialog({
   invoiceNo,
   total,
   paid,
+  canAmend = true,
 }: {
   bookingId: number;
   invoiceNo: string;
   total: number;
   paid: number;
+  /**
+   * Whether already-recorded payments can be corrected or reversed.
+   *
+   * False for a booker. Taking cash at a shop door is their job; quietly
+   * lowering a payment they wrote down an hour ago is how a shortfall gets
+   * tidied away, so a correction goes through the owner. Recording a new one
+   * is untouched - the list only ever grows.
+   */
+  canAmend?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState<Details>(null);
@@ -164,6 +174,8 @@ export function PaymentDialog({
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-0.5">
+                    {canAmend ? (
+                      <>
                     <EditPaymentButton
                       payment={{
                         id: p.id,
@@ -179,6 +191,8 @@ export function PaymentDialog({
                       onDone={load}
                     />
                     <ReversePaymentButton paymentId={p.id} onDone={load} />
+                      </>
+                    ) : null}
                   </span>
                 </li>
               ))}

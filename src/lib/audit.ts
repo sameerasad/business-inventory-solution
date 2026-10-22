@@ -7,8 +7,20 @@ import type { Prisma, PrismaClient } from "@prisma/client";
  * real logins, replace currentActor() with a session lookup and every existing
  * call site starts recording the real user with no other change.
  */
-export function currentActor(): string {
-  return process.env.DEFAULT_ACTOR?.trim() || "owner";
+/**
+ * Whose name goes on the audit row.
+ *
+ * Takes the signed-in person when there is one. Every action used to be
+ * recorded as "owner" whoever did it, which was honest while one person had
+ * the only password and becomes a lie the moment a booker signs in - and an
+ * audit trail that cannot say who is useless at exactly the moment money has
+ * gone missing.
+ *
+ * Still falls back, because jobs that nobody is signed in to - a script, the
+ * seed, a scheduled task - still write rows.
+ */
+export function currentActor(user?: { name?: string } | null): string {
+  return user?.name?.trim() || process.env.DEFAULT_ACTOR?.trim() || "owner";
 }
 
 export type AuditableEntity =
@@ -20,7 +32,9 @@ export type AuditableEntity =
   | "shop"
   | "booking"
   | "payment"
-  | "booker";
+  | "booker"
+  | "user"
+  | "booker_target";
 
 type Tx = Prisma.TransactionClient | PrismaClient;
 

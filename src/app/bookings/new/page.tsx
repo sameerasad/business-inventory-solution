@@ -8,16 +8,24 @@ import { Button } from "@/components/ui/button";
 import { getBookableProducts } from "@/lib/bookings";
 import { getAreasWithShops } from "@/lib/queries";
 import { getActiveBookers } from "@/lib/bookers";
+import { requireUser, scopeBookerId } from "@/lib/session";
 
 export const metadata: Metadata = { title: "New Booking" };
 export const dynamic = "force-dynamic";
 
 export default async function NewBookingPage() {
-  const [products, areas, bookers] = await Promise.all([
+  const user = await requireUser();
+  const mine = scopeBookerId(user);
+
+  const [products, areas, allBookers] = await Promise.all([
     getBookableProducts(),
     getAreasWithShops(),
     getActiveBookers(),
   ]);
+
+  // A booker is offered one name: their own. The server forces it anyway, so
+  // this is about not showing a choice that is not a choice.
+  const bookers = mine == null ? allBookers : allBookers.filter((b) => b.id === mine);
 
   const inStock = products.filter((p) => p.available > 0);
   const blocked = products.length === 0 ? "products" : areas.length === 0 ? "areas" : null;

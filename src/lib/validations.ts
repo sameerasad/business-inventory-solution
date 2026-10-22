@@ -550,3 +550,110 @@ export const updatePaymentSchema = z.object({
     .transform((v) => (v ? v : null)),
   notes: optionalNotes,
 });
+
+/* --------------------------------------------------------------- accounts */
+
+/**
+ * A username is typed on a phone, at a shop door, in a hurry.
+ *
+ * Lowercased and stripped of spaces rather than rejected for them: "Rizwan "
+ * and "rizwan" are the same person trying to sign in, and an account that
+ * refuses the obvious spelling of its own name is an account that generates a
+ * phone call.
+ */
+const username = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3, "Username must be at least 3 characters")
+  .max(32, "Username cannot exceed 32 characters")
+  .refine(
+    (v) => /^[a-z0-9][a-z0-9._-]*$/.test(v),
+    "Use letters, numbers, dot, dash or underscore, starting with a letter or number",
+  );
+
+/**
+ * Eight characters, and that is the whole rule.
+ *
+ * Complexity requirements on a password somebody else chooses for a booker
+ * produce one outcome: the password gets written on the inside of a till
+ * drawer. Length is the part that actually buys anything.
+ */
+const password = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(200, "Password is too long");
+
+const personName = z
+  .string()
+  .trim()
+  .min(1, "Name is required")
+  .max(120, "Name cannot exceed 120 characters");
+
+const role = z.enum(["admin", "booker"], { message: "Pick a role" });
+
+export const createUserSchema = z.object({
+  username,
+  name: personName,
+  password,
+  role,
+  /** The booker whose orders this account records. Optional for an admin. */
+  bookerId: optionalDbId,
+});
+
+/**
+ * Editing an account never touches the password.
+ *
+ * Changing somebody's name and resetting their password are different acts
+ * with different consequences, and a single form that does both quietly turns
+ * a typo fix into a lockout.
+ */
+export const updateUserSchema = z.object({
+  id: dbId("User"),
+  name: personName,
+  role,
+  bookerId: optionalDbId,
+  isActive: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v === "true" || v === "on" || v === "1"),
+});
+
+export const resetPasswordSchema = z.object({
+  id: dbId("User"),
+  password,
+});
+
+/**
+ * A monthly target, stored against the first of the month.
+ *
+ * Both figures are optional because a real target is often only one of them -
+ * "do thirty thousand" or "move four hundred packs" - and a zero standing in
+ * for "not set" would read on the booker's page as a target already met.
+ */
+export const setTargetSchema = z.object({
+  bookerId: dbId("Booker"),
+  /** YYYY-MM-DD; always normalised to the first of that month. */
+  month: dateOnlyString,
+  amount: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : null))
+    .refine(
+      (v) => v === null || /^\d+(\.\d{1,2})?$/.test(v),
+      "Amount must be a number with at most 2 decimals",
+    )
+    .transform((v) => (v === null ? null : Number.parseFloat(v)))
+    .refine((n) => n === null || (n >= 0 && n <= 1_000_000_000), "Amount is out of range"),
+  packs: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : null))
+    .refine((v) => v === null || /^\d+$/.test(v), "Packs must be a whole number")
+    .transform((v) => (v === null ? null : Number.parseInt(v, 10)))
+    .refine((n) => n === null || (n >= 0 && n <= 10_000_000), "Packs is out of range"),
+  notes: optionalNotes,
+});

@@ -24,6 +24,7 @@ import { dateOnly, money, qty } from "@/lib/format";
 import { isDateOnly } from "@/lib/dates";
 import { getBatchList, readPageSize, type BatchStatusFilter } from "@/lib/lists";
 import { getProductOptions } from "@/lib/queries";
+import { requireAdmin } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Batches" };
 export const dynamic = "force-dynamic";
@@ -37,6 +38,9 @@ export default async function BatchesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Cost and profit are on this page. A booker is sent to their own.
+  await requireAdmin();
+
   const sp = await searchParams;
   const productParam = first(sp.product);
   const statusParam = first(sp.status);

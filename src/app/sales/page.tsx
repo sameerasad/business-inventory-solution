@@ -26,6 +26,7 @@ import { isDateOnly } from "@/lib/dates";
 import { getSaleList, readPageSize, type SaleKindFilter } from "@/lib/lists";
 import { getAreasWithShops, getProductOptions } from "@/lib/queries";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Sales" };
 export const dynamic = "force-dynamic";
@@ -45,6 +46,9 @@ export default async function SalesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Cost and profit are on this page. A booker is sent to their own.
+  await requireAdmin();
+
   const sp = await searchParams;
   const fromParam = first(sp.from);
   const toParam = first(sp.to);

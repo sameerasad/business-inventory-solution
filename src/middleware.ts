@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { SESSION_COOKIE, authConfigured, sessionValid } from "@/lib/auth";
+import { SESSION_COOKIE, authConfigured, sessionUserId } from "@/lib/auth";
 
 /**
  * The gate.
@@ -36,8 +36,12 @@ async function guard(request: NextRequest, pathname: string, search: string) {
   // auth gate that fails open is decoration.
   if (!authConfigured()) return redirectToLogin(request, pathname, search);
 
-  const ok = await sessionValid(request.cookies.get(SESSION_COOKIE)?.value);
-  if (ok) return NextResponse.next();
+  // Signed in or not, and nothing more. Which ROLE they have is decided in
+  // the pages, where the database is - see lib/session.ts. Middleware runs on
+  // the edge with no database, and a gate that guesses at authority from a
+  // token keeps letting people through after that authority is taken away.
+  const id = await sessionUserId(request.cookies.get(SESSION_COOKIE)?.value);
+  if (id != null) return NextResponse.next();
 
   // An API call gets a status, not a login page: a fetch following a redirect
   // into HTML is a confusing failure to debug.

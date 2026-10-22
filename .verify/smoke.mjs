@@ -49,10 +49,17 @@ const env = {
   AUTH_PASSWORD,
 };
 
-function sessionCookie() {
-  const expires = String(Date.now() + 86400_000);
-  const mac = createHmac("sha256", AUTH_SECRET).update(expires).digest("hex");
-  return `ibt_session=${expires}.${mac}`;
+/**
+ * A session cookie for a given user id.
+ *
+ * The body is "expires:userId" and the whole of it is signed, which is what
+ * stops a booker editing their own id into an admin's. Id 0 is the break-glass
+ * owner: it belongs to no row, so it works before any account exists.
+ */
+function sessionCookie(userId = 0) {
+  const body = `${Date.now() + 86400_000}:${userId}`;
+  const mac = createHmac("sha256", AUTH_SECRET).update(body).digest("hex");
+  return `ibt_session=${body}.${mac}`;
 }
 const COOKIE = sessionCookie();
 
@@ -98,6 +105,41 @@ if (
   (await run("npx tsx --tsconfig .verify/tsconfig.verify.json .verify/sample-data.ts")) !== 0
 )
   process.exit(1);
+
+/**
+ * Three booker accounts, inserted straight into the database.
+ *
+ * One is linked to the booker the sample data attributed its bookings to; one
+ * to a booker with no bookings at all. The pair is the point: the first proves
+ * a booker still sees their own work, the second proves the scoping is a real
+ * filter rather than a no-op that happens to look right because there is only
+ * one booker in the database.
+ *
+ * The third is linked to no booker, which is the dangerous case - a null id
+ * read as "no filter" would hand them the whole business.
+ */
+await db.exec(`
+  INSERT INTO bookers (name, is_active, is_deleted, created_at, updated_at)
+  VALUES ('Smoke Other', true, false, now(), now())
+  ON CONFLICT DO NOTHING;
+`);
+const bookerRows = await db.query(
+  "SELECT id, name FROM bookers WHERE name IN ('Sample Booker', 'Smoke Other')",
+);
+const bookerId = (name) => bookerRows.rows.find((r) => r.name === name)?.id ?? null;
+await db.exec(`
+  INSERT INTO users (username, name, password_hash, role, booker_id, is_active, created_at, updated_at)
+  VALUES
+    ('smoke_working', 'Smoke Working', 'x', 'booker', ${bookerId("Sample Booker")}, true, now(), now()),
+    ('smoke_other',   'Smoke Other',   'x', 'booker', ${bookerId("Smoke Other")}, true, now(), now()),
+    ('smoke_nobody',  'Smoke Nobody',  'x', 'booker', NULL, true, now(), now())
+  ON CONFLICT (username) DO NOTHING;
+`);
+const userRows = await db.query("SELECT id, username FROM users WHERE username LIKE 'smoke\\_%'");
+const userId = (u) => userRows.rows.find((r) => r.username === u)?.id;
+const WORKING = sessionCookie(userId("smoke_working"));
+const OTHER = sessionCookie(userId("smoke_other"));
+const NOBODY = sessionCookie(userId("smoke_nobody"));
 
 console.log("\nstarting next server...");
 const app = spawn(`npx next start --port ${APP_PORT}`, {
@@ -151,6 +193,7 @@ const NAV_LINKS = [
   "/batches",
   "/products",
   "/bookers",
+  "/users",
   "/voice",
   "/areas",
 ].map((href) => `href="${href}"`);
@@ -425,9 +468,9 @@ const bare = (pathname, init) => fetch(`http://127.0.0.1:${APP_PORT}${pathname}`
   // Correctly signed, but the expiry inside it has passed. The expiry is part
   // of what is signed, so this is the only way to have a valid signature on a
   // dead session.
-  const expires = String(Date.now() - 1000);
-  const mac = createHmac("sha256", AUTH_SECRET).update(expires).digest("hex");
-  const res = await bare("/dashboard", { headers: { cookie: `ibt_session=${expires}.${mac}` } });
+  const body = `${Date.now() - 1000}:0`;
+  const mac = createHmac("sha256", AUTH_SECRET).update(body).digest("hex");
+  const res = await bare("/dashboard", { headers: { cookie: `ibt_session=${body}.${mac}` } });
   check("an expired cookie is refused", res.status !== 200, res.status);
 }
 
@@ -452,6 +495,137 @@ const bare = (pathname, init) => fetch(`http://127.0.0.1:${APP_PORT}${pathname}`
     res.status,
   );
   check("and an unknown token is simply not found", res.status === 404, res.status);
+}
+
+/* ------------------------------------------------------------------ roles */
+/**
+ * What a booker can and cannot reach.
+ *
+ * Checked over HTTP against the real server rather than by calling the guard
+ * helpers, because the question is not "does the helper return false" - it is
+ * "can this person get the page". Those are the same thing right up until
+ * somebody adds a route and forgets the guard.
+ */
+console.log("\n=== roles ===");
+
+const get = (pathname, cookie) =>
+  fetch(`http://127.0.0.1:${APP_PORT}${pathname}`, { redirect: "manual", headers: { cookie } });
+
+// Everything that shows what stock cost, what it earned, or changes the shape
+// of the business.
+for (const pathname of [
+  "/dashboard",
+  "/sales",
+  "/sales/new",
+  "/batches",
+  "/batches/new",
+  "/products",
+  "/bookers",
+  "/users",
+]) {
+  const res = await get(pathname, WORKING);
+  const to = res.headers.get("location") ?? "";
+  check(
+    `a booker is turned away from ${pathname}`,
+    (res.status === 307 || res.status === 302) && to.includes("/my"),
+    `${res.status} -> ${to}`,
+  );
+}
+
+// ...and the same pages still open for the owner.
+for (const pathname of ["/dashboard", "/sales", "/batches", "/products", "/bookers", "/users"]) {
+  const res = await get(pathname, COOKIE);
+  check(`an admin still reaches ${pathname}`, res.status === 200, res.status);
+}
+
+/**
+ * The other half of every check below it.
+ *
+ * "The booker's page does not contain X" passes just as happily when nothing
+ * renders X at all - a renamed class, a dialog that only mounts on click - and
+ * then it is a test of a typo rather than of the gate. These assert the same
+ * markers ARE on the admin's copy of the same page, so the absence below means
+ * something.
+ */
+{
+  const res = await get("/bookings", COOKIE);
+  const html = await res.text();
+  check("the admin's bookings page does carry a profit column", html.includes(">Profit</th>"));
+  check("and a profit total", html.includes("Profit (filtered)"));
+  check("and a cancel control", html.includes("Cancel booking"));
+  check("and invoices to find", html.includes("INV-"));
+}
+
+{
+  const res = await get("/bookings", WORKING);
+  const html = await res.text();
+  check("a booker reaches the bookings page", res.status === 200, res.status);
+  // The margin on every line is on this page for an admin. It is the one
+  // figure a booker negotiating a price must not be able to read.
+  check("and it carries no profit column", !html.includes(">Profit</th>"), "profit header present");
+  check("and no profit total", !html.includes("Profit (filtered)"), "profit tile present");
+  // A booker cannot change or cancel an order after the fact.
+  check("and no cancel button", !html.includes("Cancel booking"), "cancel present");
+  // Their own orders ARE there: scoping that shows nothing is not scoping.
+  check("but their own invoices are", html.includes("INV-"), "no invoices at all");
+}
+
+{
+  const res = await get("/bookings", OTHER);
+  const html = await res.text();
+  check("a booker with no orders reaches the page", res.status === 200, res.status);
+  check(
+    "and sees none of the other booker's invoices",
+    !html.includes("INV-"),
+    "another booker's invoices leaked",
+  );
+}
+
+{
+  const res = await get("/bookings", NOBODY);
+  const html = await res.text();
+  // The one that matters: a null booker id read as "no filter" would show the
+  // whole business to an account linked to nobody.
+  check(
+    "an account linked to no booker sees nothing, not everything",
+    res.status === 200 && !html.includes("INV-"),
+    String(res.status),
+  );
+}
+
+{
+  // A booker needs to add the shop they just walked into. They must not be
+  // able to rename one, which would silently rename it on every invoice
+  // already sent, or delete an area.
+  const mine = await get("/areas", WORKING);
+  const theirs = await mine.text();
+  const owner = await get("/areas", COOKIE);
+  const all = await owner.text();
+
+  check("the admin's areas page offers rename", all.includes(">Rename<"));
+  check("and delete", all.includes("Delete area"));
+  check("a booker's does not offer rename", !theirs.includes(">Rename<"), "rename offered");
+  check("nor delete", !theirs.includes("Delete area"), "delete offered");
+  // The half they do need.
+  check("but still offers add shop", theirs.includes("Add shop"), "cannot add a shop");
+  check("and add area", theirs.includes("Add area"), "cannot add an area");
+}
+
+{
+  const res = await get("/", WORKING);
+  check(
+    "the front door sends a booker to their own page",
+    (res.headers.get("location") ?? "").includes("/my"),
+    res.headers.get("location"),
+  );
+}
+
+{
+  const res = await get("/my", WORKING);
+  const html = await res.text();
+  check("a booker's own page renders", res.status === 200, res.status);
+  check("and it shows a target", html.includes("Booked value"), "no target panel");
+  check("and draws no dashboard link", !html.includes('href="/dashboard"'), "dashboard link drawn");
 }
 
 if (/Error|error:/i.test(appLog) && !/Compiled|ready/i.test(appLog)) {

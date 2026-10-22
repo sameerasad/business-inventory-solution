@@ -8,6 +8,35 @@ import { buildPrompt, groqConfigured, transcribeWithGroq } from "@/lib/voice/tra
 import { speechVocabulary } from "@/lib/voice/names";
 import { enrich } from "@/lib/voice/enrich";
 import { logVoiceAttempt, markVoiceAttemptSaved } from "@/lib/voice/log";
+import { currentUser, scopeBookerId } from "@/lib/session";
+
+/**
+ * The answer a booker gets to a question about the business.
+ *
+ * Every figure the voice panel can report - revenue, profit, the biggest shop -
+ * is the whole business's, not one booker's. Rather than read those out to
+ * somebody who is not allowed to see them on screen, the question is declined
+ * out loud. Recording a booking and opening a page still work, which is what
+ * voice is actually for out on a round.
+ *
+ * Scoping these answers to "meri sale", "mera target", is a real feature and a
+ * better answer than this one. It is not built yet, and until it is, saying so
+ * beats quietly reporting somebody else's numbers.
+ */
+function notYours(): VoiceAnswer {
+  return {
+    speech: "Yeh figure sirf owner dekh sakta hai. Aap apna target page par apni booking dekh sakte hain.",
+    value: "—",
+    label: "Owner only",
+    href: "/my",
+  };
+}
+
+/** True when the signed-in person may not be told business-wide figures. */
+async function figuresAreOffLimits(): Promise<boolean> {
+  const user = await currentUser();
+  return user == null || scopeBookerId(user) != null;
+}
 
 /**
  * Interpret a spoken command.
@@ -98,7 +127,7 @@ export async function interpretVoiceAction(transcript: string): Promise<VoiceRes
   });
 
   if (command.kind === "query") {
-    const answer = await answerQuery(command);
+    const answer = (await figuresAreOffLimits()) ? notYours() : await answerQuery(command);
     return { transcript: said, command, answer, summary: answer.speech, attemptId };
   }
 
@@ -288,7 +317,7 @@ export async function transcribeAndInterpretAction(
   });
 
   if (command.kind === "query") {
-    const answer = await answerQuery(command);
+    const answer = (await figuresAreOffLimits()) ? notYours() : await answerQuery(command);
     return {
       ok: true,
       model: transcribed.model,

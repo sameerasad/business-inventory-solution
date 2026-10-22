@@ -23,6 +23,7 @@ import {
 import { money, qty } from "@/lib/format";
 import { getCategories, getStockLevels } from "@/lib/queries";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Products" };
 export const dynamic = "force-dynamic";
@@ -36,6 +37,9 @@ export default async function ProductsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Cost and profit are on this page. A booker is sent to their own.
+  await requireAdmin();
+
   const sp = await searchParams;
   const q = (first(sp.q) ?? "").trim();
   const categoryParam = first(sp.category);

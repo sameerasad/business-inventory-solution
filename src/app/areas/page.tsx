@@ -6,6 +6,7 @@ import { ListFilters, type FilterSpec } from "@/components/list-filters";
 import { getAreasWithShops } from "@/lib/queries";
 import { getAreaCoverage } from "@/lib/bookers";
 import { currentYear } from "@/lib/dates";
+import { requireUser, scopeBookerId } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Areas & Shops" };
 export const dynamic = "force-dynamic";
@@ -19,6 +20,11 @@ export default async function AreasPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const user = await requireUser();
+  // A booker may add a shop they just walked into; renaming and deleting are
+  // the owner's. The actions refuse them server-side either way.
+  const canManage = scopeBookerId(user) == null;
+
   const sp = await searchParams;
   const q = (first(sp.q) ?? "").trim();
 
@@ -71,7 +77,7 @@ export default async function AreasPage({
           Nothing matches “{q}”. Clear the search to see every area.
         </p>
       ) : (
-        <AreaManager areas={areas} bookersByArea={bookersByArea} />
+        <AreaManager areas={areas} bookersByArea={bookersByArea} canManage={canManage} />
       )}
     </div>
   );

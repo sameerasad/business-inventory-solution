@@ -20,6 +20,8 @@ import {
   type BookingLineInput,
   updateBookingSchema,
 } from "@/lib/validations";
+import { denyNonAdmin, viewer } from "@/lib/guard";
+import { currentUser, scopeBookerId } from "@/lib/session";
 
 /**
  * Unguessable id for a shareable invoice link. 16 random bytes in base64url
@@ -106,7 +108,15 @@ export async function createBookingAction(
   if (!parsed.success) {
     return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
   }
-  const input = parsed.data;
+
+  const user = await viewer();
+  if (!user) return failure("You are not signed in.");
+
+  // A booker's orders are recorded under their own name, whatever the form
+  // said. The dropdown they are shown has one option, but the form is not
+  // where this is decided - a posted bookerId is just a number someone typed.
+  const mine = scopeBookerId(user);
+  const input = mine != null ? { ...parsed.data, bookerId: mine } : parsed.data;
 
   // A replayed submit returns the original booking instead of double-selling.
   if (input.idempotencyKey) {
@@ -169,7 +179,7 @@ export async function createBookingAction(
   }
 
   const saleDate = parseDateOnly(input.bookingDate);
-  const actor = currentActor();
+  const actor = currentActor(await currentUser());
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -382,6 +392,9 @@ export async function softDeleteBookingAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = softDeleteSchema.safeParse({
     id: formData.get("id") ?? "",
     reason: formData.get("reason") ?? undefined,
@@ -467,6 +480,9 @@ export async function updateBookingAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
+
   const parsed = updateBookingSchema.safeParse({
     id: formData.get("id") ?? "",
     bookerId: formData.get("bookerId") ?? undefined,

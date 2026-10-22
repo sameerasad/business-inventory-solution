@@ -265,6 +265,8 @@ model Booker {
   isDeleted  Boolean      @default(false) @map("is_deleted")
   createdAt  DateTime     @default(now()) @map("created_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
+  users      User[]
+  targets    BookerTarget[]
   bookings   Booking[]
   /// Territory: the areas this booker is responsible for.
   areas      BookerArea[]
@@ -322,4 +324,70 @@ model VoiceAttempt {
   @@index([createdAt])
   @@index([kind, createdAt])
   @@map("voice_attempts")
+}
+
+/// Somebody who can sign in.
+///
+/// Added when bookers were about to be given access. Until then one shared
+/// password was enough and a users table bought nothing; the moment a second
+/// person signs in it buys the only thing that matters when money goes
+/// missing - every audit row saying WHO, not just what.
+///
+/// Two roles and no more. "admin" sees the whole business including cost and
+/// profit; "booker" sees their own areas, their own orders, and never a margin.
+/// A third role is a thing to add when somebody can name the job it is for.
+model User {
+  id           Int      @id @default(autoincrement())
+  /// What they type to sign in. Lowercased on the way in so case is never the
+  /// reason a login fails.
+  username     String   @unique
+  name         String
+  /// PBKDF2 over the password, as "iterations:salt:hash". Never the password.
+  passwordHash String   @map("password_hash")
+  /// "admin" or "booker". Not an enum: adding a role should not need a
+  /// migration before anyone has agreed what it does.
+  role         String   @default("booker")
+  /// The booker this person records orders as.
+  ///
+  /// Nullable, and set for admins too - an owner who also runs a route is one
+  /// person with both, which is why this is a link rather than something the
+  /// role implies. A Booker with no User is ordinary: history keeps bookers
+  /// who never had a login.
+  bookerId     Int?     @map("booker_id")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  booker       Booker?  @relation(fields: [bookerId], references: [id], onDelete: SetNull)
+
+  @@index([bookerId])
+  @@map("users")
+}
+
+/// What a booker is expected to sell in one month.
+///
+/// Both figures, because they answer different questions and can disagree: a
+/// rupee target is met by selling the expensive line, a pack target by selling
+/// volume. A booker short on packs but ahead on rupees is a fact worth seeing
+/// rather than one worth hiding behind a single number.
+///
+/// One row per booker per month. Absent means no target was set, which is not
+/// the same as a target of zero and is shown differently.
+model BookerTarget {
+  id       Int      @id @default(autoincrement())
+  bookerId Int      @map("booker_id")
+  /// The month it covers, as its first day.
+  month    DateTime @db.Date
+  /// Rupees of sales expected. Null when only packs were set.
+  amount   Decimal? @db.Decimal(12, 2)
+  /// Packs expected. Null when only rupees were set.
+  packs    Int?
+  notes    String?
+  createdBy String  @default("system") @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  booker   Booker   @relation(fields: [bookerId], references: [id], onDelete: Cascade)
+
+  @@unique([bookerId, month])
+  @@index([month])
+  @@map("booker_targets")
 }
