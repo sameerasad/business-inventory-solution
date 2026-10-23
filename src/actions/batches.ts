@@ -96,6 +96,7 @@ export async function createBatchAction(
       });
 
       await writeAudit(tx, {
+        actor,
         entityType: "batch",
         entityId: created.id,
         action: "batch.created",
@@ -137,6 +138,8 @@ export async function softDeleteBatchAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = softDeleteSchema.safeParse({
     id: formData.get("id") ?? "",
     reason: formData.get("reason") ?? undefined,
@@ -159,6 +162,7 @@ export async function softDeleteBatchAction(
   await prisma.$transaction(async (tx) => {
     await tx.batch.update({ where: { id }, data: { isDeleted: true } });
     await writeAudit(tx, {
+      actor,
       entityType: "batch",
       entityId: id,
       action: "batch.soft_deleted",
@@ -196,6 +200,8 @@ export async function updateBatchAction(
 ): Promise<ActionState> {
   const denied = await denyNonAdmin();
   if (denied) return denied;
+
+  const actor = currentActor(await currentUser());
 
   const parsed = updateBatchSchema.safeParse({
     id: formData.get("id") ?? "",
@@ -247,6 +253,7 @@ export async function updateBatchAction(
       },
     });
     await writeAudit(tx, {
+      actor,
       entityType: "batch",
       entityId: input.id,
       action: "batch.updated",
@@ -307,6 +314,8 @@ export async function updateBatchCostAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const id = Number.parseInt(String(formData.get("id") ?? ""), 10);
   const unitCost = Number(String(formData.get("unitCost") ?? ""));
 
@@ -339,6 +348,7 @@ export async function updateBatchCostAction(
         data: { unitCost: new Prisma.Decimal(unitCost.toFixed(2)) },
       });
       await writeAudit(tx, {
+        actor,
         entityType: "batch",
         entityId: id,
         action: "batch.cost_corrected",

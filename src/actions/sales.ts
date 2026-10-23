@@ -170,6 +170,7 @@ export async function createSaleAction(
       });
 
       await writeAudit(tx, {
+        actor,
         entityType: "sale",
         entityId: sale.id,
         action: "sale.created",
@@ -238,6 +239,8 @@ export async function softDeleteSaleAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = softDeleteSchema.safeParse({
     id: formData.get("id") ?? "",
     reason: formData.get("reason") ?? undefined,
@@ -281,6 +284,7 @@ export async function softDeleteSaleAction(
         data: { remainingQty: { increment: sale.quantity } },
       });
       await writeAudit(tx, {
+        actor,
         entityType: "sale",
         entityId: id,
         action: "sale.soft_deleted",
@@ -327,6 +331,8 @@ export async function updateSaleAction(
 ): Promise<ActionState> {
   const denied = await denyNonAdmin();
   if (denied) return denied;
+
+  const actor = currentActor(await currentUser());
 
   const parsed = updateSaleSchema.safeParse({
     id: formData.get("id") ?? "",
@@ -474,6 +480,7 @@ export async function updateSaleAction(
       });
 
       await writeAudit(tx, {
+        actor,
         entityType: "sale",
         entityId: input.id,
         action: "sale.updated",

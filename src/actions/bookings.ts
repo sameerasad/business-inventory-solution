@@ -254,10 +254,10 @@ export async function createBookingAction(
       }
 
       await writeAudit(tx, {
+        actor,
         entityType: "booking",
         entityId: booking.id,
         action: "booking.created",
-        actor,
         payload: {
           invoiceNo: booking.invoiceNo,
           customer: input.customerName,
@@ -396,6 +396,8 @@ export async function softDeleteBookingAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = softDeleteSchema.safeParse({
     id: formData.get("id") ?? "",
     reason: formData.get("reason") ?? undefined,
@@ -436,6 +438,7 @@ export async function softDeleteBookingAction(
       const returned = booking.sales.reduce((sum, s) => sum + s.quantity, 0);
       const reversed = booking.payments.reduce((sum, p) => sum + Number(p.amount), 0);
       await writeAudit(tx, {
+        actor,
         entityType: "booking",
         entityId: id,
         action: "booking.cancelled",
@@ -483,6 +486,8 @@ export async function updateBookingAction(
 ): Promise<ActionState> {
   const denied = await denyNonAdmin();
   if (denied) return denied;
+
+  const actor = currentActor(await currentUser());
 
   const parsed = updateBookingSchema.safeParse({
     id: formData.get("id") ?? "",
@@ -572,6 +577,7 @@ export async function updateBookingAction(
     });
 
     await writeAudit(tx, {
+      actor,
       entityType: "booking",
       entityId: input.id,
       action: "booking.updated",

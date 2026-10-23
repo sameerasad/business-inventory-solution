@@ -1,7 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { yearRange } from "@/lib/dates";
-import { writeAudit } from "@/lib/audit";
+import { currentActor, writeAudit } from "@/lib/audit";
+import { currentUser } from "@/lib/session";
 
 /**
  * Per-booker performance.
@@ -468,6 +469,8 @@ export async function attributeUnattributedBookings(options: {
    */
   assignAreas: boolean;
 }): Promise<{ bookings: number; areasAssigned: number }> {
+  const actor = currentActor(await currentUser());
+
   const booker = await prisma.booker.findUnique({
     where: { id: options.bookerId },
     select: { id: true, name: true, isDeleted: true },
@@ -502,6 +505,7 @@ export async function attributeUnattributedBookings(options: {
     }
 
     await writeAudit(tx, {
+      actor,
       entityType: "booker",
       entityId: booker.id,
       action: "booker.backfilled_attribution",

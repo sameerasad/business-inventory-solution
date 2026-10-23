@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/db";
-import { writeAudit } from "@/lib/audit";
+import { currentActor, writeAudit } from "@/lib/audit";
 import {
   createBookerSchema,
   failure,
@@ -16,6 +16,7 @@ import {
   type ActionState,
 } from "@/lib/validations";
 import { denyNonAdmin } from "@/lib/guard";
+import { currentUser } from "@/lib/session";
 
 function revalidateBookers() {
   revalidatePath("/bookers");
@@ -31,6 +32,8 @@ export async function createBookerAction(
 ): Promise<ActionState> {
   const denied = await denyNonAdmin();
   if (denied) return denied;
+
+  const actor = currentActor(await currentUser());
 
   const parsed = createBookerSchema.safeParse({
     name: formData.get("name") ?? "",
@@ -61,6 +64,7 @@ export async function createBookerAction(
           data: { isDeleted: false, isActive: true, ...input },
         });
         await writeAudit(tx, {
+          actor,
           entityType: "booker",
           entityId: existing.id,
           action: "booker.restored",
@@ -73,6 +77,7 @@ export async function createBookerAction(
     const booker = await prisma.$transaction(async (tx) => {
       const created = await tx.booker.create({ data: input, select: { id: true } });
       await writeAudit(tx, {
+        actor,
         entityType: "booker",
         entityId: created.id,
         action: "booker.created",
@@ -98,6 +103,8 @@ export async function updateBookerAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = updateBookerSchema.safeParse({
     id: formData.get("id") ?? "",
     name: formData.get("name") ?? "",
@@ -115,6 +122,7 @@ export async function updateBookerAction(
     await prisma.$transaction(async (tx) => {
       await tx.booker.update({ where: { id }, data: fields });
       await writeAudit(tx, {
+        actor,
         entityType: "booker",
         entityId: id,
         action: "booker.updated",
@@ -148,6 +156,8 @@ export async function toggleBookerActiveAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
 
@@ -161,6 +171,7 @@ export async function toggleBookerActiveAction(
   await prisma.$transaction(async (tx) => {
     await tx.booker.update({ where: { id: booker.id }, data: { isActive: next } });
     await writeAudit(tx, {
+      actor,
       entityType: "booker",
       entityId: booker.id,
       action: next ? "booker.reactivated" : "booker.retired",
@@ -181,6 +192,8 @@ export async function deleteBookerAction(
 ): Promise<ActionState> {
   const denied = await denyNonAdmin();
   if (denied) return denied;
+
+  const actor = currentActor(await currentUser());
 
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
@@ -205,7 +218,7 @@ export async function deleteBookerAction(
 
   await prisma.$transaction(async (tx) => {
     await tx.booker.update({ where: { id }, data: { isDeleted: true, isActive: false } });
-    await writeAudit(tx, { entityType: "booker", entityId: id, action: "booker.soft_deleted" });
+    await writeAudit(tx, { entityType: "booker", entityId: id, action: "booker.soft_deleted", actor });
   });
   revalidateBookers();
   return success(`Booker "${booker.name}" removed.`);
@@ -228,6 +241,8 @@ export async function setBookerAreasAction(
 ): Promise<ActionState> {
   const denied = await denyNonAdmin();
   if (denied) return denied;
+
+  const actor = currentActor(await currentUser());
 
   const parsed = setBookerAreasSchema.safeParse({
     bookerId: formData.get("bookerId") ?? "",
@@ -265,6 +280,7 @@ export async function setBookerAreasAction(
         });
       }
       await writeAudit(tx, {
+        actor,
         entityType: "booker",
         entityId: bookerId,
         action: "booker.areas_assigned",

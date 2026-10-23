@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/db";
-import { writeAudit } from "@/lib/audit";
+import { currentActor, writeAudit } from "@/lib/audit";
 import { similarity } from "@/lib/voice/normalise";
 import {
   areaSchema,
@@ -18,7 +18,7 @@ import {
   type ActionState,
 } from "@/lib/validations";
 import { denyNonAdmin, viewer } from "@/lib/guard";
-import { visibleAreaIds } from "@/lib/session";
+import { currentUser, visibleAreaIds } from "@/lib/session";
 
 function revalidateGeography() {
   revalidatePath("/areas");
@@ -67,6 +67,8 @@ export async function createArea(input: { name: string; confirmSimilar?: boolean
   | { ok: true; areaId: number; name: string; status: "created" | "restored" | "existing" }
   | { ok: false; message: string; similar?: Lookalike[] }
 > {
+  const actor = currentActor(await currentUser());
+
   const parsed = areaSchema.safeParse({ name: input.name });
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid area." };
@@ -81,7 +83,7 @@ export async function createArea(input: { name: string; confirmSimilar?: boolean
   if (existing?.isDeleted) {
     await prisma.$transaction(async (tx) => {
       await tx.area.update({ where: { id: existing.id }, data: { isDeleted: false } });
-      await writeAudit(tx, { entityType: "area", entityId: existing.id, action: "area.restored" });
+      await writeAudit(tx, { entityType: "area", entityId: existing.id, action: "area.restored", actor });
     });
     revalidateGeography();
     return { ok: true, areaId: existing.id, name: existing.name, status: "restored" };
@@ -121,10 +123,17 @@ export async function createArea(input: { name: string; confirmSimilar?: boolean
   try {
     const created = await prisma.$transaction(async (tx) => {
       const row = await tx.area.create({ data: { name }, select: { id: true } });
-      await writeAudit(tx, { entityType: "area", entityId: row.id, action: "area.created", payload: { name } });
+      await writeAudit(tx, {
+        actor,
+        entityType: "area",
+        entityId: row.id,
+        action: "area.created",
+        payload: { name },
+      });
       if (claimFor != null) {
         await tx.bookerArea.create({ data: { bookerId: claimFor, areaId: row.id } });
         await writeAudit(tx, {
+          actor,
           entityType: "area",
           entityId: row.id,
           action: "area.assigned",
@@ -188,6 +197,8 @@ export async function renameAreaAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = updateAreaSchema.safeParse({
     id: formData.get("id") ?? "",
     name: formData.get("name") ?? "",
@@ -201,6 +212,7 @@ export async function renameAreaAction(
     await prisma.$transaction(async (tx) => {
       await tx.area.update({ where: { id }, data: { name, voiceAlias } });
       await writeAudit(tx, {
+        actor,
         entityType: "area",
         entityId: id,
         action: "area.renamed",
@@ -229,6 +241,8 @@ export async function deleteAreaAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
   const { id } = parsed.data;
@@ -254,7 +268,7 @@ export async function deleteAreaAction(
     await tx.area.update({ where: { id }, data: { isDeleted: true } });
     // Hiding an area must hide its shops too, or they would be orphaned in the picker.
     await tx.shop.updateMany({ where: { areaId: id }, data: { isDeleted: true } });
-    await writeAudit(tx, { entityType: "area", entityId: id, action: "area.soft_deleted" });
+    await writeAudit(tx, { entityType: "area", entityId: id, action: "area.soft_deleted", actor });
   });
 
   revalidateGeography();
@@ -337,6 +351,8 @@ export async function createShop(input: {
   | { ok: true; shopId: number; name: string; address: string | null; phone: string | null }
   | { ok: false; message: string; similar?: Lookalike[] }
 > {
+  const actor = currentActor(await currentUser());
+
   const parsed = shopSchema.safeParse({
     areaId: String(input.areaId),
     name: input.name,
@@ -420,6 +436,7 @@ export async function createShop(input: {
             },
           });
           await writeAudit(tx, {
+            actor,
             entityType: "shop",
             entityId: existing.id,
             action: existing.isDeleted ? "shop.restored" : "shop.details_updated",
@@ -432,6 +449,7 @@ export async function createShop(input: {
         select: { id: true, address: true, phone: true },
       });
       await writeAudit(tx, {
+        actor,
         entityType: "shop",
         entityId: created.id,
         action: "shop.created",
@@ -487,6 +505,8 @@ export async function renameShopAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = updateShopSchema.safeParse({
     id: formData.get("id") ?? "",
     name: formData.get("name") ?? "",
@@ -502,6 +522,7 @@ export async function renameShopAction(
     await prisma.$transaction(async (tx) => {
       await tx.shop.update({ where: { id }, data: { name, address, phone, voiceAlias } });
       await writeAudit(tx, {
+        actor,
         entityType: "shop",
         entityId: id,
         action: "shop.updated",
@@ -526,6 +547,8 @@ export async function deleteShopAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
   const { id } = parsed.data;
@@ -544,7 +567,7 @@ export async function deleteShopAction(
 
   await prisma.$transaction(async (tx) => {
     await tx.shop.update({ where: { id }, data: { isDeleted: true } });
-    await writeAudit(tx, { entityType: "shop", entityId: id, action: "shop.soft_deleted" });
+    await writeAudit(tx, { entityType: "shop", entityId: id, action: "shop.soft_deleted", actor });
   });
 
   revalidateGeography();
@@ -578,10 +601,13 @@ export async function saveShopPhoneAction(
   const shop = await prisma.shop.findUnique({ where: { id }, select: { name: true } });
   if (!shop) return failure("Shop not found.");
 
+  const actor = currentActor(await currentUser());
+
   try {
     await prisma.$transaction(async (tx) => {
       await tx.shop.update({ where: { id }, data: { phone } });
       await writeAudit(tx, {
+        actor,
         entityType: "shop",
         entityId: id,
         action: "shop.phone_saved",
@@ -589,6 +615,8 @@ export async function saveShopPhoneAction(
       });
     });
   } catch (error) {
+  const actor = currentActor(await currentUser());
+
     console.error("saveShopPhoneAction failed", error);
     return failure("Could not save the number.");
   }

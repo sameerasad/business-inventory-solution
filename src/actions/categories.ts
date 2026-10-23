@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/db";
-import { writeAudit } from "@/lib/audit";
+import { currentActor, writeAudit } from "@/lib/audit";
 import {
   categorySchema,
   failure,
@@ -14,6 +14,7 @@ import {
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
+import { currentUser } from "@/lib/session";
 
 function revalidateCatalog() {
   revalidatePath("/products");
@@ -33,6 +34,8 @@ export async function createCategoryAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const actor = currentActor(await currentUser());
+
   const parsed = categorySchema.safeParse({ name: formData.get("name") ?? "" });
   if (!parsed.success) {
     return failure("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
@@ -50,6 +53,7 @@ export async function createCategoryAction(
     const created = await prisma.$transaction(async (tx) => {
       const row = await tx.category.create({ data: { name }, select: { id: true } });
       await writeAudit(tx, {
+        actor,
         entityType: "category",
         entityId: row.id,
         action: "category.created",
@@ -72,6 +76,8 @@ export async function renameCategoryAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const actor = currentActor(await currentUser());
+
   const parsed = updateCategorySchema.safeParse({
     id: formData.get("id") ?? "",
     name: formData.get("name") ?? "",
@@ -94,6 +100,7 @@ export async function renameCategoryAction(
     await prisma.$transaction(async (tx) => {
       await tx.category.update({ where: { id }, data: { name } });
       await writeAudit(tx, {
+        actor,
         entityType: "category",
         entityId: id,
         action: "category.renamed",
@@ -121,6 +128,8 @@ export async function deleteCategoryAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const actor = currentActor(await currentUser());
+
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
   const { id } = parsed.data;
@@ -142,6 +151,7 @@ export async function deleteCategoryAction(
       // Audit first: once the row is gone the id means nothing, but the record
       // that it existed and was deleted is exactly what you want to keep.
       await writeAudit(tx, {
+        actor,
         entityType: "category",
         entityId: id,
         action: "category.deleted",

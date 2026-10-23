@@ -116,6 +116,7 @@ export async function recordPaymentAction(
       });
 
       await writeAudit(tx, {
+        actor,
         entityType: "payment",
         entityId: payment.id,
         action: "payment.received",
@@ -160,6 +161,8 @@ export async function deletePaymentAction(
   const denied = await denyNonAdmin();
   if (denied) return denied;
 
+  const actor = currentActor(await currentUser());
+
   const parsed = softDeleteSchema.safeParse({
     id: formData.get("id") ?? "",
     reason: formData.get("reason") ?? undefined,
@@ -177,6 +180,7 @@ export async function deletePaymentAction(
   await prisma.$transaction(async (tx) => {
     await tx.payment.update({ where: { id }, data: { isDeleted: true } });
     await writeAudit(tx, {
+      actor,
       entityType: "payment",
       entityId: id,
       action: "payment.reversed",
@@ -223,6 +227,8 @@ export async function updatePaymentAction(
 ): Promise<ActionState> {
   const denied = await denyNonAdmin();
   if (denied) return denied;
+
+  const actor = currentActor(await currentUser());
 
   const parsed = updatePaymentSchema.safeParse({
     id: formData.get("id") ?? "",
@@ -281,6 +287,7 @@ export async function updatePaymentAction(
       },
     });
     await writeAudit(tx, {
+      actor,
       entityType: "payment",
       entityId: id,
       action: "payment.updated",

@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/db";
-import { writeAudit } from "@/lib/audit";
+import { currentActor, writeAudit } from "@/lib/audit";
 import {
   createProductSchema,
   deriveSku,
@@ -16,6 +16,7 @@ import {
   zodFieldErrors,
   type ActionState,
 } from "@/lib/validations";
+import { currentUser } from "@/lib/session";
 
 function revalidateCatalog() {
   revalidatePath("/products");
@@ -33,6 +34,8 @@ export async function createProductAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const actor = currentActor(await currentUser());
+
   const parsed = createProductSchema.safeParse({
     categoryId: formData.get("categoryId") ?? "",
     name: formData.get("name") ?? "",
@@ -64,6 +67,7 @@ export async function createProductAction(
         select: { id: true, sku: true },
       });
       await writeAudit(tx, {
+        actor,
         entityType: "product",
         entityId: created.id,
         action: "product.created",
@@ -95,6 +99,8 @@ export async function updateProductPriceAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const actor = currentActor(await currentUser());
+
   const parsed = updateProductPriceSchema.safeParse({
     productId: formData.get("productId") ?? "",
     defaultSalePrice: formData.get("defaultSalePrice") ?? "",
@@ -116,6 +122,7 @@ export async function updateProductPriceAction(
       data: { defaultSalePrice: new Prisma.Decimal(defaultSalePrice.toFixed(2)) },
     });
     await writeAudit(tx, {
+      actor,
       entityType: "product",
       entityId: productId,
       action: "product.price_updated",
@@ -138,6 +145,8 @@ export async function toggleProductActiveAction(
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
 
+  const actor = currentActor(await currentUser());
+
   const product = await prisma.product.findUnique({
     where: { id: parsed.data.id },
     select: { id: true, sku: true, isActive: true },
@@ -148,6 +157,7 @@ export async function toggleProductActiveAction(
   await prisma.$transaction(async (tx) => {
     await tx.product.update({ where: { id: product.id }, data: { isActive: next } });
     await writeAudit(tx, {
+      actor,
       entityType: "product",
       entityId: product.id,
       action: next ? "product.reactivated" : "product.retired",
@@ -170,6 +180,8 @@ export async function updateProductAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const actor = currentActor(await currentUser());
+
   const parsed = updateProductSchema.safeParse({
     id: formData.get("id") ?? "",
     categoryId: formData.get("categoryId") ?? "",
@@ -243,6 +255,7 @@ export async function updateProductAction(
         },
       });
       await writeAudit(tx, {
+        actor,
         entityType: "product",
         entityId: id,
         action: "product.updated",
@@ -284,6 +297,8 @@ export async function deleteProductAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const actor = currentActor(await currentUser());
+
   const parsed = idOnlySchema.safeParse({ id: formData.get("id") ?? "" });
   if (!parsed.success) return failure("Invalid request.");
   const { id } = parsed.data;
@@ -309,6 +324,7 @@ export async function deleteProductAction(
   try {
     await prisma.$transaction(async (tx) => {
       await writeAudit(tx, {
+        actor,
         entityType: "product",
         entityId: id,
         action: "product.deleted",

@@ -75,10 +75,10 @@ export async function createUserAction(
         select: { id: true },
       });
       await writeAudit(tx, {
+        actor,
         entityType: "user",
         entityId: created.id,
         action: "user.created",
-        actor,
         // Never the password, and never the hash. An audit log is read by more
         // people than the users table is.
         payload: { username: input.username, name: input.name, role: input.role },
@@ -145,10 +145,10 @@ export async function updateUserAction(
         },
       });
       await writeAudit(tx, {
+        actor,
         entityType: "user",
         entityId: input.id,
         action: "user.updated",
-        actor,
         payload: {
           username: existing.username,
           role: input.role,
@@ -202,10 +202,10 @@ export async function resetPasswordAction(
     await prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: input.id }, data: { passwordHash } });
       await writeAudit(tx, {
+        actor,
         entityType: "user",
         entityId: input.id,
         action: "user.password_reset",
-        actor,
         payload: { username: existing.username },
       });
     });
@@ -280,10 +280,10 @@ export async function setTargetAction(
         select: { id: true },
       });
       await writeAudit(tx, {
+        actor,
         entityType: "booker_target",
         entityId: saved.id,
         action: "target.set",
-        actor,
         payload: {
           bookerId: input.bookerId,
           month: month.toISOString().slice(0, 10),

@@ -48,7 +48,22 @@ export async function writeAudit(
     entityType: AuditableEntity;
     entityId: number;
     action: string;
-    actor?: string;
+    /**
+     * Who did it. Required, and deliberately not defaulted.
+     *
+     * It used to fall back to currentActor(), which read an environment
+     * variable - so every row in the log said "owner" no matter who was
+     * signed in. That was honest while one person had the only password and
+     * became a lie the day a second account existed, which is exactly when an
+     * audit trail starts earning its keep.
+     *
+     * Required rather than resolved here on purpose, twice over. A default is
+     * a thing a new call site gets silently and wrongly. And resolving it
+     * would mean a database read inside whatever transaction is open, which
+     * has already cost this codebase a broken Receive Stock page - the caller
+     * reads it before the transaction, where it belongs.
+     */
+    actor: string;
     payload?: Prisma.InputJsonValue;
   },
 ): Promise<void> {
@@ -57,7 +72,7 @@ export async function writeAudit(
       entityType: entry.entityType,
       entityId: entry.entityId,
       action: entry.action,
-      actor: entry.actor ?? currentActor(),
+      actor: entry.actor,
       payload: entry.payload,
     },
   });

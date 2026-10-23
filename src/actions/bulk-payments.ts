@@ -142,10 +142,10 @@ export async function clearAllReceivablesAction(
         // One entry for the run rather than one per payment: what matters
         // afterwards is that this happened, when, and to which invoices.
         await writeAudit(tx, {
+          actor,
           entityType: "payment",
           entityId: 0,
           action: "payment.bulk_cleared",
-          actor,
           payload: {
             batchId,
             paidOn,
@@ -245,10 +245,10 @@ export async function undoClearanceAction(
           data: { isDeleted: true },
         });
         await writeAudit(tx, {
+          actor,
           entityType: "payment",
           entityId: 0,
           action: "payment.bulk_undone",
-          actor,
           payload: { batchId, invoices: rows.length, total },
         });
       },
