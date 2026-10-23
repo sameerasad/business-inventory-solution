@@ -18,6 +18,7 @@ import {
 } from "@/lib/validations";
 import { denyNonAdmin, mayTouchBooking, viewer } from "@/lib/guard";
 import { currentUser, scopeBookerId } from "@/lib/session";
+import { withTag } from "@/lib/fault";
 
 function revalidateMoney() {
   revalidatePath("/bookings");
@@ -94,6 +95,11 @@ export async function recordPaymentAction(
     );
   }
 
+  // Read before the transaction opens. Fetching the signed-in user is a
+  // database round trip, and a transaction is the wrong place to make one it
+  // does not need: it holds a connection while waiting for another.
+  const actor = currentActor(await currentUser());
+
   try {
     await prisma.$transaction(async (tx) => {
       const payment = await tx.payment.create({
@@ -104,7 +110,7 @@ export async function recordPaymentAction(
           method: input.method,
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
-          createdBy: currentActor(await currentUser()),
+          createdBy: actor,
         },
         select: { id: true },
       });
@@ -139,7 +145,7 @@ export async function recordPaymentAction(
       return success("That payment was already recorded (duplicate submission ignored).");
     }
     console.error("recordPaymentAction failed", error);
-    return failure("Could not record the payment. Please try again.");
+    return failure(withTag("Could not record the payment.", error));
   }
 }
 

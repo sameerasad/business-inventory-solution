@@ -18,6 +18,7 @@ import {
 } from "@/lib/validations";
 import { denyNonAdmin, adminOnly } from "@/lib/guard";
 import { currentUser } from "@/lib/session";
+import { withTag } from "@/lib/fault";
 
 function revalidateSales() {
   revalidatePath("/sales");
@@ -125,6 +126,11 @@ export async function createSaleAction(
     }
   }
 
+  // Read before the transaction opens. Fetching the signed-in user is a
+  // database round trip, and a transaction is the wrong place to make one it
+  // does not need: it holds a connection while waiting for another.
+  const actor = currentActor(await currentUser());
+
   try {
     const result = await prisma.$transaction(async (tx) => {
       // Atomic guarded deduction - no read-then-write gap to lose a race in.
@@ -153,7 +159,7 @@ export async function createSaleAction(
           saleDate: parseDateOnly(input.saleDate),
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
-          createdBy: currentActor(await currentUser()),
+          createdBy: actor,
         },
         select: { id: true },
       });
@@ -200,7 +206,7 @@ export async function createSaleAction(
       return success("This sale was already recorded (duplicate submission ignored).");
     }
     console.error("createSaleAction failed", error);
-    return failure("Could not save the sale. Please try again.");
+    return failure(withTag("Could not save the sale.", error));
   }
 }
 
@@ -296,7 +302,7 @@ export async function softDeleteSaleAction(
       );
     }
     console.error("softDeleteSaleAction failed", error);
-    return failure("Could not remove the sale. Please try again.");
+    return failure(withTag("Could not remove the sale.", error));
   }
 }
 
@@ -512,6 +518,6 @@ export async function updateSaleAction(
       );
     }
     console.error("updateSaleAction failed", error);
-    return failure("Could not save the sale. Please try again.");
+    return failure(withTag("Could not save the sale.", error));
   }
 }

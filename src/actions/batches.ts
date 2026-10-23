@@ -17,6 +17,7 @@ import {
 } from "@/lib/validations";
 import { denyNonAdmin } from "@/lib/guard";
 import { currentUser } from "@/lib/session";
+import { withTag } from "@/lib/fault";
 
 function revalidateInventory() {
   revalidatePath("/batches");
@@ -73,6 +74,11 @@ export async function createBatchAction(
     return failure("That product no longer exists.", { productId: "Unknown product" });
   }
 
+  // Read before the transaction opens. Fetching the signed-in user is a
+  // database round trip, and a transaction is the wrong place to make one it
+  // does not need: it holds a connection while waiting for another.
+  const actor = currentActor(await currentUser());
+
   try {
     const batch = await prisma.$transaction(async (tx) => {
       const created = await tx.batch.create({
@@ -84,7 +90,7 @@ export async function createBatchAction(
           receivedDate: parseDateOnly(input.receivedDate),
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
-          createdBy: currentActor(await currentUser()),
+          createdBy: actor,
         },
         select: { id: true },
       });
@@ -114,7 +120,7 @@ export async function createBatchAction(
       return success("This batch was already recorded (duplicate submission ignored).");
     }
     console.error("createBatchAction failed", error);
-    return failure("Could not save the batch. Please try again.");
+    return failure(withTag("Could not save the batch.", error));
   }
 }
 
