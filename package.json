@@ -19,7 +19,7 @@
     "verify": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify.ts\"",
     "verify:migrations": "node .verify/migrate-check.mjs && node .verify/drift-check.mjs",
     "verify:pages": "node .verify/smoke.mjs",
-    "verify:all": "npm run typecheck && npm run verify:transactions && npm run verify:auth && npm run verify:whatsapp && npm run verify:voice && npm run verify:transcribe && npm run verify:llm && npm run verify:ui && npm run verify:layout && npm run verify && npm run verify:bookings && npm run verify:bookers && npm run verify:edits && npm run verify:payments && npm run verify:bulkpay && npm run verify:stock && npm run verify:recognition && npm run verify:dump && npm run verify:repair && npm run verify:migrations && npm run verify:pages",
+    "verify:all": "npm run typecheck && npm run verify:transactions && npm run verify:auth && npm run verify:whatsapp && npm run verify:voice && npm run verify:transcribe && npm run verify:llm && npm run verify:ui && npm run verify:layout && npm run verify && npm run verify:bookings && npm run verify:bookers && npm run verify:edits && npm run verify:payments && npm run verify:bulkpay && npm run verify:stock && npm run verify:recognition && npm run verify:dump && npm run verify:repair && npm run verify:migrations && npm run verify:pages && npm run verify:actions",
     "db:repair": "prisma db push --skip-generate && prisma db execute --schema prisma/schema.prisma --file prisma/repair/restore-constraints.sql && prisma db seed",
     "verify:bookings": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-bookings.ts\"",
     "verify:repair": "node .verify/repair-rehearsal.mjs",
@@ -48,7 +48,8 @@
     "verify:stock": "node .verify/pglite-run.mjs \"npx tsx prisma/seed.ts\" \"npx tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-stock-cover.ts\"",
     "db:user": "tsx scripts/make-user.ts",
     "verify:auth": "tsx --tsconfig .verify/tsconfig.verify.json .verify/verify-auth.ts",
-    "verify:transactions": "node .verify/verify-transactions.mjs"
+    "verify:transactions": "node .verify/verify-transactions.mjs",
+    "verify:actions": "node .verify/verify-actions.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
